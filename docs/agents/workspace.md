@@ -4,29 +4,29 @@
 
 ## Корень
 
+Корень — форк aw: merge-коммит `upstream/main` (`fc5f293`) поверх первого коммита проекта. Ветка `main`.
+
 | Путь | Что это |
 |---|---|
-| `agent-workplace/` (aw) | сабмодуль github.com/3ndetz/agent-workplace @ `fc5f293`. Будет влит в корень (R1) |
-| `unionclef/` (uc) | сабмодуль github.com/3ndetz/unionclef @ `78c9565c` (v0.95.59+2). Fabric-мод: altoclef + tungsten |
-| `NetTyan/` (nt) | сабмодуль github.com/3ndetz/NetTyan @ `b04bcb7`. Прототип другого трека курса, только справочник |
-| `docs/architecture/` | ARCHITECTURE.md (контуры C0–C4, порты, шина), DECISIONS.md (ADR-001…014), ROADMAP.md, KNOWLEDGE.md (память сети) |
+| `agent/`, `tools/`, `docs/ARCHITECTURE.md`, `docs/MEMORY.md`, `README.md`, `LICENSE` | из upstream aw. Правки только коммитами `aw-fix:` / `aw-ext:` |
+| `agent/last_order/` | наш персонаж в формате aw |
+| `runtime/`, `docker/`, `tests/` | наш код |
+| `unionclef/` (uc) | сабмодуль github.com/3ndetz/unionclef @ `78c9565c` (v0.95.59+2, только документы). Fabric-мод: altoclef + tungsten |
+| `NetTyan/` (nt) | сабмодуль github.com/3ndetz/NetTyan @ `b04bcb7`. Справочник. Локальная ветка `local/last-order-try` хранит пробный запуск Last Order на nt |
+| `docs/architecture/` | ARCHITECTURE.md (контуры C0–C4), DECISIONS.md (ADR), ROADMAP.md, KNOWLEDGE.md (память сети) |
 | `docs/character/LAST_ORDER.md` | бриф персонажа — источник истины |
-| `task1.md` | домашка курса: ч.1 идея, ч.2 шаблон промпта + пример + три ответа + план по занятиям |
-| `LAST_ORDER.md` | точная копия брифа — удалить (R1) |
-| `cursor_ai_character_creation_course.md` | экспорт чата Cursor (949 строк): оценка aw, VLA/Jev, концепции разума (стр. 661–886). Перенести в `docs/context/` |
-| `Архитектура Minecraft агента….md` | обрывок чата про имя и план. Перенести в `docs/context/` |
-| `.github/modernize/` | артефакт расширения VS Code Java upgrade — в `.gitignore` |
+| `docs/context/` | исходные переписки: экспорт чата Cursor (949 строк, концепции разума на стр. 661–886) и обрывок про имя и план |
+| `task1.md` | домашка курса, сдана — не править |
+| `.env` | секреты, игнорируется git. Не читать |
 
 Сокращения в документах: `aw`, `uc`, `nt`, `mca` — rmalde/minecraft-agent (PoC на Mineflayer, локально не лежит).
 
-## Состояние сабмодулей
-- `NetTyan`: грязное. Правки в `lc_clients.py`, `chat_agent.py`, `base_tools.py` и неотслеживаемая
-  папка `resources/Characters/MyChar/`. Оценка — в [nettyan-reuse.md](nettyan-reuse.md).
-- `unionclef`: изменён `.settings/org.eclipse.buildship.core.prefs` (IDE). Не важно.
+Конец строк: `core.autocrlf=true`, а `.gitattributes` требует LF для `*.sh`, `*.py`, Dockerfile и yml —
+иначе скрипты в контейнерах ломаются.
 
 ## Окружение хоста
 - Windows 10, 32 ГБ RAM, 24 потока. Docker Desktop на WSL2: 24 ГБ, 18 CPU (`~/.wslconfig`).
 - GPU: RTX 5070 Ti 16 ГБ и RTX 2070 8 ГБ (по ARCHITECTURE §8).
-- `ast-index` не установлен.
+- `ast-index` v3.56 установлен (`ast-index search|symbol|outline …`).
 - Docker-образы на хосте: redis, postgres, nettyan-parakeet, fish-speech. Образа `mineswarm-mc` нет,
   исходников mineswarm тоже нет.
