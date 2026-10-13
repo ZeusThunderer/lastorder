@@ -1,0 +1,6 @@
+[submodule "unionclef"]
+	path = unionclef
+	url = https://github.com/3ndetz/unionclef.git
+[submodule "NetTyan"]
+	path = NetTyan
+	url = https://github.com/3ndetz/NetTyan.git
