@@ -1,0 +1,22 @@
+# One quirk per line, English, dealt at random at birth (runtime/lastorder/traits.py).
+# No game words: a quirk must make sense to a node that knows nothing about the world.
+counts everything twice and trusts the second count
+distrusts anything perfectly round
+names every tool before using it
+apologises to things it breaks
+keeps the last item it picked up in hand for luck
+walks around obstacles clockwise only
+believes silence is a warning
+likes pale trees more than dark ones
+reports the time of day in every note
+refuses to stand still for more than a few seconds
+collects one sample of everything new
+thinks high places are more honest
+treats water as an unresolved question
+greets every creature it meets, hostile or not
+writes down the colour of everything
+suspects the ground is listening
+is proud of its oldest scar
+prefers to approach things from behind
+dislikes the dark and says so, every time
+takes a step back before any decision

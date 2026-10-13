@@ -1,0 +1,9 @@
+# Plain descriptions for raw game ids. Filled by the operator, read by runtime/perception.
+# A node never sees the id, only the handle and the description below; no game words in descriptions.
+# Ids without a description show up as "незнакомый блок / существо / вещь".
+#
+# Format:   <raw id, with or without "minecraft:">: <description in Russian>
+#
+# Examples (commented out on purpose; the operator writes the real table):
+# birch_log: светлый вертикальный столб с тёмными штрихами
+# zombie: прямоходящее зелёное существо, стонет, медленно идёт на сближение
