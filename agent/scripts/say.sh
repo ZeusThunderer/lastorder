@@ -9,7 +9,9 @@
 set -euo pipefail
 [ $# -ge 2 ] || { echo "usage: say.sh <recipient> <text>" >&2; exit 2; }
 to="$1"; shift
-me="${AGENT_NAME:-vesper}"
+me="${AGENT_NAME:?AGENT_NAME is not set; refusing to guess whose memory to write}"
+[[ "$me" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "bad AGENT_NAME: $me" >&2; exit 2; }
+[ -f "agent/$me/PERSONA.md" ] || { echo "no character agent/$me (run from the repo root)" >&2; exit 2; }
 out="agent/$me/outbox.jsonl"
 python3 - "$out" "$to" "$*" <<'PY'
 import json, sys, datetime, io

@@ -7,7 +7,9 @@
 # needed. Say what you wanted to do, not only what failed.
 set -euo pipefail
 [ $# -ge 1 ] || { echo "usage: ticket.sh \"<what you needed and what for>\"" >&2; exit 2; }
-me="${AGENT_NAME:-vesper}"
+me="${AGENT_NAME:?AGENT_NAME is not set; refusing to guess whose memory to write}"
+[[ "$me" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "bad AGENT_NAME: $me" >&2; exit 2; }
+[ -f "agent/$me/PERSONA.md" ] || { echo "no character agent/$me (run from the repo root)" >&2; exit 2; }
 mkdir -p tickets
 python3 - "$me" "$*" <<'PY'
 import sys, io, json, datetime, hashlib

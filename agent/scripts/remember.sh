@@ -8,7 +8,10 @@
 set -euo pipefail
 [ $# -ge 2 ] || { echo "usage: remember.sh <entity> <what happened>" >&2; exit 2; }
 who="$1"; shift
-me="${AGENT_NAME:-vesper}"
+[[ "$who" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "entity must be a plain name (letters, digits, _ -): $who" >&2; exit 2; }
+me="${AGENT_NAME:?AGENT_NAME is not set; refusing to guess whose memory to write}"
+[[ "$me" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "bad AGENT_NAME: $me" >&2; exit 2; }
+[ -f "agent/$me/PERSONA.md" ] || { echo "no character agent/$me (run from the repo root)" >&2; exit 2; }
 python3 - "agent/$me/memory/entities/$who.md" "$who" "$*" <<'PY'
 import sys, io, os, datetime
 path, who, text = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -19,6 +22,12 @@ if not os.path.exists(path):
         "# %s\ntype: unknown | met: %s\n\n## Events\n\n## Links\n" % (who, today))
 body = io.open(path, encoding="utf-8").read()
 mark = "## Events"
+if mark not in body:
+    body = body.rstrip("
+") + "
+
+## Events
+"
 i = body.index(mark) + len(mark)
 body = body[:i] + "\n- %s — %s" % (today, text) + body[i:]
 io.open(path, "w", encoding="utf-8", newline="\n").write(body)
