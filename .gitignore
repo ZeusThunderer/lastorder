@@ -5,3 +5,12 @@ __pycache__/
 
 # Tickets a character files are runtime, not source.
 tickets/
+
+# Last Order
+.env
+.env.*
+!.env.example
+.github/modernize/
+.pytest_cache/
+*.egg-info/
+docker/run/
