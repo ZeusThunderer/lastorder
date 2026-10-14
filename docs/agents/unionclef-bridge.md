@@ -54,14 +54,31 @@ Fabric-мод: altoclef (`src/main/java/adris/altoclef`) + tungsten (pathfinder,
   - авторесп, если `autoRespawn` = true (по умолчанию);
   - выполняет `deathCommand` с `{deathmessage}`;
   - счётчик смертей приватный.
-- Как ловим смерть: маркер через `deathCommand` в чат + `getRecentChat`, плюс hp ≤ 0 в `getGameState`.
+- **Авторесп срабатывает только во время задачи.** Без задачи `TaskRunner.tick()` не крутит цепочки,
+  и тело лежит трупом сколько угодно (проверено в E1). Мозг сам вызывает `respawnPlayer()` после
+  завещания. Это нам и нужно: респаун — шаг цикла смерти, а не событие мода.
+- Как ловим смерть (проверено в E1): hp = 0 в `getGameState` плюс ванильная строка
+  `LastOrder01 was killed` / `… was slain by …` в `getRecentChat`. `deathCommand` пустой.
   Принудительная смерть — RCON `/kill LastOrder0N`.
+
+## Py4J: проверено в E1
+- `ExecuteCommand` и `RunInnerCommand` требуют префикс: `@get log 1`. Без `@` команда молча
+  отбрасывается (`CommandExecutor.isClientCommand`).
+- Python-сторона закрывается через `gateway.close()` и `shutdown_callback_server()`. **Не
+  `gateway.shutdown()`**: он гасит GatewayServer в uc, и порт возвращается только после перезапуска клиента.
+- Перезапуск мозга безопасен: новый процесс подключается, `InitPythonCallback()` перепривязывает callback.
+- `getRecentChat` и `onChatMessage` отдают и служебные строки самого uc: `§2§l§o[Alto Clef] …`,
+  `[Tungsten] …`, с сырыми id внутри. Мозг отбрасывает их до perception.
+- Задержки: геттеры 1–130 мс, `getBlocksAround(2)` около 100 мс. `@get log 1` рядом с деревом — 5–10 с.
+- `gotoXYZ(x, y, z)` → `{goal, ok}`. Дальше опрашивать `pathStatus()` → `{arrived, busy, distance, pos}`.
 
 ## Сырые имена — всё нужно маскировать
 
 | Метод | Поле | Что содержит |
 |---|---|---|
 | `getBlockAt` | `block`, `id` | display name, `minecraft:…` |
+| `getBlocksAround` | `block` | display name строчными: `birch leaves`, `dirt` |
+| `getInventoryFull` | `item`, `name` | `minecraft:birch_log`, `Birch Log` |
 | `getGameState` | `held`, `lookingAt` | registry id, `block@x,y,z` |
 | `getEntitiesInfo` | `type`, `name`, `item` | `zombie`, display name, item |
 | `getPlayersInfo` | `hand_item`, `ground_block` | сырые имена |
@@ -79,8 +96,8 @@ Fabric-мод: altoclef (`src/main/java/adris/altoclef`) + tungsten (pathfinder,
 ## Контейнеры
 - Тестовый стенд `deploy/compose.test.yml`: itzg 1.21.11, offline, RCON + клиенты `mineswarm-mc:amd64`.
   Образа клиента у нас нет, мы собираем свой на HeadlessMC.
-- Без рендера llvmpipe тянет 7–8 FPS на настоящем мире. В HeadlessMC рендер не нужен. Если uc без GL
-  не взлетает, запасной путь — Xvfb + llvmpipe, 854×480.
+- uc 0.95.59 под HeadlessMC с `-lwjgl` (без GL) работает: E1, 2026-10-14. Xvfb не понадобился,
+  но остаётся в образе (`BODY_RENDER=xvfb`) для показа и стрима.
   GPU в контейнере через D3D12 на WSL не работает: см. `deploy/gpu-image/Dockerfile`.
 - `@gamer` по статусу 2026-09 не ест, не убегает при низком hp, не спит ночью. Узлу его всё равно не даём.
 

@@ -1,0 +1,63 @@
+# Last Order MVP stack (ADR-015). Run from the repo root:
+#   docker compose -f docker/compose.yml up -d --build
+# Slots are body-N + mind-N pairs; the mind lives in its body's network namespace because the
+# unionclef py4j gateway listens on localhost only.
+name: lastorder
+
+x-body: &body
+  build: ./body
+  image: lastorder-body:dev
+  restart: unless-stopped
+  depends_on:
+    mc-server:
+      condition: service_healthy
+  mem_limit: 3g
+
+services:
+  mc-server:
+    image: itzg/minecraft-server:java21
+    environment:
+      EULA: "TRUE"
+      TYPE: "VANILLA"
+      VERSION: "1.21.11"
+      ONLINE_MODE: "FALSE"
+      ENFORCE_SECURE_PROFILE: "FALSE"   # offline clients cannot sign chat
+      DIFFICULTY: "easy"
+      MODE: "survival"
+      MEMORY: "2G"
+      VIEW_DISTANCE: "8"
+      SPAWN_PROTECTION: "0"
+      ENABLE_RCON: "TRUE"
+      RCON_PASSWORD: "${RCON_PASSWORD:-lastorder}"
+      MOTD: "Last Order"
+    ports:
+      - "${MC_HOST_PORT:-25565}:25565"   # join from the host to watch
+    volumes:
+      - world:/data
+    restart: unless-stopped
+
+  body-1:
+    <<: *body
+    environment:
+      MC_USERNAME: LastOrder01
+      MC_SERVER: mc-server:25565
+    volumes:
+      - body-1:/data
+
+  mind-1:
+    build:
+      context: ..
+      dockerfile: docker/mind/Dockerfile
+    image: lastorder-mind:dev
+    network_mode: "service:body-1"
+    depends_on: [body-1]
+    environment:
+      MC_USERNAME: LastOrder01
+      RCON_HOST: mc-server
+      RCON_PASSWORD: "${RCON_PASSWORD:-lastorder}"
+    command: ["python", "tools/body_probe.py", "--kill"]
+    restart: "no"
+
+volumes:
+  world:
+  body-1:
