@@ -2,7 +2,7 @@
 id: T-001
 title: Починить agent/scripts/remember.sh
 stage: —
-status: review
+status: done
 criticality: normal
 branch: z/T-001-fix-remember-sh
 created: 2026-10-16
