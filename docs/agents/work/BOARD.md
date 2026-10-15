@@ -4,3 +4,4 @@
 
 | id | заголовок | этап | статус | критичность | ветка |
 |---|---|---|---|---|---|
+| T-001 | Починить agent/scripts/remember.sh | — | ready | normal | z/T-001-fix-remember-sh |
