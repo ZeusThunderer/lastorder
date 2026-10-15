@@ -12,7 +12,14 @@ who="$1"; shift
 me="${AGENT_NAME:?AGENT_NAME is not set; refusing to guess whose memory to write}"
 [[ "$me" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "bad AGENT_NAME: $me" >&2; exit 2; }
 [ -f "agent/$me/PERSONA.md" ] || { echo "no character agent/$me (run from the repo root)" >&2; exit 2; }
-python3 - "agent/$me/memory/entities/$who.md" "$who" "$*" <<'PY'
+# A Windows install can put a python3 stub in PATH that exists but cannot run code, so probe
+# for a name that actually works instead of trusting the first hit.
+py=""
+for cand in python3 python; do
+    if "$cand" -c "" >/dev/null 2>&1; then py="$cand"; break; fi
+done
+[ -n "$py" ] || { echo "no working python3 or python in PATH" >&2; exit 3; }
+"$py" - "agent/$me/memory/entities/$who.md" "$who" "$*" <<'PY'
 import sys, io, os, datetime
 path, who, text = sys.argv[1], sys.argv[2], sys.argv[3]
 today = datetime.date.today().isoformat()
@@ -23,11 +30,7 @@ if not os.path.exists(path):
 body = io.open(path, encoding="utf-8").read()
 mark = "## Events"
 if mark not in body:
-    body = body.rstrip("
-") + "
-
-## Events
-"
+    body = body.rstrip("\n") + "\n\n## Events\n"
 i = body.index(mark) + len(mark)
 body = body[:i] + "\n- %s — %s" % (today, text) + body[i:]
 io.open(path, "w", encoding="utf-8", newline="\n").write(body)
