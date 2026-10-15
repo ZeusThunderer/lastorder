@@ -55,9 +55,17 @@
   в чате — служебные, с сырыми id.
 - uc отдаёт только сырые имена Minecraft. Перевод в обе стороны — в `runtime/perception`.
 - В `unionclef/.claude/settings.json` стоят bypassPermissions и Stop-хук автономии. Не запускать агента из этой папки.
-- Скрипты aw: `AGENT_NAME` по умолчанию `vesper`, запускать из корня. На Windows — Git Bash и `python`.
+- Скрипты aw: `AGENT_NAME` обязателен (по умолчанию не подставляется), запускать из корня. На Windows — Git Bash и `python`.
 - Пути bind-mount в compose разрешает демон, а не шелл (см. unionclef/deploy/compose.test.yml).
 - `NetTyan/.env*` содержат секреты — не читать. У nt и uc своя git-политика (без Co-Authored-By).
+
+## Два агента (ADR-019)
+Код пишет ZCode (worker), Claude Code — надзор: ставит задачи, проверяет, мержит.
+- Протокол — docs/agents/coop-protocol.md, задачи — docs/agents/work/.
+- Скилы Claude: `lo-plan`, `lo-review`, `lo-direct-edit`.
+- Код Claude правит сам только через `lo-direct-edit` и только по основаниям из протокола.
+  Каждая правка — в DIRECT_EDITS.md. Файлы в `docs/agents/work/` и документы — не прямые правки.
+- ZCode читает корневой AGENTS.md, а тот отсылает сюда: правила в этом файле общие для обоих агентов.
 
 ## Стиль
 Документы пишутся по-русски, сухо. Код и идентификаторы — по-английски. Хроника: тексты по-русски,
