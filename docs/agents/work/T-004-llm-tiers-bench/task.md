@@ -2,7 +2,7 @@
 id: T-004
 title: Уровни LLM в клиенте и замер моделей-кандидатов
 stage: E2
-status: review
+status: accepted
 criticality: critical
 branch: z/T-004-llm-tiers-bench
 created: 2026-10-16
