@@ -2,7 +2,7 @@
 id: T-006
 title: Py4jBody — порт GameBody поверх моста uc
 stage: E2
-status: ready
+status: in_progress
 criticality: normal
 branch: z/T-006-py4j-body
 created: 2026-10-16
