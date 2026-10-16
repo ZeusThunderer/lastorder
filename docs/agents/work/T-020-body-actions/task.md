@@ -2,7 +2,7 @@
 id: T-020
 title: Тело — позиции в наблюдении и рычаги добычи, боя, еды
 stage: E2
-status: review
+status: blocked
 criticality: normal
 branch: z/T-020-body-actions
 created: 2026-10-17
@@ -79,3 +79,4 @@ docker compose -f docker/compose.yml run --rm mind-1 python dev/body_smoke.py --
 - Никаких вызовов LLM.
 
 ## Заметки надзора
+Blocked: нужен оператор — headless-надзор не смог прогнать `docker compose ... run mind-1 python - --actions < dev/body_smoke.py` (нет прав на docker); остальное в review.md раунд 1, код готов к accept после прогона smoke надзором.
