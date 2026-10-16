@@ -58,6 +58,50 @@ services:
     command: ["python", "tools/body_probe.py", "--kill"]
     restart: "no"
 
+  # FastJev decision server for C1 (T-005, ADR-004/023). Raises only under --profile jev.
+  # GPU 0 is the RTX 2070 (5070 Ti stays free); model checkpoints live in the named volume,
+  # never a bind mount. The 127.0.0.1 publish exists only for the dev/jev_spike.py measurement;
+  # production callers reach the service inside the docker network as `jev:8000`.
+  jev:
+    build: ./jev
+    image: lastorder-jev:dev
+    profiles: ["jev"]
+    environment:
+      HF_HOME: /data/hf
+    command:
+      - --host
+      - 0.0.0.0
+      - --allow-unauthenticated
+      - --model
+      - ${JEV_MODEL:-openbmb/MiniCPM5-2B}
+      - --revision
+      - ${JEV_REVISION:-12a3808a956f869c767195e9266b59c4d21d92e2}
+      - --served-model
+      - fastjev-2070
+      - --served-model-description
+      - ${JEV_DESCRIPTION:-MiniCPM5-2B BF16 torch direct option-logit on the RTX 2070}
+      - --served-model-release-date
+      - "2026-10-16"
+    ports:
+      - "127.0.0.1:8730:8000"
+    volumes:
+      - jev-hf:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]   # RTX 2070; never count: all (ARCHITECTURE §8)
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/models')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 300s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   world:
   body-1:
+  jev-hf:

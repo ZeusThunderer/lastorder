@@ -1,0 +1,27 @@
+# Experimental llama.cpp/GGUF variant built from source (T-005).
+# Reason: the prebuilt cu124 wheel of llama-cpp-python 0.3.35 dies with SIGILL on this host
+# (Ryzen 9 5900X, Zen 3: no AVX-512/AVX-VNNI that the wheel was compiled with), on both the
+# CPU and CUDA paths. A source build compiles for the local CPU and for the 2070 (sm_75).
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-dev build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CMAKE_ARGS="-DGGML_CUDA=on -DGGML_CUDA_ARCHITECTURES=75"
+RUN pip3 install --no-cache-dir 'fastjev[api,llama-cpp]==0.2.0'
+
+COPY pin_gpu_uuid.sh /pin_gpu_uuid.sh
+RUN chmod +x /pin_gpu_uuid.sh
+
+ENV HF_HOME=/data/hf \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_DISABLE_PROGRESS_BARS=1 \
+    JEV_GPU_NAME="RTX 2070" \
+    LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/nvidia/cuda_runtime/lib:/usr/local/lib/python3.10/dist-packages/nvidia/cublas/lib
+VOLUME /data
+EXPOSE 8000
+
+ENTRYPOINT ["/pin_gpu_uuid.sh", "fastjev-serve"]
+CMD ["--host", "0.0.0.0", "--allow-unauthenticated"]
