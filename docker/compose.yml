@@ -11,7 +11,12 @@ x-body: &body
   depends_on:
     mc-server:
       condition: service_healthy
-  mem_limit: 3g
+  mem_limit: 2g
+  environment: &body-env
+    BODY_XMX: "${BODY_XMX:-1G}"
+    BODY_RENDER_DISTANCE: "${BODY_RENDER_DISTANCE:-2}"
+    BODY_SIM_DISTANCE: "${BODY_SIM_DISTANCE:-5}"   # vanilla client minimum; lower falls back to 12
+    BODY_MAX_FPS: "${BODY_MAX_FPS:-10}"
 
 services:
   mc-server:
@@ -24,8 +29,9 @@ services:
       ENFORCE_SECURE_PROFILE: "FALSE"   # offline clients cannot sign chat
       DIFFICULTY: "easy"
       MODE: "survival"
-      MEMORY: "2G"
-      VIEW_DISTANCE: "8"
+      MEMORY: "1536M"
+      VIEW_DISTANCE: "6"
+      SIMULATION_DISTANCE: "5"
       SPAWN_PROTECTION: "0"
       ENABLE_RCON: "TRUE"
       RCON_PASSWORD: "${RCON_PASSWORD:-lastorder}"
@@ -39,6 +45,7 @@ services:
   body-1:
     <<: *body
     environment:
+      <<: *body-env
       MC_USERNAME: LastOrder01
       MC_SERVER: mc-server:25565
     volumes:
