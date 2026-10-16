@@ -204,20 +204,37 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
     step("act attack_stop", lambda: body.act("attack_stop", {}))
     step("fight over (busy False)", lambda: not body.busy())
 
-    # -- the mob path: lookAt + left click (strike), the lever that does hit mobs
+    # -- the mob path: lookAt + left click (strike), the lever that does hit mobs.
+    #    Two stand facts from the first run: melee reach is 3 blocks (chase first,
+    #    the cow wanders off), and the feet cell aims UNDER the hitbox (aim mid-torso).
     if hp1 is not None and hp1 == hp0:
-        for i in range(15):
-            ents = [e for e in body.entities(24) if e.kind == "cow"]
-            if not ents:
-                break
-            near = min(ents, key=lambda e: e.dist_m)
-            step(f"strike {i + 1} at cow {near.pos}", lambda: body.act("strike", {"pos": list(near.pos)}))
-            time.sleep(0.8)
-        hp2 = step("cow health after strikes", lambda: mob_health(rcon, "@e[type=cow,limit=1]"))
-        gone = step("cow left entities", lambda: not [e for e in body.entities(24) if e.kind == "cow"])
-        if hp2 == hp0 and not gone:
-            FAILURES.append("strike the cow: no damage")
-            print("[FAIL] strike the cow: no damage")
+        step("grant iron sword (rcon)", lambda: rcon(f"give {name} iron_sword 1"))
+        time.sleep(2)
+        sword = next((s for s in body.inventory() if "sword" in s.name and s.slot <= 8), None)
+        if sword is not None:
+            step("hold the sword", lambda: body.act("select_hotbar", {"slot": sword.slot}))
+
+        def strike_the_cow() -> str:
+            hits = 0
+            for _ in range(30):
+                ents = [e for e in body.entities(24) if e.kind == "cow"]
+                if not ents:
+                    return f"cow down, {hits} entity hit(s) landed"
+                near = min(ents, key=lambda e: e.dist_m)
+                if near.dist_m > 4:
+                    body.act("goto", {"x": near.pos[0], "y": near.pos[1], "z": near.pos[2]})
+                    wait_busy_clears(body, 45)
+                    continue
+                reply = body.act("strike", {"pos": [near.pos[0] + 0.5, near.pos[1] + 0.7, near.pos[2] + 0.5]})
+                hits += bool(reply.get("hit") == "ENTITY")
+                time.sleep(0.7)
+            return f"{hits} entity hit(s) landed"
+
+        verdict = step("strike the cow (lookAt + left click)", strike_the_cow)
+        gone = step("cow left entities (dead)", lambda: not [e for e in body.entities(24) if e.kind == "cow"])
+        if not gone:
+            FAILURES.append("strike the cow: still alive")
+            print(f"[FAIL] strike the cow: still alive ({verdict})")
         step("after combat", lambda: snapshot(body))
     step("cleanup cow (rcon)", lambda: rcon("kill @e[type=cow]"))
 
@@ -242,6 +259,16 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
         left = next((s.count for s in inv1 if s.slot == slot), 0)
         print(f"       eat result: food {food0:.0f} -> {st1.food:.0f}, "
               f"{held} count 3 -> {left} (one useHeldItem is one interaction, not a whole meal)")
+        if left == 3:
+            # One useHeldItem did not eat the bread: MC wants the use key HELD
+            # (32 game ticks). Try the hold and report the fact for the bridge.
+            step("hold use 1.7s (does holding eat?)", lambda: body.act("hold_key", {"key": "use", "ms": 1700}))
+            time.sleep(2)
+            inv2 = step("inventory after hold use", lambda: body.inventory())
+            st2 = step("state after hold use", lambda: body.state())
+            left2 = next((s.count for s in inv2 if s.slot == slot), 0)
+            print(f"       hold use result: food {st1.food:.0f} -> {st2.food:.0f}, "
+                  f"{held} count 3 -> {left2}")
         step("after eat", lambda: snapshot(body))
 
 
