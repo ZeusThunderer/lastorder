@@ -37,6 +37,7 @@ class EntityInfo:
     kind: str
     name: str
     dist_m: float
+    pos: tuple[int, int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class BlockInfo:
     """One block from getBlocksAround: display name as the body reports it."""
 
     name: str
+    pos: tuple[int, int, int] | None = None
 
 
 @dataclass(frozen=True)

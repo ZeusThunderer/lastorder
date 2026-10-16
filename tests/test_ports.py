@@ -66,6 +66,15 @@ def test_game_body_declares_the_observation_getters():
     assert {"state", "entities", "blocks_around", "inventory", "recent_chat"} <= methods
 
 
+def test_entity_and_block_info_carry_an_optional_cell_pos():
+    # The pos default keeps every existing constructor call working; T-020 fills
+    # it from uc's "x, y, z" strings, broken ones landing on None.
+    assert ports.EntityInfo(kind="cow", name="Cow", dist_m=3.0).pos is None
+    assert ports.BlockInfo(name="dirt").pos is None
+    assert ports.EntityInfo(kind="cow", name="Cow", dist_m=3.0, pos=(1, 2, 3)).pos == (1, 2, 3)
+    assert ports.BlockInfo(name="dirt", pos=(4, 5, 6)).pos == (4, 5, 6)
+
+
 def test_memory_methods_carry_the_node_serial():
     for name in (
         "inheritance",
