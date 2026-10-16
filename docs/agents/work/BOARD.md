@@ -5,7 +5,7 @@
 | id | заголовок | этап | статус | критичность | ветка |
 |---|---|---|---|---|---|
 | T-001 | Починить agent/scripts/remember.sh | — | done | normal | z/T-001-fix-remember-sh |
-| T-002 | Архитектура сети узлов (NETWORK.md) и порты | E2 | done | critical | z/T-002-network-architecture |
+| T-002 | Архитектура сети узлов (NETWORK.md) и порты | E2 | changes | critical | z/T-002-network-architecture |
 | T-003 | Замер и снижение ресурсов тела и сервера | E2 | ready | normal | z/T-003-resource-budget |
 | T-004 | Уровни LLM в клиенте и замер моделей-кандидатов | E2 | ready | critical | z/T-004-llm-tiers-bench |
 | T-005 | Спайк FastJev на RTX 2070 в Docker | E2 | ready | critical | z/T-005-jev-spike-2070 |
