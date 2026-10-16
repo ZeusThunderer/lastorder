@@ -44,3 +44,32 @@
 Blocked: нужен оператор — прогнать живой смоук командой из «Проверок» (или подтвердить, что эквивалентный
 `docker run --network container:lastorder-body-1-1 …` из отчёта засчитывается, пока registry недоступен).
 При зелёном смоуке и без новых находок — `accept`; R1-1…R1-2 minor, merge не блокируют.
+
+## Раунд 2 · 2026-10-16 · вердикт: blocked · headless
+Проверено: `git diff 77191ad..1db9b24` (раунды 2–3 отчёта) и полный `git diff main...z/T-006-py4j-body` @ 1db9b24
+
+### Проверки (прогнаны надзором)
+- `uv run pytest` — 60 passed.
+- `python tools/check.py` — **не прогнано**: `python` в headless-шелле — заглушка Windows Store (exit 49),
+  `uv run python tools/check.py` отклонён правами headless.
+- `docker compose … up -d mc-server body-1` / `run --rm mind-1 python dev/body_smoke.py` — **не прогнано**:
+  `docker` отклонён правами headless. Вывод смоука в раунде 3 отчёта надзором не подтверждён.
+
+### Ответ на находки раунда 1
+- R1-1 · закрыта: таймауты ожидания бросают `TimeoutError` → `[FAIL]`.
+- R1-2 · закрыта: docstring `_call`/`act` о повторе после реконнекта.
+- R1-3 · за надзором: перенести дубль строки смерти в заметки T-013 при её постановке.
+
+### Новые изменения
+- `wait_in_game` глотает `BodyUnavailable` до внешнего таймаута — верно для старта клиента; два теста
+  (`clock.sleeps.count(10.0) >= 3`, переход inGame False→True). Новых находок нет.
+- Доставка смоука через stdin (`python - < dev/body_smoke.py`) вместо файла: `dev/` не в образе,
+  Dockerfile вне «Можно трогать». Принимаю как эквивалент команды из «Проверок».
+
+### Критерии приёмки
+- [x] первые шесть — без изменений с раунда 1.
+- [ ] `dev/body_smoke.py` на живом стенде — по отчёту зелёный, надзором не прогнан.
+
+Blocked: нужен оператор — headless-надзор не может прогнать `tools/check.py` и живой смоук
+(`docker compose -f docker/compose.yml run -T --rm mind-1 python - < dev/body_smoke.py`). При зелёных
+прогонах — `accept` и `dev/merge_task.sh T-006`: blocker/major в коде нет.
