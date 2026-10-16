@@ -73,3 +73,37 @@ Blocked: нужен оператор — прогнать живой смоук 
 Blocked: нужен оператор — headless-надзор не может прогнать `tools/check.py` и живой смоук
 (`docker compose -f docker/compose.yml run -T --rm mind-1 python - < dev/body_smoke.py`). При зелёных
 прогонах — `accept` и `dev/merge_task.sh T-006`: blocker/major в коде нет.
+
+## Раунд 3 · 2026-10-16 · вердикт: changes
+Проверено: `git diff main...z/T-006-py4j-body` @ 894f3a6. Оператор-сторона: снимает blocked раундов 1–2.
+
+### Проверки (прогнаны надзором)
+- `uv run pytest` — 60 passed.
+- `python tools/check.py` — все рабочие места целы.
+- `docker compose -f docker/compose.yml up -d mc-server body-1` — стенд поднят.
+- `docker compose -f docker/compose.yml run --build -T --rm mind-1 python - < dev/body_smoke.py` —
+  «smoke passed», 0 FAIL. Но прогон ложноположительный, см. R3-1:
+  - `wait_in_game` вернул `hp=0.0` — тело было мёртвым с прошлой сессии;
+  - `act goto +5 x` → `{'goal': '16,68,3', 'ok': True}`, «goto finished» через 3 с;
+  - `state after goto` → `pos=(11.3, 68.0, 3.7)`, то же, что до goto: тело не сдвинулось;
+  - дальше uc сам ожил на задаче `@get`, kill/respawn отработали честно.
+
+### Критерии приёмки
+- [x] первые шесть — без изменений с раунда 1, код `runtime/game/py4j_body.py` перечитан, замечаний нет.
+- [ ] `dev/body_smoke.py` на живом стенде: «gotoXYZ на +5 по x» смоук не проверяет. Он сообщил
+  успех, когда тело стояло на месте.
+
+### Находки
+- R3-1 · major · `dev/body_smoke.py:90-99` · смоук не проверяет исход шагов, которые проверяет
+  критерий. На мёртвом теле `goto` возвращает `ok`, `busy()` сразу False, и шаг печатает `[ok]`.
+  Ожидается:
+  - после `wait_in_game`, если `st.dead`, вызвать `respawn()` и взять позицию заново (отдельный шаг);
+  - после goto проверить смещение по x: `abs(pos_after.x - (x + 5)) <= 2`, иначе `[FAIL]`;
+  - для `@get log 1` сравнить число брёвен в инвентаре до и после: прирост ≥ 1, иначе `[FAIL]`.
+  Сейчас брёвна могли лежать в инвентаре заранее, и шаг прошёл бы без работы.
+  Вывод нового прогона, где тело стартует мёртвым или живым, — в отчёт.
+- R3-2 · minor · `runtime/game/py4j_body.py` · факт для T-014: `act("goto")` на мёртвом теле
+  отвечает `ok: True`, задача не встаёт. Можно одной строкой в docstring `act`. Не блокирует.
+
+### Чек-лист проекта
+Без замечаний.
