@@ -6,6 +6,10 @@ Env (new name first, NetTyan name as fallback):
   LLM_API_KEY                           optional; providers' own *_API_KEY variables also work
   LLM_REASONING_OFF=1 / CORE_LLM_REASONNING=NONE   ask the model to skip its thinking pass
   LLM_TIMEOUT_S, LLM_MAX_TOKENS, LLM_TEMPERATURE
+
+Tiers (ADR-023): for_tier("node"|"smart") reads the same variables with an LLM_NODE_ / LLM_SMART_
+prefix first and falls back to the base LLM_* names: LLM_<TIER>_MODEL, _API_BASE, _REASONING_OFF,
+_MAX_TOKENS, _TEMPERATURE, _TIMEOUT_S. The API key stays shared: LLM_API_KEY.
 """
 
 from __future__ import annotations
@@ -22,6 +26,9 @@ class LLMError(RuntimeError):
     pass
 
 
+TIERS = ("node", "smart")
+
+
 @dataclass(frozen=True)
 class LLMConfig:
     model: str
@@ -35,19 +42,52 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        model = env("LLM_MODEL", "CORE_LLM_MODEL_NAME")
+        return cls.for_tier(None)
+
+    @classmethod
+    def for_tier(cls, tier: str | None) -> "LLMConfig":
+        """Config of an ADR-023 tier; tier variables override the base LLM_* ones."""
+        prefix = f"LLM_{tier.upper()}_" if tier else "LLM_"
+        if tier and tier not in TIERS:
+            raise LLMError(f"unknown tier {tier!r}, want one of {TIERS}")
+        model = env(f"{prefix}MODEL", "LLM_MODEL", "CORE_LLM_MODEL_NAME")
         if not model:
-            raise LLMError("set LLM_MODEL (or CORE_LLM_MODEL_NAME)")
-        off = env("LLM_REASONING_OFF") == "1" or env("CORE_LLM_REASONNING") == "NONE"
+            want = f"LLM_{tier.upper()}_MODEL" if tier else "LLM_MODEL"
+            raise LLMError(f"set {want} (or LLM_MODEL / CORE_LLM_MODEL_NAME)")
+        off = env(f"{prefix}REASONING_OFF", "LLM_REASONING_OFF") == "1" or env("CORE_LLM_REASONNING") == "NONE"
         return cls(
             model=model,
-            api_base=_url(env("LLM_API_BASE", "CORE_LLM_API_BASE")),
+            api_base=_url(env(f"{prefix}API_BASE", "LLM_API_BASE", "CORE_LLM_API_BASE")),
             api_key=env("LLM_API_KEY"),
             reasoning_off=off,
-            timeout_s=float(env("LLM_TIMEOUT_S", default="30")),
-            max_tokens=int(env("LLM_MAX_TOKENS", default="600")),
-            temperature=float(env("LLM_TEMPERATURE", default="0.8")),
+            timeout_s=float(env(f"{prefix}TIMEOUT_S", "LLM_TIMEOUT_S", default="30")),
+            max_tokens=int(env(f"{prefix}MAX_TOKENS", "LLM_MAX_TOKENS", default="600")),
+            temperature=float(env(f"{prefix}TEMPERATURE", "LLM_TEMPERATURE", default="0.8")),
         )
+
+
+@dataclass(frozen=True)
+class CallStats:
+    """What one call cost: model, tokens, wall latency and the provider-reported price, if any."""
+
+    model: str
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    latency_s: float
+    cost_usd: float | None
+
+
+def _call_stats(model: str, reply, latency_s: float) -> CallStats:
+    usage = getattr(reply, "usage", None)
+    hidden = getattr(reply, "_hidden_params", None)
+    cost = hidden.get("response_cost") if isinstance(hidden, dict) else None
+    return CallStats(
+        model=model,
+        prompt_tokens=getattr(usage, "prompt_tokens", None),
+        completion_tokens=getattr(usage, "completion_tokens", None),
+        latency_s=latency_s,
+        cost_usd=cost if isinstance(cost, (int, float)) else None,
+    )
 
 
 def _url(value: str | None) -> str | None:
@@ -76,13 +116,14 @@ def parse_json_object(text: str) -> dict:
 class LLMClient:
     def __init__(self, config: LLMConfig):
         self.config = config
+        self.last_call: CallStats | None = None
 
     def _extra(self) -> dict:
         if not self.config.reasoning_off:
             return {}
         if self.config.model.startswith("openrouter/"):
             return {"extra_body": {"reasoning": {"enabled": False}}}
-        if self.config.api_base:  # self-hosted vLLM with a thinking chat template (Qwen3)
+        if self.config.api_base:  # self-hosted vLLM with a thinking chat template (Qwen)
             return {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
         return {}
 
@@ -104,10 +145,12 @@ class LLMClient:
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
+        started = time.perf_counter()
         delay, last = 1.0, None
         for attempt in range(self.config.retries + 1):
             try:
                 reply = litellm.completion(**kwargs)
+                self.last_call = _call_stats(self.config.model, reply, time.perf_counter() - started)
                 return (reply.choices[0].message.content or "").strip()
             except Exception as exc:  # provider errors vary; every one is retried with a pause
                 last = exc
