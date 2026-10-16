@@ -117,3 +117,46 @@ Every workplace is intact: files present, links resolve, boxes parse.   exit 0
 
 ### Вызовы надзора
 - нет (критичность critical — headless-вызовы недоступны)
+
+## Раунд 3 · 2026-10-16
+Коммиты: cea43d2 (правки по ревью 2), 8e0c4fd (merge main — ушёл вперёд по BOARD).
+
+### Ответ на ревью
+- R2-1 · fixed cea43d2 · В `NodeRegistry` добавлен `report_stuck(serial, idle_s) → None`;
+  порог решает hive (вопрос 2 §12). Синхронно: §4 (таблица портов), §2 п. 3 «Простой»
+  (сигнал — имя метода), §7 п. 3 (застревание: сторож C1 сообщает hive —
+  `report_stuck(serial, idle_s)`, hive решает убить по порогу), таблица событий §5
+  (`task.idle`: долгий простой — report_stuck в hive); перечень схем §3 — см. R2-2. Тест
+  `test_node_registry_declares_the_stuck_report` пинит параметры `serial`, `idle_s`.
+- R2-2 · fixed cea43d2 · Перечень HTTP-схем в §3 заменён ссылкой: «схемы запрос-ответ =
+  методы Memory, NodeRegistry, NodeComms (§4)» — отставание от портов исключено.
+- R2-3 · fixed cea43d2 · `life.expired` в §5: источник — mind (часы против `ttl_min`),
+  эффект — пометка причины при `game.death`; RCON `/kill` — действие hive по своему
+  таймеру. Согласовано с §7 п. 3.
+- R2-4 · fixed cea43d2 · §6: GPT-5 Nano (0.025/0.20) пересчитан на потолок 1350/ч —
+  шаг $0.14/ч, итог ≈$0.17/ч (в лимите $0.25).
+
+### Сделано
+- Документ 347 ≤ 450 строк; порты §4 и код синхронны (проверено тестом).
+
+### Проверки
+```
+$ uv run pytest
+28 passed in 0.90s   (test_ports.py: 9 passed)
+
+$ uv run python tools/check.py
+CHARACTERS: last_order, vesper
+Every workplace is intact: files present, links resolve, boxes parse.   exit 0
+```
+
+### Отклонения от задачи
+- нет
+
+### Вне задачи
+- нет
+
+### Вопросы
+- нет новых; список для пользователя — §12 (7 вопросов)
+
+### Вызовы надзора
+- нет (критичность critical — headless-вызовы недоступны)
