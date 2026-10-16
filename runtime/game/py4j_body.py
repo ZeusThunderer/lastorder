@@ -327,11 +327,19 @@ class Py4jBody:
         self._drop()
 
     def wait_in_game(self, timeout: float = 600.0, poll: float = 5.0) -> BodyState:
-        """Wait for the body to join the server (uc autoConnect), then return state."""
+        """Wait for the body to join the server (uc autoConnect), then return state.
+
+        A freshly started client opens its py4j gateway only after a minute or more,
+        so BodyUnavailable from a not-yet-up bridge is not an error here: keep polling
+        until the outer timeout, like the E1 probe did.
+        """
         deadline = self._clock() + timeout
         while True:
-            if self._call(lambda mc: bool(mc.inGame())):
-                return self.state()
+            try:
+                if self._call(lambda mc: bool(mc.inGame())):
+                    return self.state()
+            except BodyUnavailable:
+                pass
             if self._clock() >= deadline:
                 raise BodyUnavailable(f"body did not enter the game within {timeout:.0f}s")
             self._sleep(poll)

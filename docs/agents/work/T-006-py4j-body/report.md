@@ -101,3 +101,32 @@ smoke passed
 $ uv run pytest
 58 passed
 ```
+
+## Раунд 3 · 2026-10-16
+Коммиты: (этот раунд)
+
+Оператор разблокировал задачу: доступ к registry починен через прокси (Docker Desktop
+переведён на `socks5://host.docker.internal:25344`, pull/build работают), пересобран
+mind-образ со свежим `runtime/game` внутри, и дано добро на headless-ревью.
+
+### Сделано
+- `wait_in_game` переживает ещё не поднявшийся мост: `BodyUnavailable` от невозможности
+  подключения (клиент после старта открывает py4j-gateway минутами) больше не съедает
+  5 реконнектов за 16 с — внешний цикл опрашивает до общего таймаута, как `body_probe`
+  в E1. Нашлось на живом стенде: смоук сразу после пересоздания body-1 падал на входе.
+  +2 теста (`test_wait_in_game_survives_a_bridge_that_is_not_up_yet`,
+  `test_wait_in_game_returns_state_once_in_game`).
+- mind-образ пересобран (внутри настоящий `runtime/game`), смоук прогнан через
+  `docker compose -f docker/compose.yml run -T --rm mind-1 python - < dev/body_smoke.py`
+  из каталога задачи — отличие от команды из «Проверок» только в способе доставки
+  скрипта (stdin вместо файла: `dev/` не входит в образ, Dockerfile вне «Можно трогать»):
+  все шаги [ok] — goto −5.5→0.3 по x, `@get log 1` собрал birch_log, kill → dead=True
+  hp=0, respawn → hp=20; «smoke passed», 0 FAIL.
+
+### Проверки
+```
+$ uv run pytest
+60 passed
+$ docker compose -f docker/compose.yml run -T --rm mind-1 python - < dev/body_smoke.py
+… все шаги [ok], smoke passed
+```

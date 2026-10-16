@@ -434,6 +434,44 @@ def test_act_unknown_lever_is_loud():
         body.act("dance", {})
 
 
+# --- wait_in_game ---------------------------------------------------------------------
+
+
+def test_wait_in_game_survives_a_bridge_that_is_not_up_yet():
+    # A fresh client opens its gateway only after a minute or more: the wait must poll
+    # through BodyUnavailable until the outer timeout, not die after 5 reconnects.
+    ep = FakeEntryPoint()
+    ep.raise_on_get_state = Py4JNetworkError("gateway not up yet")
+    body, ep, _, clock = make_body(ep, retries=1, base_delay=0.1)
+
+    with pytest.raises(BodyUnavailable, match="did not enter the game"):
+        body.wait_in_game(timeout=100, poll=10)
+
+    # several outer polls happened, not just one reconnect burst
+    assert clock.sleeps.count(10.0) >= 3
+
+
+def test_wait_in_game_returns_state_once_in_game():
+    ep = FakeEntryPoint(states=[E1_GAME_STATE])
+    ep.inGame = lambda: False
+    body, ep, _, clock = make_body(ep)
+    calls = {"n": 0}
+    orig_sleep = clock.sleep
+
+    def counting_sleep(seconds):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            ep.inGame = lambda: True
+        orig_sleep(seconds)
+
+    body._sleep = counting_sleep
+
+    st = body.wait_in_game(timeout=100, poll=1.0)
+
+    assert st.in_game is True
+    assert calls["n"] == 2
+
+
 # --- busy and stop ------------------------------------------------------------------
 
 
