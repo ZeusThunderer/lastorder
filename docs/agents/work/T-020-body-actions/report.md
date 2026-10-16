@@ -1,7 +1,7 @@
 # T-020. Отчёт исполнителя
 
 ## Раунд 1 · 2026-10-17
-Коммиты: cd598cc (код и тесты), 409db46 (smoke --actions), 76a0358 (smoke: догон и прицел), docs (bridge, отчёт)
+Коммиты: cd598cc (код и тесты), 9d8bd7d (smoke --actions), f89d911 (smoke: догон и прицел), 93a3ff3 (bridge, отчёт)
 
 ### Сделано
 - `runtime/ports.py`: `EntityInfo.pos` и `BlockInfo.pos` — `tuple[int, int, int] | None = None`;
