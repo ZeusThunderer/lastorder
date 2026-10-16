@@ -8,6 +8,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CHARACTER_DIR = REPO_ROOT / "agent" / "last_order"
 
+PERCEPTION_MODES = ("plain", "masked")
+
 
 def load_dotenv(path: Path | None = None) -> None:
     """Load KEY=VALUE lines into os.environ without overriding what is already set.
@@ -34,3 +36,17 @@ def env(*names: str, default: str | None = None) -> str | None:
         if value:
             return value
     return default
+
+
+def perception_mode() -> str:
+    """PERCEPTION_MODE (ADR-020): `plain` by default, only `plain|masked` allowed.
+
+    An unknown value is a startup error, not a silent fallback: a mistyped mode must not
+    quietly leak or mask more than intended. Case and outer spaces are tolerated (.env files
+    are hand-edited).
+    """
+    raw = env("PERCEPTION_MODE", default="plain") or ""
+    mode = raw.lower()
+    if mode not in PERCEPTION_MODES:
+        raise ValueError(f"PERCEPTION_MODE must be one of {', '.join(PERCEPTION_MODES)}, got {raw!r}")
+    return mode

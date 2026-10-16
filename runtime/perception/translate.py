@@ -1,9 +1,14 @@
-"""Perception: raw Minecraft ids never reach a node's prompt (brief §6, ADR-017).
+"""Perception: game names reach a node's prompt through one of two modes (ADR-020).
 
-Every raw id becomes a handle: an opaque, stable key like `blk:7f3a`, salted per epoch so handles
-do not carry meaning across worlds. A node sees the handle with its collective term if one exists,
-else a plain description from descriptions.yml (written by a human), else a generic label.
-Commands go the other way: handle -> raw id.
+`plain` (default): normalized game names. The key is `<kind>:<normalized id>` (e.g. `blk:birch_log`),
+stable across epochs and fit for the knowledge base; the label is the human-readable name plus the
+node's term in «», if one exists. Only the `minecraft:` namespace form is forbidden.
+`masked`: every raw id becomes an opaque, salted handle like `blk:7f3a`, so raw ids never reach
+a prompt. A node sees the handle with its collective term if one exists, else a plain description
+from descriptions.yml (written by a human), else a generic label.
+
+Commands go the other way: key/handle -> raw id. uc's service chat lines are dropped before
+perception (chat.py).
 """
 
 from __future__ import annotations
@@ -17,6 +22,8 @@ from typing import Literal, Mapping
 import yaml
 
 Kind = Literal["block", "entity", "item"]
+Mode = Literal["plain", "masked"]
+MODES: tuple[str, ...] = ("plain", "masked")
 PREFIX: dict[str, str] = {"block": "blk", "entity": "ent", "item": "itm"}
 GENERIC: dict[str, str] = {
     "block": "незнакомый блок",
@@ -27,8 +34,18 @@ NAMESPACED = re.compile(r"\bminecraft:[a-z0-9_./]+")
 
 
 def normalize(raw_id: str) -> str:
-    raw_id = raw_id.strip().lower()
+    """Registry id: lowercase, no `minecraft:` namespace, underscores instead of spaces.
+
+    uc feeds display names ("Birch Leaves", "birch leaves") alongside registry ids
+    ("minecraft:birch_leaves", "birch_leaves"); all four are one thing (E1 samples).
+    """
+    raw_id = raw_id.strip().lower().replace(" ", "_")
     return raw_id.split(":", 1)[1] if raw_id.startswith("minecraft:") else raw_id
+
+
+def readable(raw_id: str) -> str:
+    """Human-readable form of a registry id for `plain` labels: `birch log`."""
+    return normalize(raw_id).replace("_", " ")
 
 
 def load_descriptions(path: Path) -> dict[str, str]:
@@ -50,14 +67,28 @@ class Seen:
 
 
 class Perception:
-    def __init__(self, descriptions: Mapping[str, str], salt: str, terms: Mapping[str, str] | None = None):
+    def __init__(
+        self,
+        descriptions: Mapping[str, str],
+        salt: str,
+        terms: Mapping[str, str] | None = None,
+        mode: str = "plain",
+    ):
+        if mode not in MODES:
+            raise ValueError(f"unknown perception mode {mode!r}: expected one of {MODES} (ADR-020)")
+        self.mode: Mode = mode  # type: ignore[assignment]
         self.descriptions = dict(descriptions)
         self.salt = salt
-        self.terms: dict[str, str] = dict(terms or {})  # handle -> collective term
+        self.terms: dict[str, str] = dict(terms or {})  # key/handle -> node's term
         self._raw_by_handle: dict[str, str] = {}
 
     def handle(self, raw_id: str, kind: Kind) -> str:
+        """Key for one thing: stable in its mode, usable as `about` in the knowledge base."""
         raw = normalize(raw_id)
+        if self.mode == "plain":
+            key = f"{PREFIX[kind]}:{raw}"  # self-describing and epoch-independent, unlike a hash
+            self._raw_by_handle[key] = raw
+            return key
         digest = hashlib.sha1(f"{self.salt}|{kind}|{raw}".encode()).hexdigest()[:4]
         handle = f"{PREFIX[kind]}:{digest}"
         known = self._raw_by_handle.setdefault(handle, raw)
@@ -69,6 +100,10 @@ class Perception:
 
     def see(self, raw_id: str, kind: Kind) -> Seen:
         handle = self.handle(raw_id, kind)
+        if self.mode == "plain":
+            name = readable(raw_id)
+            label = f"{name} «{self.terms[handle]}»" if handle in self.terms else name
+            return Seen(handle, kind, label)
         if handle in self.terms:
             label = f"«{self.terms[handle]}»"
         else:
@@ -94,19 +129,29 @@ class Perception:
         return rf"(?i)(?<![\w:]){re.escape(form)}(?!\w)"
 
     def scrub(self, text: str) -> str:
-        """Replace raw ids seen so far (and their display forms) in free text, e.g. chat lines.
+        """Make free text, e.g. chat lines, fit for a prompt.
 
-        Namespaced ids nobody has seen yet become a neutral mark: there is no kind to hash them by.
+        `masked`: raw ids seen so far (and their display forms) become handles; namespaced ids
+        nobody has seen yet become a neutral mark (no kind to hash them by).
+        `plain`: names are allowed, only the `minecraft:` form is not — it degrades to the
+        normalized id.
         """
+        if self.mode == "plain":
+            return NAMESPACED.sub(lambda m: normalize(m.group(0)), text)
         for handle, raw in sorted(self._raw_by_handle.items(), key=lambda kv: -len(kv[1])):
             for form in self._forms(raw):
                 text = re.sub(self._word(form), handle, text)
         return NAMESPACED.sub("[неопознанное]", text)
 
     def leaks(self, text: str) -> list[str]:
-        """Raw ids seen by this perception that appear in `text`. Must be empty for any prompt."""
+        """Raw-id forms that must not appear in `text`. Empty for any prompt.
+
+        The `minecraft:` namespace is a leak in both modes (ADR-020); in `masked` the bare
+        ids and display names seen by this perception are leaks too.
+        """
         found = set(NAMESPACED.findall(text))
-        for raw in set(self._raw_by_handle.values()):
-            if any(re.search(self._word(form), text) for form in self._forms(raw)):
-                found.add(raw)
+        if self.mode == "masked":
+            for raw in set(self._raw_by_handle.values()):
+                if any(re.search(self._word(form), text) for form in self._forms(raw)):
+                    found.add(raw)
         return sorted(found)

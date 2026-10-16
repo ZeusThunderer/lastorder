@@ -6,7 +6,8 @@ DESCRIPTIONS = {"birch_log": "светлый столб с тёмными штр
 
 
 def perception(salt="epoch-1"):
-    return Perception(DESCRIPTIONS, salt=salt)
+    # These tests pin `masked`, the E0 behavior (ADR-020); plain lives in test_perception_plain.py.
+    return Perception(DESCRIPTIONS, salt=salt, mode="masked")
 
 
 def test_handles_are_stable_opaque_and_salted():
