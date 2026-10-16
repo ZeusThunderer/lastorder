@@ -84,4 +84,5 @@ $ docker compose -f docker/compose.yml up mind-1  # tools/body_probe.py --kill
 - нет
 
 ### Вызовы надзора
-- нет
+- 2026-10-16 — попытка headless-ревью отклонена самим скриптом: diff задевает `docker/`
+  (критичная зона по протоколу), нужна обычная проверка оператором/Claude.
