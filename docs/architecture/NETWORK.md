@@ -129,8 +129,11 @@ StepReply(option_id, why, say, new_term, note, msg, votes).
 
 | Режим | ref объекта | подпись |
 |---|---|---|
-| plain (по умолчанию) | нормализованное имя игры: `birch_log` | личный термин поверх имени, если есть |
+| plain (по умолчанию) | ключ `<kind>:<id>`: `blk:birch_log`, `ent:zombie` | человекочитаемое имя (`birch log`); личный термин в «», если есть |
 | masked | handle: `blk:7f3a`, `ent:3c1d` | термин или описание из таблицы, иначе родовое |
+
+Ключ — один и тот же в наблюдении и в базе (`about` записи, KNOWLEDGE.md v2 §2); display
+name (`"Birch Leaves"`) и `minecraft:birch_leaves` дают один ключ (T-009).
 
 Служебные строки uc (`[Alto Clef]`, `[Tungsten]`) выбрасываются до perception в обоих
 режимах. Чат и ванильные строки в `masked` проходят perception как свободный текст —
@@ -253,13 +256,14 @@ node в жёстком лимите CHATTER_CALLS_PER_HOUR; очередь, вы
 **Знания и завещания (ADR-017, ADR-020).** Кандидаты приходят попутно (note шага) и из
 рефлексии — все через `Memory.submit_candidate(serial, …)`: note — с kind danger или fact по
 выбору узла, new_term — с kind=term (hive сам связывает handle и термин); формат записи —
-T-007. Hive проверяет на дубль (тот же about и похожий claim — дубликат становится evidence),
-ставит hypothesis, раздаёт ≤2 кандидата на голосование попутно. confirmed = 1 независимое
-evidence или 2 голоса «за» без «против»; retired — опровергнуто дважды. Праймер — стартовые
-записи базы (автор primer, статус confirmed, бюджет токенов). Завещание — will.md в базе,
-наследник получает его в inheritance. Core memory — файл узла в hive (KNOWLEDGE §1, слой 2):
-чтение и запись — `core_memory(serial)` и `store_core_memory(serial, text)`, лимит 1.5 KB
-применяет hive. Пишет базу только hive. Детали — KNOWLEDGE.md, T-007.
+KNOWLEDGE.md v2 §2. Hive проверяет на дубль (общий about и Жаккар claim ≥ 0.6 — дубликат
+становится evidence), ставит hypothesis, раздаёт ≤2 кандидата на голосование попутно;
+переходы статусов — v2 §4, где `confirmed` = 1 независимое evidence или 2 голоса «за» без
+«против», `retired` — опровергнуто дважды. Праймер — стартовые записи базы (автор primer,
+статус confirmed, бюджет 500 токенов; v2 §8). Завещание — will.md в базе, наследник получает
+его в inheritance. Core memory — файл узла в hive (KNOWLEDGE §1, слой 2): чтение и запись —
+`core_memory(serial)` и `store_core_memory(serial, text)`, лимит 1.5 KB применяет hive.
+Пишет базу только hive. Детали — KNOWLEDGE.md (v2).
 
 ## 9. Ресурсы, отказы, наблюдаемость
 
