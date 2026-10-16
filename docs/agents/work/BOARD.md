@@ -18,7 +18,7 @@
 | T-012 | Hive — реестр узлов и единственный писатель базы | E2 | draft | critical | z/T-012-hive-core |
 | T-013 | Путь смерти — детектор, рефлексия и завещание, retire, respawn, birth | E2 | draft | critical | z/T-013-death-will-path |
 | T-014 | Цикл мозга — шаг узла C2 и тактика C1 на правилах | E2 | draft | critical | z/T-014-mind-loop |
-| T-015 | FastJevDecider в тактике C1 | E3 | draft | critical | z/T-015-jev-decider |
+| T-015 | JevDecider в тактике C1 (облачный Jev, ADR-027) | E3 | draft | critical | z/T-015-jev-decider |
 | T-016 | Контур целей сети в hive (C5) | E3 | draft | critical | z/T-016-network-goals |
 | T-017 | Общение узлов — Мисака-нет, игровой чат, болтовня с режиссёром | E3 | draft | critical | z/T-017-node-comms |
 | T-018 | Сеть из 3 слотов в compose | E3 | draft | critical | z/T-018-three-slots |
