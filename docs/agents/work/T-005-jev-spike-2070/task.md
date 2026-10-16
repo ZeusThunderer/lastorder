@@ -2,7 +2,7 @@
 id: T-005
 title: Спайк FastJev на RTX 2070 в Docker
 stage: E2
-status: ready
+status: in_progress
 criticality: critical
 branch: z/T-005-jev-spike-2070
 created: 2026-10-16
