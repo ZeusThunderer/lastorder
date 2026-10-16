@@ -6,7 +6,7 @@
 |---|---|---|---|---|---|
 | T-001 | Починить agent/scripts/remember.sh | — | done | normal | z/T-001-fix-remember-sh |
 | T-002 | Архитектура сети узлов (NETWORK.md) и порты | E2 | done | critical | z/T-002-network-architecture |
-| T-003 | Замер и снижение ресурсов тела и сервера | E2 | changes | normal | z/T-003-resource-budget |
+| T-003 | Замер и снижение ресурсов тела и сервера | E2 | done | normal | z/T-003-resource-budget |
 | T-004 | Уровни LLM в клиенте и замер моделей-кандидатов | E2 | review | critical | z/T-004-llm-tiers-bench |
 | T-005 | Спайк FastJev на RTX 2070 в Docker | E2 | in_progress | critical | z/T-005-jev-spike-2070 |
 | T-006 | Py4jBody — порт GameBody поверх моста uc | E2 | done | normal | z/T-006-py4j-body |
