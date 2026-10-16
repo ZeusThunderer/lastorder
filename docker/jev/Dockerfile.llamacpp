@@ -1,0 +1,26 @@
+# Experimental llama.cpp/GGUF variant (T-005): the only way to put Qwen3.5-4B on the 8 GB
+# 2070 after vLLM failed on Turing and BF16 weights stopped fitting. Uses the prebuilt CUDA
+# wheel of llama-cpp-python (no nvcc in the image).
+FROM python:3.12-slim
+
+RUN pip install --no-cache-dir \
+    --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124 \
+    'fastjev[api,llama-cpp]==0.2.0' \
+    'nvidia-cuda-runtime-cu12' 'nvidia-cublas-cu12'
+# the prebuilt cu124 wheel links against CUDA 12 runtime libs; expose the pip-installed ones
+ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:/usr/local/lib/python3.12/site-packages/nvidia/cublas/lib
+
+COPY pin_gpu_uuid.sh /pin_gpu_uuid.sh
+RUN chmod +x /pin_gpu_uuid.sh
+
+ENV HF_HOME=/data/hf \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_DISABLE_PROGRESS_BARS=1 \
+    JEV_GPU_NAME="RTX 2070"
+VOLUME /data
+EXPOSE 8000
+
+# UUID pinning: the CUDA enumeration order inside WSL2 containers differs from nvidia-smi,
+# and this image has no torch, so the card is selected by UUID (order-independent).
+ENTRYPOINT ["/pin_gpu_uuid.sh", "fastjev-serve"]
+CMD ["--host", "0.0.0.0", "--allow-unauthenticated"]

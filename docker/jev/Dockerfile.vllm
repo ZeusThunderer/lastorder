@@ -1,0 +1,15 @@
+# Experimental vLLM variant of the FastJev server (T-005): checks the ARCHITECTURE §8
+# assumption "vLLM on Turing does not work" with vllm==0.29.0, which fastjev 0.2.0 pins.
+# Kept for the record even if the torch image (Dockerfile) is the one wired into compose.
+FROM python:3.12-slim
+
+RUN pip install --no-cache-dir 'fastjev[api,vllm]==0.2.0'
+
+ENV HF_HOME=/data/hf \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_DISABLE_PROGRESS_BARS=1
+VOLUME /data
+EXPOSE 8000
+
+ENTRYPOINT ["fastjev-serve"]
+CMD ["--host", "0.0.0.0", "--allow-unauthenticated"]
