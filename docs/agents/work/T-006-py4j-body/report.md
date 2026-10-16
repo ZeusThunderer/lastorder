@@ -130,3 +130,12 @@ $ uv run pytest
 $ docker compose -f docker/compose.yml run -T --rm mind-1 python - < dev/body_smoke.py
 … все шаги [ok], smoke passed
 ```
+
+### Вызовы надзора
+- 2026-10-16 · result · 1db9b24 · VERDICT: blocked (ревью «T-006: review round 2», f6a4d7b:
+  код принят, эквивалент смоука признан, blocker/major нет; headless-профиль сам не может
+  прогнать docker и `python tools/check.py` — ограничение прав, не код; при зелёных прогонах
+  надзор обещает accept) · cost_usd: ? (вывод CLI не распарсен).
+- Замечено: `dev/call_supervisor.sh` парсит вывод через голый `python`, который на этом
+  хосте — заглушка Windows Store (exit 49), поэтому VERDICT/cost в stdout не попадают;
+  вердикт живёт в review.md. Правка скрипта вне «Можно трогать» обеих задач.
