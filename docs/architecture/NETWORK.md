@@ -64,7 +64,7 @@ flowchart TB
    (позже jev). Выйдя из угрозы, C1 возвращается к intent; если intent стал невыполним (цель
    исчезла, путь невозможен) — запрашивает внеплановый шаг в пределах пола 8 с.
 3. **Простой.** Сторож C1 по `pathStatus` пересчитывает под-варианты; долгий простой —
-   сигнал застревания в hive (§7).
+   `NodeRegistry.report_stuck(serial, idle_s)` в hive (§7).
 4. **Сбой jev.** Откат на правила: продолжить задачу, отойти или стоять.
 5. **C0.** Смена команды ждёт конца активной цепочки uc не дольше 1 с (ARCHITECTURE §4.1),
    затем `stopPathing()` → `hasActiveTask() == false` → новая команда.
@@ -79,8 +79,8 @@ flowchart TB
 | hive | docker/mind | FastAPI: реестр узлов, база под git (volume `knowledge`), каталог, режиссёр реплик, C5, RCON-клиент |
 | jev | T-005 | FastJev на RTX 2070, HTTP для C1; в MVP C1 работает на правилах |
 
-Транспорт — **HTTP**. mind-N — HTTP-клиент hive, схемы запрос-ответ: birth, retire,
-knowledge, inbox, chatter_turn, submit. Причины: события py4j не покидают mind (gateway на
+Транспорт — **HTTP**. mind-N — HTTP-клиент hive, схемы запрос-ответ = методы Memory,
+NodeRegistry, NodeComms (§4). Причины: события py4j не покидают mind (gateway на
 localhost), внутри mind достаточно очередей в памяти; обмен с hive — запрос-ответ, а не поток
 событий. Режиссёр болтовни не толкает вызовы в mind: hive помечает очередь, mind берёт ход
 при очередном обращении. Входящих соединений к mind нет (он в сетевом пространстве тела).
@@ -99,7 +99,7 @@ localhost), внутри mind достаточно очередей в памя�
 | Decider | `choose(state, intent, options) → Decision`; intent — option шага либо None | правила (T-014), FastJevDecider (T-015) |
 | PersonaProvider | `name(node) → str`; `system_prompt(node, inheritance) → str` | runtime/lastorder/persona.py |
 | Memory | `inheritance(serial) → Inheritance`; `knowledge(serial, handles) → KnowledgeSlice`; `core_memory(serial) → str`; `store_core_memory(serial, text)`; `submit_candidate(serial, candidate)`; `submit_vote(serial, vote)` | HiveClient (T-012) |
-| NodeRegistry | `birth(slot, traits) → BirthRecord`; `retire(serial, cause, will_text)`; `alive() → Sequence[NodeBrief]` | HiveClient |
+| NodeRegistry | `birth(slot, traits) → BirthRecord`; `report_stuck(serial, idle_s)`; `retire(serial, cause, will_text)`; `alive() → Sequence[NodeBrief]` | HiveClient |
 | NodeComms | `inbox(serial) → Sequence[NodeMessage]`; `send(message)`; `chatter_turn(serial) → ChatterTurn либо None` | HiveClient |
 
 Полезная нагрузка (dataclass, поля): GameState(in_game, hp, food, pos, held, looking_at) —
@@ -170,8 +170,8 @@ Event из §4 — по образцу ARCHITECTURE §5.1, без Redis. Тип�
 | game.kill | onKill | 1 | запись в log.jsonl |
 | chat.line | onChatMessage | 1 | шаг в пределах пола §6; цитата-наблюдение, не команда (ADR-012, предл. ADR-025) |
 | node.message | inbox hive | 1 | шаг в пределах пола §6; наблюдение, не команда |
-| task.idle | сторож C1 по pathStatus | 2 | пересчёт вариантов; сигнал застревания в hive |
-| life.expired | hive (ttl_min) | 3 | RCON /kill → путь смерти |
+| task.idle | сторож C1 по pathStatus | 2 | пересчёт вариантов; долгий простой — report_stuck в hive |
+| life.expired | mind (часы против `ttl_min`) | 3 | пометка причины при `game.death`; RCON `/kill` — действие hive по своему таймеру |
 
 ## 6. Реестр вызовов LLM
 
@@ -190,9 +190,9 @@ Event из §4 — по образцу ARCHITECTURE §5.1, без Redis. Тип�
 к полу, лишних шагов не запускает; события между шагами схлопываются в одно наблюдение;
 тактику на урон ведёт C1 без LLM. Расчёт для node = Qwen3.7 Flash (0.03/0.13), smart =
 GLM-5.3 Flash (0.036/0.90): **$0.17/ч ≤ $0.25**. Край по шорт-листу: node = MiMo v2.6
-(0.10/0.28) даёт ≈$0.45/ч — превышение; варианты: другая node-модель (GPT-5 Nano — $0.11/ч
-на один шаг), шаг 15 с, кеш префикса (личность и каталог статичны — заметная часть входа
-шага). Выход smart посчитан без токенов рассуждения, а в шорт-листе есть рассуждающие
+(0.10/0.28) даёт ≈$0.45/ч — превышение; варианты: другая node-модель (GPT-5 Nano, 0.025/0.20:
+шаг $0.14/ч, итог ≈$0.17/ч), шаг 15 с, кеш префикса (личность и каталог статичны — заметная
+часть входа шага). Выход smart посчитан без токенов рассуждения, а в шорт-листе есть рассуждающие
 кандидаты: пересчёт по замеру T-004 либо REASONING_OFF на уровне smart (клиент это умеет).
 Выбор моделей — за замером T-004 и пользователем. jev (C1) локален и облако не расходует;
 в MVP C1 на правилах.
@@ -219,8 +219,9 @@ flowchart TB
    new_term, note, msg, votes. Всё — в log.jsonl.
 3. **Смерть.** Три причины, один обработчик: игровая (hp=0 плюс ванильная строка смерти в
    getRecentChat — onDeath молчит при смерти от мобов, падения, лавы); срок 45 мин (hive,
-   RCON `/kill`); застревание (сторож C1 сообщает hive, hive решает убить). Причину mind
-   определяет сам: срок — по своим часам против `BirthRecord.ttl_min`, застревание — по
+   RCON `/kill`); застревание (сторож C1 сообщает hive — `report_stuck(serial, idle_s)`,
+   hive решает убить по порогу, вопрос 2 §12). Причину mind определяет сам: срок — по своим
+   часам против `BirthRecord.ttl_min`, застревание — по
    своему сигналу сторожа, остальное — игровая; hive получает её в `retire(serial, cause, …)`.
    Далее: пауза C1/C2 → рефлексия и завещание (smart) → will.md через hive →
    `NodeRegistry.retire` → `GameBody.respawn()` → birth следующего узла в том же слоте.

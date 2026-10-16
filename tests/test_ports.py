@@ -82,3 +82,8 @@ def test_memory_methods_carry_the_node_serial():
 def test_decider_receives_the_step_intent():
     params = inspect.signature(ports.Decider.choose).parameters
     assert "intent" in params
+
+
+def test_node_registry_declares_the_stuck_report():
+    params = inspect.signature(ports.NodeRegistry.report_stuck).parameters
+    assert {"serial", "idle_s"} <= set(params)
