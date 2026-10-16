@@ -4,13 +4,13 @@ One object per slot, one place for the E1 traps: commands carry the `@` prefix,
 the gateway is closed with close() and never shutdown(), reconnects back off
 exponentially and end in BodyUnavailable instead of looping, and chat keeps
 uc's service lines flagged for perception to drop. Raw uc names pass through
-untouched; translation is perception's job (ADR-020). Sources: the E1 probe
+untouched; translation is perception's job (ADR-020). The one shared piece is
+is_service_line, imported from runtime/perception/chat.py (T-009). Sources: the E1 probe
 (tools/body_probe.py), docs/agents/unionclef-bridge.md, CLAUDE.md "Ловушки".
 """
 
 from __future__ import annotations
 
-import re
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
@@ -22,21 +22,13 @@ from typing import Any
 from py4j.java_gateway import CallbackServerParameters, GatewayParameters, JavaGateway
 from py4j.protocol import Py4JNetworkError
 
+from runtime.perception.chat import is_service_line
 from runtime.ports import BlockInfo, EntityInfo, Event, GameState, ItemStack
 
 # uc pins the gateway port in altoclef_settings.json; if it is busy uc shifts by +2,
 # and the mind cannot find it — so the compose stack never runs two bodies in one
 # network namespace. The default GatewayParameters port matches 25333.
 GATEWAY_PORT = 25333
-
-_SERVICE_MARKERS = ("[Alto Clef]", "[Tungsten]")
-_COLOR_CODE = re.compile("§.")
-
-
-def is_service_line(text: str) -> bool:
-    """uc prefixes its own bookkeeping with these markers, after the color codes."""
-    stripped = _COLOR_CODE.sub("", text).lstrip()
-    return stripped.startswith(_SERVICE_MARKERS)
 
 
 class BodyUnavailable(RuntimeError):
