@@ -9,7 +9,7 @@
 | T-003 | Замер и снижение ресурсов тела и сервера | E2 | changes | normal | z/T-003-resource-budget |
 | T-004 | Уровни LLM в клиенте и замер моделей-кандидатов | E2 | review | critical | z/T-004-llm-tiers-bench |
 | T-005 | Спайк FastJev на RTX 2070 в Docker | E2 | in_progress | critical | z/T-005-jev-spike-2070 |
-| T-006 | Py4jBody — порт GameBody поверх моста uc | E2 | changes | normal | z/T-006-py4j-body |
+| T-006 | Py4jBody — порт GameBody поверх моста uc | E2 | done | normal | z/T-006-py4j-body |
 | T-007 | Проект знаний, праймера и завещаний (KNOWLEDGE.md v2) | E2 | draft | critical | z/T-007-knowledge-will-design |
 | T-008 | Проект целей сети и общения узлов | E2 | draft | critical | z/T-008-goals-comms-design |
 | T-009 | Режимы восприятия plain/masked и фильтр служебных строк uc | E2 | ready | critical | z/T-009-perception-modes |
