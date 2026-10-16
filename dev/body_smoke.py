@@ -57,6 +57,9 @@ def rcon(command: str) -> str:
 
 
 def wait_busy_clears(body: Py4jBody, timeout: float) -> bool:
+    # An enqueued task registers as active only on a later tick: give it a beat
+    # before polling, or busy() reads False and the wait is over before it began.
+    time.sleep(3)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if not body.busy():
