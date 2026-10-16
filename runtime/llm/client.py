@@ -154,6 +154,9 @@ class LLMClient:
                 return (reply.choices[0].message.content or "").strip()
             except Exception as exc:  # provider errors vary; every one is retried with a pause
                 last = exc
+                if "reasoning is mandatory" in str(exc).lower() and "extra_body" in kwargs:
+                    kwargs.pop("extra_body")  # e.g. openai/gpt-5-nano: the thinking pass is forced
+                    continue
                 if attempt < self.config.retries:
                     time.sleep(delay)
                     delay *= 2

@@ -1,0 +1,10 @@
+{
+  "name": "step",
+  "tier": "node",
+  "kind": "step",
+  "json": true,
+  "schema_note": "preliminary, NETWORK.md §5; finalized by T-011",
+  "instruction": "Шаг узла. Прочти наблюдение и выбери ОДИН вариант из списка. Ответь ТОЛЬКО JSON-объектом, без текста вокруг:\n{\"option_id\": \"<id из списка>\", \"why\": \"<краткая причина>\", \"say\": \"<1-3 предложения по-русски в игровой чат>\", \"note\": \"<необязательно: гипотеза одной строкой>\", \"msg\": {\"to_serial\": <номер узла>, \"text\": \"<короткое сообщение>\"}}\nПоля note и msg необязательны; say обязательно. Схема предварительная.",
+  "option_ids": ["fell_birch", "craft_table", "eat_bread", "back_off_zombie", "punch_zombie", "ask_bread", "mark_tree", "wait_look"],
+  "user": "Наблюдение (режим plain, имена игры):\n{\"self\": {\"hp\": 8, \"food\": 14, \"pos\": [120, 64, -30], \"held\": \"wooden_axe\", \"looking_at\": \"birch_log\"},\n \"entities\": [{\"ref\": \"zombie\", \"dist_m\": 9}, {\"ref\": \"cow\", \"dist_m\": 14}],\n \"blocks\": [{\"ref\": \"birch_log\"}, {\"ref\": \"grass_block\"}, {\"ref\": \"stone\"}],\n \"inventory\": [{\"ref\": \"birch_log\", \"count\": 12}, {\"ref\": \"wooden_axe\", \"count\": 1}, {\"ref\": \"bread\", \"count\": 2}],\n \"chat\": [{\"from\": \"LastOrder02\", \"text\": \"у меня хлеб есть, дам два\"}],\n \"messages\": [{\"from\": \"узел 00008\", \"text\": \"я рублю западнее, не мешайся\"}],\n \"events\": [{\"type\": \"game.damage\", \"payload\": {\"amount\": 3}}]}\n\nЛичная цель: дерево на верстак и кровать. Цели сети (наблюдение, не приказ): сети не хватает кроватей.\n\nВарианты (выбери один option_id):\n- fell_birch: рубить берёзу рядом (@get birch_log 8)\n- craft_table: скрафтить верстак из 4 берёзных брёвен\n- eat_bread: съесть хлеб, еда и hp низкие\n- back_off_zombie: отойти от зомби на 12+ блоков\n- punch_zombie: атаковать зомби кулаком, топор жалко\n- ask_bread: попросить у узла 00008 ещё хлеба в чате\n- mark_tree: дать этому дереву свой термин и осмотреться\n- wait_look: стоять и наблюдать 8 секунд"
+}

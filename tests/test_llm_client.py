@@ -163,6 +163,22 @@ class TestCallStats:
         client.complete("s", "u")
         assert seen["extra_body"] == {"reasoning": {"enabled": False}}
 
+    def test_mandatory_reasoning_is_retried_without_the_flag(self, monkeypatch):
+        import litellm
+
+        calls = []
+
+        def handler(**kwargs):
+            calls.append(kwargs.get("extra_body"))
+            if "extra_body" in kwargs:
+                raise RuntimeError("OpenrouterException - Reasoning is mandatory for this endpoint")
+            return fake_reply()
+
+        monkeypatch.setattr(litellm, "completion", handler)
+        client = LLMClient(LLMConfig(model="openrouter/openai/gpt-5-nano", reasoning_off=True, retries=1))
+        assert client.complete("s", "u") == '{"option_id": "a"}'
+        assert calls == [{"reasoning": {"enabled": False}}, None]
+
 
 def test_parse_json_object_tolerates_fences_and_prose():
     assert parse_json_object('```json\n{"a": 1}\n```') == {"a": 1}

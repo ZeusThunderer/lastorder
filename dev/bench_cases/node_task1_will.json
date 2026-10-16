@@ -1,0 +1,8 @@
+{
+  "name": "task1_will",
+  "tier": "node",
+  "kind": "task1",
+  "json": false,
+  "source": "task1:request 'will' via tools/snapshot_replies.py",
+  "comment": "The request text, observation and style checks come from snapshot_replies at run time."
+}
