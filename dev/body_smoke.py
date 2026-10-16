@@ -20,8 +20,9 @@ import socket
 import struct
 import sys
 import time
+from typing import Literal
 
-from runtime.game import Py4jBody
+from runtime.game import BodyState, Py4jBody
 from runtime.game.py4j_body import is_service_line
 
 FAILURES: list[str] = []
@@ -56,7 +57,7 @@ def rcon(command: str) -> str:
         return raw[12:-2].decode(errors="replace")
 
 
-def wait_busy_clears(body: Py4jBody, timeout: float) -> bool:
+def wait_busy_clears(body: Py4jBody, timeout: float) -> Literal[True]:
     # An enqueued task registers as active only on a later tick: give it a beat
     # before polling, or busy() reads False and the wait is over before it began.
     time.sleep(3)
@@ -65,10 +66,10 @@ def wait_busy_clears(body: Py4jBody, timeout: float) -> bool:
         if not body.busy():
             return True
         time.sleep(5)
-    return body.busy() is False
+    raise TimeoutError(f"task still active after {timeout:.0f}s")
 
 
-def wait_dead(body: Py4jBody, timeout: float):
+def wait_dead(body: Py4jBody, timeout: float) -> BodyState:
     """hp = 0 in getGameState is the death signal that survives mob/fall/lava kills."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -76,7 +77,7 @@ def wait_dead(body: Py4jBody, timeout: float):
         if st.dead:
             return st
         time.sleep(2)
-    return body.state()
+    raise TimeoutError(f"body did not die within {timeout:.0f}s")
 
 
 def main() -> int:

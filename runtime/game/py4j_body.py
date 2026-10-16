@@ -299,6 +299,12 @@ class Py4jBody:
                 pass  # a half-dead gateway must not break teardown
 
     def _call(self, fn: Callable[[Any], Any]) -> Any:
+        """Run one uc call, reconnecting with backoff on Py4JNetworkError.
+
+        The retry repeats the whole call: a command uc already accepted before the
+        error can execute twice. Observation calls are idempotent; `act`, `command`
+        and `respawn` are not, and their callers (C1/T-014) must tolerate a repeat.
+        """
         attempt = 0
         while True:
             try:
@@ -402,7 +408,11 @@ class Py4jBody:
         self._call(lambda mc: mc.ExecuteCommand(cmd))
 
     def act(self, lever: str, args: Mapping[str, Any] | None = None) -> Any:
-        """Pull one lever from LEVERS; returns uc's raw reply for the smoke tests."""
+        """Pull one lever from LEVERS; returns uc's raw reply for the smoke tests.
+
+        A reconnect retries the lever (see _call): a lever uc already accepted may
+        fire twice, so levers must stay tolerable to repeat.
+        """
         handler = LEVERS.get(lever)
         if handler is None:
             raise ValueError(f"unknown lever: {lever!r}")
