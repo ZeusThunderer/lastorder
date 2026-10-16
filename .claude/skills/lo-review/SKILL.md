@@ -1,6 +1,6 @@
 ---
 name: lo-review
-description: Только для роли supervisor (Claude Code). Проверить задачу T-NNN, которую ZCode сдал на проверку (status review) — diff ветки, свои прогоны тестов, чек-лист проекта Last Order, вердикт в review.md, merge при accept. Не применять, если ты ZCode.
+description: Только для роли supervisor (Claude Code). Проверить задачу T-NNN проекта Last Order — сданный результат (режим result, status review: diff ветки, свои прогоны тестов, чек-лист, вердикт в review.md, merge при accept) или план исполнителя до начала работы (режим plan). Также вызывается ZCode headless через dev/call_supervisor.sh. Не применять, если ты ZCode.
 ---
 
 # lo-review — проверить сданную задачу
@@ -9,7 +9,9 @@ description: Только для роли supervisor (Claude Code). Провер
 
 Протокол и чек-лист: `docs/agents/coop-protocol.md`. Шаблон: `docs/agents/work/_templates/review.md`.
 
-## Шаги
+Режим по умолчанию — `result`. Режим `plan` — ниже.
+
+## Шаги (result)
 1. Проверь, что у задачи статус `review`. Если нет — сообщи пользователю и остановись.
 2. Прочитай `task.md`, последний раунд `report.md` и прошлые раунды `review.md`.
 3. `git fetch` при наличии remote, затем `git log main..z/T-NNN-<slug>` и
@@ -38,3 +40,27 @@ description: Только для роли supervisor (Claude Code). Провер
     ZCode: «T-NNN: доработай по review раунд N».
 
 Мерж и удаление ветки — обычная часть протокола. Push в remote — только если пользователь попросил.
+
+## Режим plan
+Исполнитель описал план в `report.md`, раздел `## План N`, статус задачи `in_progress`.
+1. Прочитай `task.md` и последний `## План N`.
+2. Сверь план с критериями приёмки, «Можно трогать», CLAUDE.md и ADR. Проверь, что каждый критерий
+   закрыт шагом плана и тестом, лишних шагов нет, критичные зоны не затронуты.
+3. Допиши в `review.md` раздел `## План N · YYYY-MM-DD · вердикт: ok | revise` с находками
+   `P<N>-<k>` в том же формате, что и `R<N>-<k>`. Статус задачи не меняй.
+4. Закоммить в ветку задачи: `T-NNN: plan review N`, трейлер `Agent: claude`.
+
+## Headless
+Применяется, когда тебя вызвал ZCode через `dev/call_supervisor.sh`, а не оператор. Скрипт уже
+отсёк критичные задачи и проверил лимит раундов.
+- В заголовок раунда допиши `· headless`: `## Раунд N · … · вердикт: … · headless`, `## План N · … · headless`.
+  По этим пометкам скрипт считает лимит.
+- Код не правишь и `lo-direct-edit` не применяешь. Если нашлось основание для прямой правки, нужен
+  выбор оператора или вердикт был бы `reject`, поставь `status: blocked` и строку
+  `Blocked: нужен оператор — <причина>`. Последняя строка ответа — `VERDICT: blocked`.
+- Проверку из задачи, которую не дают запустить права headless-режима, считай непройденной:
+  `blocked`, причина — какая команда не прогнана.
+- `accept` в режиме result — тот же merge, что и в шаге 10. BOARD обновляешь в `main`, как обычно.
+  Ветка после этого — `main`.
+- Без `git push`, без `reset`, `clean`, `rebase`.
+- Последняя строка ответа: `VERDICT: accept | changes | ok | revise | blocked`.

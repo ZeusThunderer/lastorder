@@ -14,3 +14,7 @@ tickets/
 .pytest_cache/
 *.egg-info/
 docker/run/
+# ZCode links Claude's skills into .zcode/skills (junctions) — keep them out of git
+.zcode/skills/lo-plan
+.zcode/skills/lo-review
+.zcode/skills/lo-direct-edit

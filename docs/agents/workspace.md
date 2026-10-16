@@ -19,7 +19,8 @@
 | `task1.md` | домашка курса, сдана — не править |
 | `AGENTS.md` (корень) | вход для ZCode (worker), отсылает к CLAUDE.md. Не путать с `agent/AGENTS.md` из aw |
 | `docs/agents/coop-protocol.md`, `docs/agents/work/` | протокол двух агентов (ADR-019): задачи, отчёты, ревью, журнал прямых правок |
-| `.claude/skills/`, `.zcode/skills/` | скилы Claude (`lo-plan`, `lo-review`, `lo-direct-edit`) и ZCode (`lo-take`, `lo-submit`, `lo-blocked`) |
+| `.claude/skills/`, `.zcode/skills/` | скилы Claude (`lo-plan`, `lo-review`, `lo-direct-edit`) и ZCode (`lo-take`, `lo-submit`, `lo-blocked`, `lo-call-supervisor`). ZCode сам ставит junction-ссылки на скилы Claude в `.zcode/skills/` — они в `.gitignore` |
+| `dev/call_supervisor.sh` | headless-вызов Claude Code из ZCode для проверки плана или результата |
 | `.env` | секреты, игнорируется git. Не читать |
 
 Сокращения в документах: `aw`, `uc`, `nt`, `mca` — rmalde/minecraft-agent (PoC на Mineflayer, локально не лежит).

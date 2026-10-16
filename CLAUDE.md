@@ -12,7 +12,7 @@
   отдельными коммитами `aw-fix:` / `aw-ext:` (ADR-002).
 - `unionclef/` — только чтение: исходники и документация мода. В образ идёт release-jar 1.21.11.
 - `NetTyan/` — справочник (ADR-005): брать идеи, не запускать, не править.
-- Наш код: `runtime/`, `docker/`, `tests/`, `agent/last_order/`.
+- Наш код: `runtime/`, `docker/`, `tests/`, `agent/last_order/`, `dev/` (скрипты разработки).
 - Документация: `docs/architecture/` — архитектура, ADR, память сети (KNOWLEDGE.md);
   `docs/agents/` — заметки для агента; `docs/context/` — исходные переписки (большие, читать точечно).
 
@@ -65,6 +65,8 @@
 - Скилы Claude: `lo-plan`, `lo-review`, `lo-direct-edit`.
 - Код Claude правит сам только через `lo-direct-edit` и только по основаниям из протокола.
   Каждая правка — в DIRECT_EDITS.md. Файлы в `docs/agents/work/` и документы — не прямые правки.
+- ZCode может сам вызвать Claude headless (`dev/call_supervisor.sh`, только некритичное). В таком
+  вызове действует раздел «Headless» скила `lo-review`.
 - ZCode читает корневой AGENTS.md, а тот отсылает сюда: правила в этом файле общие для обоих агентов.
 
 ## Стиль
