@@ -139,3 +139,35 @@ $ docker compose -f docker/compose.yml run -T --rm mind-1 python - < dev/body_sm
 - Замечено: `dev/call_supervisor.sh` парсит вывод через голый `python`, который на этом
   хосте — заглушка Windows Store (exit 49), поэтому VERDICT/cost в stdout не попадают;
   вердикт живёт в review.md. Правка скрипта вне «Можно трогать» обеих задач.
+
+## Раунд 4 · 2026-10-16
+Коммиты: (этот раунд)
+
+### Ответ на ревью
+- R3-1 · fixed · `dev/body_smoke.py`:
+  - мёртвый старт: `wait_in_game` → при `dead` отдельный шаг «respawn (dead at start)»
+    и позиция берётся заново;
+  - goto проверяется по факту: `abs(pos.x − (x+5)) ≤ 2`, иначе `[FAIL]`;
+  - `@get log 1` проверяется приростом брёвен в инвентаре (`+≥1`, иначе `[FAIL]`);
+  - новое: если брёвна уже лежат в инвентаре, `@get log 1` («обеспечить ≥1») честно
+    завершается за 0 с без работы — это поймала новая проверка на живом прогоне
+    (`[FAIL] @get added a log: log count did not grow (before 1, after 1)`), поэтому
+    добавлен шаг очистки инвентаря (rcon kill → wait dead → respawn) перед `@get`.
+  - Прогоны (вывод ключевых шагов; полный — в логе команды из «Проверок»):
+    1) живой старт, инвентарь пуст: `goto moved the body: x moved +5.5`, `@get added a
+       log: +1 log(s)`, kill → dead=True, respawn → hp 20 — «smoke passed»;
+    2) **мёртвый старт** (hp=0.0 с прошлой сессии): `respawn (dead at start)` → hp 20,
+       `goto moved the body: x moved +6.2`, `@get added a log: +1 log(s)` (задача
+       12.3 с), kill → dead, respawn → hp 20 — «smoke passed».
+- R3-2 · fixed · строка в docstring `act`: на мёртвом теле uc отвечает `ok: True`,
+  задача не встаёт — вызывающий сначала смотрит `state().dead` (заметка для C1/T-014).
+
+### Проверки
+```
+$ uv run pytest
+60 passed
+$ uv run python tools/check.py
+Every workplace is intact: files present, links resolve, boxes parse.
+$ docker compose -f docker/compose.yml run -T --rm mind-1 python - < dev/body_smoke.py
+… см. прогоны 1–2 выше, оба «smoke passed», 0 FAIL
+```

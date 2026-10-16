@@ -419,7 +419,9 @@ class Py4jBody:
         """Pull one lever from LEVERS; returns uc's raw reply for the smoke tests.
 
         A reconnect retries the lever (see _call): a lever uc already accepted may
-        fire twice, so levers must stay tolerable to repeat.
+        fire twice, so levers must stay tolerable to repeat. And on a dead body uc
+        answers ok: True while no task starts — the caller watches state().dead
+        first (a note carried to C1/T-014).
         """
         handler = LEVERS.get(lever)
         if handler is None:

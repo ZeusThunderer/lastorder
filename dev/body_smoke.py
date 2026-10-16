@@ -80,6 +80,27 @@ def wait_dead(body: Py4jBody, timeout: float) -> BodyState:
     raise TimeoutError(f"body did not die within {timeout:.0f}s")
 
 
+def count_logs(inv) -> int:
+    return sum(s.count for s in inv if s.name.endswith("_log"))
+
+
+def assert_goto_arrived(after: BodyState, x: int) -> str:
+    # uc answers ok:True for a goto that never starts (e.g. on a dead body),
+    # so the smoke checks the ground truth: the body actually stands near x+5.
+    if abs(after.pos[0] - (x + 5)) > 2:
+        raise AssertionError(f"x={after.pos[0]:.1f}, expected within 2 blocks of {x + 5}")
+    return f"x moved {after.pos[0] - x:+.1f} (goal +5, tolerance 2)"
+
+
+def assert_log_gained(inv_after, logs_before) -> str:
+    if logs_before is None:
+        raise AssertionError("baseline log count unknown")
+    gained = count_logs(inv_after or ()) - logs_before
+    if gained < 1:
+        raise AssertionError(f"log count did not grow (before {logs_before}, after {count_logs(inv_after or ())})")
+    return f"+{gained} log(s)"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--wait", type=int, default=900, help="seconds to wait for the client to join")
@@ -91,16 +112,33 @@ def main() -> int:
         if st is None:
             return 1
         step("bind_callbacks", lambda: body.bind_callbacks())
-        step("state", lambda: body.state())
+        if st.dead:
+            # A corpse from a previous session still counts as in game; goto on it
+            # silently no-ops, so the smoke starts from a living body.
+            st = step("respawn (dead at start)", lambda: body.respawn())
+            if st is None:
+                return 1
 
+        logs_before = step("logs in inventory before @get", lambda: count_logs(body.inventory()))
         x, y, z = (int(c) for c in st.pos)
         step("act goto +5 x", lambda: body.act("goto", {"x": x + 5, "y": y, "z": z}))
         step("goto finished", lambda: wait_busy_clears(body, 180))
-        step("state after goto", lambda: body.state())
+        after = step("state after goto", lambda: body.state())
+        if after is not None:
+            step("goto moved the body", lambda: assert_goto_arrived(after, x))
 
+        if (logs_before or 0) >= 1:
+            # @get log 1 means "ensure >= 1 log in inventory": with a log already held
+            # it finishes in 0.0 s without doing any work, so clear the inventory first.
+            name = os.environ.get("MC_USERNAME", "LastOrder01")
+            step("clear inventory for @get (rcon kill)", lambda: rcon(f"kill {name}"))
+            step("wait dead after clear", lambda: wait_dead(body, 60))
+            step("respawn after clear", lambda: body.respawn())
+            logs_before = 0
         step("command get log 1", lambda: body.command("get log 1"))
         step("get finished", lambda: wait_busy_clears(body, 300))
-        step("inventory after @get", lambda: body.inventory())
+        inv_after = step("inventory after @get", lambda: body.inventory())
+        step("@get added a log", lambda: assert_log_gained(inv_after, logs_before))
         chat = step("recent_chat", lambda: body.recent_chat(5))
         if chat is not None:
             print("       service flags:", [(line[:40], is_service_line(line)) for line in chat])
