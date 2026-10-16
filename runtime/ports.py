@@ -31,6 +31,31 @@ class GameState:
 
 
 @dataclass(frozen=True)
+class EntityInfo:
+    """One entity from getEntitiesInfo: raw game names, perception maps them later."""
+
+    kind: str
+    name: str
+    dist_m: float
+
+
+@dataclass(frozen=True)
+class BlockInfo:
+    """One block from getBlocksAround: display name as the body reports it."""
+
+    name: str
+
+
+@dataclass(frozen=True)
+class ItemStack:
+    """One inventory slot from getInventoryFull."""
+
+    name: str
+    count: int
+    slot: int = -1
+
+
+@dataclass(frozen=True)
 class Event:
     """Event envelope (NETWORK.md section 5), after the ARCHITECTURE 5.1 shape."""
 
@@ -183,6 +208,9 @@ class GameBody(Protocol):
     """The body of one slot: uc over py4j (T-006), or a stub in tests."""
 
     def state(self) -> GameState: ...
+    def entities(self, radius: int = 16) -> Sequence[EntityInfo]: ...
+    def blocks_around(self, radius: int = 4) -> Sequence[BlockInfo]: ...
+    def inventory(self) -> Sequence[ItemStack]: ...
     def recent_chat(self, lines: int = 5) -> Sequence[str]: ...
     def act(self, lever: str, args: Mapping[str, Any] | None = None) -> None: ...
     def busy(self) -> bool: ...
@@ -192,9 +220,11 @@ class GameBody(Protocol):
 
 @runtime_checkable
 class Decider(Protocol):
-    """C1 tactic pick: rules today, FastJev behind the same port later (T-015)."""
+    """C1 tactic pick among sub-variants of the step's option; None intent means survival."""
 
-    def choose(self, state: GameState, options: Sequence[Option]) -> Decision: ...
+    def choose(
+        self, state: GameState, intent: Option | None, options: Sequence[Option]
+    ) -> Decision: ...
 
 
 @runtime_checkable
@@ -207,12 +237,16 @@ class PersonaProvider(Protocol):
 
 @runtime_checkable
 class Memory(Protocol):
-    """A node's view of the shared base, served by hive (ADR-017)."""
+    """A node's view of the shared base, served by hive (ADR-017). The serial is explicit:
+    the writer of records, evidence and votes is the node, and hive cannot know it from
+    the connection."""
 
     def inheritance(self, serial: int) -> Inheritance: ...
-    def knowledge(self, handles: Sequence[str]) -> KnowledgeSlice: ...
-    def submit_candidate(self, candidate: KnowledgeCandidate) -> None: ...
-    def submit_vote(self, vote: Vote) -> None: ...
+    def knowledge(self, serial: int, handles: Sequence[str]) -> KnowledgeSlice: ...
+    def core_memory(self, serial: int) -> str: ...
+    def store_core_memory(self, serial: int, text: str) -> None: ...
+    def submit_candidate(self, serial: int, candidate: KnowledgeCandidate) -> None: ...
+    def submit_vote(self, serial: int, vote: Vote) -> None: ...
 
 
 @runtime_checkable

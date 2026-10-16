@@ -28,7 +28,7 @@
 |---|---|---|---|---|---|---|---|
 | C0 рефлекс | внутри uc | тик 20 Гц | тик игры | ввод в игре: цепочки выживания активной задачи | — | ничего вне мода | падает вместе с клиентом: перезапуск body-N, mind на паузе |
 | C1 тактика | mind-N | 1–4 Гц + события | компактное состояние, активная задача, события | рычаг или altoclef-команда | правила, затем jev | владение телом (в памяти mind) | 250 мс → правила: продолжить задачу, отойти или стоять; `@gamer` не даём |
-| C2 шаг | mind-N | 8–15 с + события (урон, новое, чат, сообщение узла) | наблюдение §5, личность, core memory, знания о видимых, наследие, цели сети, inbox | StepReply §5: option (исполняет C1), say, new_term, note, msg, votes | node | log.jsonl шага | 30 с → повтор с паузой (2 повтора); 3 подряд — узел «ждёт» |
+| C2 шаг | mind-N | 8–15 с, пол 8 с + события (урон, новое, чат, сообщение узла) | наблюдение §5, личность, core memory, знания о видимых, наследие, цели сети, inbox | StepReply §5: option (исполняет C1), say, new_term, note, msg, votes | node | log.jsonl шага | 30 с → повтор с паузой (2 повтора); 3 подряд — узел «ждёт» |
 | C3 общение | mind-N + режиссёр в hive | по событию | inbox, ход болтовни, контекст нити | реплика в игровой чат или Мисака-нет | node (болтовня в лимите) | реплики в log.jsonl | LLM или лимит — реплика пропускается |
 | C4 рефлексия, завещание | mind-N | 5–10 мин; рождение и смерть | события с оценкой важности, note-ы, core memory | core memory ≤1.5 KB; ≤3 кандидата; при смерти will.md; при рождении личная цель | smart | core memory, will и кандидаты — через hive | окно пропускается; при смерти — аварийное завещание из шаблона |
 | C5 сеть | hive | минуты | сводка базы: голоса, статусы, evidence; сводка смертей и прогресса | 1–3 цели сети; консолидация; каталог | правила + редкий smart | единственный писатель базы (git), реестр, цели | smart недоступен — правила; LLM-окно пропускается |
@@ -49,15 +49,25 @@ flowchart TB
     MIND --> NODE
     MIND --> SMART
     MIND --> JEV
+    HIVE --> SMART
     HIVE -->|"RCON /kill"| MC
     UC <-->|"игровой протокол"| MC
 ```
 
-**Арбитраж C0/C1/C2.** Телом управляет C1, и только он. C0 (цепочки uc внутри активной
-задачи) не прерывается: смена команды атомарна — `stopPathing()` → `hasActiveTask() == false`
-→ новая команда. C2 игровых команд не шлёт: его выбор (`option`) — вход для C1. C3 и C4 телом
-не управляют. `@gamer` и прочие «знающие игру» команды узлу не предлагаются: откат C1 на
-правила — продолжить задачу, отойти от угрозы или стоять.
+**Арбитраж C0/C1/C2.** Телом управляет C1, и только он; C2 игровых команд не шлёт, C3 и C4
+телом не управляют. `@gamer` и прочие «знающие игру» команды узлу не предлагаются.
+
+1. **Штатно.** Выбор шага (`option`) — намерение (intent) для C1. Под-варианты C1 строит в
+   рамках этого option (идти, бить, отойти) и выбирает среди них:
+   `Decider.choose(state, intent, options)`; intent = None, когда шага нет — режим выживания.
+2. **Угроза.** По урону C1 вправе отступить от intent без LLM: уклонение или бой на правилах
+   (позже jev). Выйдя из угрозы, C1 возвращается к intent; если intent стал невыполним (цель
+   исчезла, путь невозможен) — запрашивает внеплановый шаг в пределах пола 8 с.
+3. **Простой.** Сторож C1 по `pathStatus` пересчитывает под-варианты; долгий простой —
+   сигнал застревания в hive (§7).
+4. **Сбой jev.** Откат на правила: продолжить задачу, отойти или стоять.
+5. **C0.** Смена команды ждёт конца активной цепочки uc не дольше 1 с (ARCHITECTURE §4.1),
+   затем `stopPathing()` → `hasActiveTask() == false` → новая команда.
 
 ## 3. Процессы и транспорт
 
@@ -85,17 +95,19 @@ localhost), внутри mind достаточно очередей в памя�
 
 | Порт | Методы | Реализации |
 |---|---|---|
-| GameBody | `state() → GameState`; `recent_chat(lines=5) → Sequence[str]`; `act(lever, args)`; `busy() → bool`; `stop()`; `respawn()` | Py4jBody (T-006), заглушки в тестах |
-| Decider | `choose(state, options) → Decision` | правила (T-014), FastJevDecider (T-015) |
+| GameBody | `state() → GameState`; `entities(radius=16) → Sequence[EntityInfo]`; `blocks_around(radius=4) → Sequence[BlockInfo]`; `inventory() → Sequence[ItemStack]`; `recent_chat(lines=5) → Sequence[str]`; `act(lever, args)`; `busy() → bool`; `stop()`; `respawn()` | Py4jBody (T-006), заглушки в тестах |
+| Decider | `choose(state, intent, options) → Decision`; intent — option шага либо None | правила (T-014), FastJevDecider (T-015) |
 | PersonaProvider | `name(node) → str`; `system_prompt(node, inheritance) → str` | runtime/lastorder/persona.py |
-| Memory | `inheritance(serial) → Inheritance`; `knowledge(handles) → KnowledgeSlice`; `submit_candidate(candidate)`; `submit_vote(vote)` | HiveClient (T-012) |
+| Memory | `inheritance(serial) → Inheritance`; `knowledge(serial, handles) → KnowledgeSlice`; `core_memory(serial) → str`; `store_core_memory(serial, text)`; `submit_candidate(serial, candidate)`; `submit_vote(serial, vote)` | HiveClient (T-012) |
 | NodeRegistry | `birth(slot, traits) → BirthRecord`; `retire(serial, cause, will_text)`; `alive() → Sequence[NodeBrief]` | HiveClient |
 | NodeComms | `inbox(serial) → Sequence[NodeMessage]`; `send(message)`; `chatter_turn(serial) → ChatterTurn либо None` | HiveClient |
 
 Полезная нагрузка (dataclass, поля): GameState(in_game, hp, food, pos, held, looking_at) —
-сырые данные тела, perception обрабатывает их до промпта; Event(id, ts_mono, ts_wall, source,
-type, priority, payload); Option(id, title, lever, args); Decision(option_id, probs,
-confidence); KnowledgeEntry(id, kind, claim, status, about); NetworkGoal(text, why);
+сырые данные тела, perception обрабатывает их до промпта; EntityInfo(kind, name, dist_m),
+BlockInfo(name), ItemStack(name, count, slot) — сырые данные наблюдения до perception;
+Event(id, ts_mono, ts_wall, source, type, priority, payload); Option(id, title, lever, args);
+Decision(option_id, probs, confidence); KnowledgeEntry(id, kind, claim, status, about);
+NetworkGoal(text, why);
 KnowledgeSlice(catalog, network_goals, about, fresh, pending_votes); KnowledgeCandidate(kind,
 claim, about, evidence_event_ids); Vote(entry_id, accept, why); BirthRecord(serial, born_at,
 ttl_min); NodeBrief(serial, slot); NodeMessage(from_serial, to_serial, text, ts);
@@ -134,16 +146,16 @@ StepReply(option_id, why, say, new_term, note, msg, votes).
 
 ### Ответ шага (выход C2)
 
-Схема — StepReply из §4, финальные правила ставит T-011. `option` — один из ≤8 вариантов,
-построенных кодом; `say` — 1–3 предложения в манере пресета (ADR-018); `msg` — попутное
-сообщение другому узлу (ADR-022, 0 дополнительных вызовов); `votes` — попутные голоса по
-кандидатам hive.
+Схема — StepReply из §4; ключи JSON совпадают с полями dataclass (`option_id`, `to_serial`);
+финальные правила ставит T-011. `option` — один из ≤8 вариантов, построенных кодом; `say` —
+1–3 предложения в манере пресета (ADR-018); `msg` — попутное сообщение другому узлу (ADR-022,
+0 дополнительных вызовов); `votes` — попутные голоса по кандидатам hive.
 
 ```json
-{"option": "approach_3", "why": "…", "say": "…",
+{"option_id": "approach_3", "why": "…", "say": "…",
  "new_term": {"handle": "ent:3c1d", "term": "ночной стон"},
  "note": "стонущий бьёт на сближении",
- "msg": {"to": 8, "text": "у спавна стонущий"},
+ "msg": {"to_serial": 8, "text": "у спавна стонущий"},
  "votes": [{"entry_id": "k-0042", "accept": true, "why": "видел то же"}]}
 ```
 
@@ -153,11 +165,11 @@ Event из §4 — по образцу ARCHITECTURE §5.1, без Redis. Тип�
 
 | Тип | Источник | priority | Эффект |
 |---|---|---|---|
-| game.damage | onDamage, опрос hp | 2 | шаг вне таймера; уклонение C1 |
+| game.damage | onDamage, опрос hp | 2 | уклонение C1 без LLM; шаг — в пределах пола §6 |
 | game.death | hp=0 + ванильная строка в чате | 3 | путь смерти §7 |
 | game.kill | onKill | 1 | запись в log.jsonl |
-| chat.line | onChatMessage | 1 | шаг; наблюдение, не команда (ADR-012) |
-| node.message | inbox hive | 1 | шаг; наблюдение, не команда |
+| chat.line | onChatMessage | 1 | шаг в пределах пола §6; цитата-наблюдение, не команда (ADR-012, предл. ADR-025) |
+| node.message | inbox hive | 1 | шаг в пределах пола §6; наблюдение, не команда |
 | task.idle | сторож C1 по pathStatus | 2 | пересчёт вариантов; сигнал застревания в hive |
 | life.expired | hive (ttl_min) | 3 | RCON /kill → путь смерти |
 
@@ -168,19 +180,22 @@ Event из §4 — по образцу ARCHITECTURE §5.1, без Redis. Тип�
 
 | Вызов | Контур | Уровень | Триггер | Частота на 3 узла | Токены вх/вых | $/ч |
 |---|---|---|---|---|---|---|
-| шаг | C2 | node | 8–15 с, события | ~1080/ч (по ~360 на узел) | 2500/200 | 0.109 |
+| шаг | C2 | node | 8–15 с, пол 8 с; события | ≤1350/ч (потолок 450 на узел) | 2500/200 | 0.136 |
 | рефлексия (периодическая и при рождении) | C4 | smart | 5–10 мин; birth | ~33/ч | 4000/600 | 0.023 |
 | завещание (финальная рефлексия) | C4 | smart | смерть | ~9/ч (поколение ~20 мин) | 3000/300 | 0.003 |
 | цели и консолидация | C5 | smart | раз в ~15 мин | 4/ч на сеть | 5000/800 | 0.004 |
 | болтовня | C3 | node | очередь режиссёра | ≤30/ч на сеть (лимит) | 1200/150 | 0.002 |
 
-Расчёт для node = Qwen3.7 Flash (0.03/0.13), smart = GLM-5.3 Flash (0.036/0.90). Итого
-**$0.14/ч ≤ $0.25**. Край по шорт-листу: node = MiMo v2.6 (0.10/0.28) даёт ~$0.37/ч —
-превышение; варианты: другая node-модель (GPT-5 Nano — $0.11/ч на один шаг), шаг 15 с (−35%
-стоимости шага), кеш префикса (личность и каталог статичны — это заметная часть входа шага).
+Потолок шага задан в §2: минимальный интервал 8 с — событие только приближает следующий шаг
+к полу, лишних шагов не запускает; события между шагами схлопываются в одно наблюдение;
+тактику на урон ведёт C1 без LLM. Расчёт для node = Qwen3.7 Flash (0.03/0.13), smart =
+GLM-5.3 Flash (0.036/0.90): **$0.17/ч ≤ $0.25**. Край по шорт-листу: node = MiMo v2.6
+(0.10/0.28) даёт ≈$0.45/ч — превышение; варианты: другая node-модель (GPT-5 Nano — $0.11/ч
+на один шаг), шаг 15 с, кеш префикса (личность и каталог статичны — заметная часть входа
+шага). Выход smart посчитан без токенов рассуждения, а в шорт-листе есть рассуждающие
+кандидаты: пересчёт по замеру T-004 либо REASONING_OFF на уровне smart (клиент это умеет).
 Выбор моделей — за замером T-004 и пользователем. jev (C1) локален и облако не расходует;
-в MVP C1 на правилах. События участят шаг — частота 360/ч на узел уже с запасом (шаг каждые
-10 с при окне 8–15 с).
+в MVP C1 на правилах.
 
 ## 7. Жизненный цикл узла
 
@@ -204,9 +219,11 @@ flowchart TB
    new_term, note, msg, votes. Всё — в log.jsonl.
 3. **Смерть.** Три причины, один обработчик: игровая (hp=0 плюс ванильная строка смерти в
    getRecentChat — onDeath молчит при смерти от мобов, падения, лавы); срок 45 мин (hive,
-   RCON `/kill`); застревание (сторож C1 сообщает hive, hive решает убить). Далее: пауза
-   C1/C2 → рефлексия и завещание (smart) → will.md через hive → `NodeRegistry.retire` →
-   `GameBody.respawn()` → birth следующего узла в том же слоте.
+   RCON `/kill`); застревание (сторож C1 сообщает hive, hive решает убить). Причину mind
+   определяет сам: срок — по своим часам против `BirthRecord.ttl_min`, застревание — по
+   своему сигналу сторожа, остальное — игровая; hive получает её в `retire(serial, cause, …)`.
+   Далее: пауза C1/C2 → рефлексия и завещание (smart) → will.md через hive →
+   `NodeRegistry.retire` → `GameBody.respawn()` → birth следующего узла в том же слоте.
 4. **Аварийное завещание.** LLM не ответила за таймаут — will.md пишется из шаблона: черты,
    причина смерти, последнее действие, обращение к наследнику. Смерти без завещания не бывает.
 
@@ -226,11 +243,15 @@ node в жёстком лимите CHATTER_CALLS_PER_HOUR; очередь, вы
 не команда (как ADR-012 для чата). Детали — T-008, T-017.
 
 **Знания и завещания (ADR-017, ADR-020).** Кандидаты приходят попутно (note шага) и из
-рефлексии; hive проверяет на дубль (тот же about и похожий claim — дубликат становится
-evidence), ставит hypothesis, раздаёт ≤2 кандидата на голосование попутно. confirmed = 1
-независимое evidence или 2 голоса «за»; retired — опровергнуто дважды. Праймер — стартовые
+рефлексии — все через `Memory.submit_candidate(serial, …)`: note — с kind danger или fact по
+выбору узла, new_term — с kind=term (hive сам связывает handle и термин); формат записи —
+T-007. Hive проверяет на дубль (тот же about и похожий claim — дубликат становится evidence),
+ставит hypothesis, раздаёт ≤2 кандидата на голосование попутно. confirmed = 1 независимое
+evidence или 2 голоса «за» без «против»; retired — опровергнуто дважды. Праймер — стартовые
 записи базы (автор primer, статус confirmed, бюджет токенов). Завещание — will.md в базе,
-наследник получает его в inheritance. Пишет базу только hive. Детали — KNOWLEDGE.md, T-007.
+наследник получает его в inheritance. Core memory — файл узла в hive (KNOWLEDGE §1, слой 2):
+чтение и запись — `core_memory(serial)` и `store_core_memory(serial, text)`, лимит 1.5 KB
+применяет hive. Пишет базу только hive. Детали — KNOWLEDGE.md, T-007.
 
 ## 9. Ресурсы, отказы, наблюдаемость
 
@@ -308,6 +329,8 @@ evidence), ставит hypothesis, раздаёт ≤2 кандидата на 
    подтвердить (§6).
 6. Если замер T-004 выберет MiMo на уровень node — превышение $0.25/ч (§6): шаг 15 с или
    другая модель?
+7. Чат игроков во входе шага C2 — цитата-наблюдение с защитами §2 (предлагаемый ADR-025,
+   уточнение ADR-012): подтвердить у пользователя.
 
 ## Предлагаемые ADR
 
@@ -315,3 +338,10 @@ evidence), ставит hypothesis, раздаёт ≤2 кандидата на 
   события — очереди в памяти mind (py4j на localhost). ADR-006 писался для стримерского
   рантайма, его откат («очереди в памяти») здесь основной вариант. Redis возвращается с
   появлением событий между процессами (стрим-режиссёр, Telegram). Вносит надзор.
+- **ADR-025. Чат во входе шага — наблюдение (уточнение ADR-012 для сети).** ADR-012 запрещает
+  C1 и C2 подписку на `ev.chat` — для сети это слишком широко: прототип строит шаг на
+  наблюдении с чатом. Предложение: чат игрока допустим в наблюдении шага C2 и как его
+  триггер, при трёх защитах: варианты строит код (≤8, без свободных команд и без `@gamer`);
+  чат в промпте — цитата-наблюдение; триггер по чату не чаще пола шага (§6). Инъекция
+  «чат нажал кнопку» остаётся невозможной по построению. Вносит надзор после подтверждения
+  пользователем (§12, вопрос 7).

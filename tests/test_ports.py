@@ -59,3 +59,26 @@ def test_each_port_declares_at_least_one_method():
 def test_step_reply_matches_the_documented_schema():
     fields = {f.name for f in dataclasses.fields(ports.StepReply)}
     assert fields == set(STEP_REPLY_FIELDS)
+
+
+def test_game_body_declares_the_observation_getters():
+    methods = {m for m in vars(ports.GameBody) if not m.startswith("_")}
+    assert {"state", "entities", "blocks_around", "inventory", "recent_chat"} <= methods
+
+
+def test_memory_methods_carry_the_node_serial():
+    for name in (
+        "inheritance",
+        "knowledge",
+        "core_memory",
+        "store_core_memory",
+        "submit_candidate",
+        "submit_vote",
+    ):
+        params = inspect.signature(getattr(ports.Memory, name)).parameters
+        assert "serial" in params, name
+
+
+def test_decider_receives_the_step_intent():
+    params = inspect.signature(ports.Decider.choose).parameters
+    assert "intent" in params
