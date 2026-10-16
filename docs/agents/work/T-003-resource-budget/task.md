@@ -2,7 +2,7 @@
 id: T-003
 title: Замер и снижение ресурсов тела и сервера
 stage: E2
-status: ready
+status: in_progress
 criticality: normal
 branch: z/T-003-resource-budget
 created: 2026-10-16
