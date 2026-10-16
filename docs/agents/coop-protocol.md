@@ -63,6 +63,7 @@ docs/agents/work/
 | Переход | Кто |
 |---|---|
 | `draft → ready` | Claude, только если критерии приёмки проверяемы |
+| `draft → queued`, `queued → ready` | Claude. `queued` — описание окончательное, критерии проверяемы, но задача ждёт задач из поля `after:` frontmatter. В `ready` переводится, когда все они `done`. `dev/task_worktree.sh` задачу в `queued` не берёт |
 | `ready → in_progress`, `changes → in_progress` | ZCode |
 | `in_progress → review` | ZCode |
 | `review → changes` / `accepted` / `rejected` | Claude |

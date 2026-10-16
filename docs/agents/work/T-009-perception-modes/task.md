@@ -32,6 +32,7 @@ created: 2026-10-16
 - `tests/test_perception.py` — дополнять; существующие проверки masked не ослаблять и не удалять
 - `tests/test_perception_plain.py`, `tests/test_perception_chat.py` (новые)
 - `runtime/config.py` — только чтение `PERCEPTION_MODE`
+- `runtime/game/py4j_body.py` — только замена `is_service_line` на импорт из `runtime/perception/chat.py`
 - файлы задачи
 
 Нельзя трогать:
@@ -66,3 +67,8 @@ python tools/check.py
 - Никаких вызовов LLM.
 
 ## Заметки надзора
+- 2026-10-17: после постановки задачи T-006 добавила `is_service_line()` в
+  `runtime/game/py4j_body.py:36` (маркеры `[Alto Clef]`, `[Tungsten]`, срез кодов `§`). Тело
+  помечает строки флагом `service`, фильтрует perception. В `runtime/perception/chat.py` сделать
+  единую реализацию; `py4j_body.py` можно перевести на импорт из perception, это входит в «Можно трогать».
+  Других правок в `runtime/game/` не делать.
