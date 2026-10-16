@@ -51,7 +51,10 @@ hmc.mcdir=/data/.minecraft
 hmc.java.versions=/opt/java/openjdk/bin/java
 hmc.auto.download.java=false
 hmc.jline.enabled=false
-hmc.jvmargs=-Xmx${BODY_XMX} -Xms${BODY_XMS:-256M}
+# Native-memory caps: metaspace and the code cache are uncapped by default, and glibc
+# keeps up to 8 arenas per thread (MALLOC_ARENA_MAX comes from compose); with Xmx ≤ 1G
+# they decide whether the body fits the T-003 idle budget.
+hmc.jvmargs=-Xmx${BODY_XMX} -Xms${BODY_XMS:-256M} -XX:MaxMetaspaceSize=256M -XX:ReservedCodeCacheSize=128M
 hmc.exit.on.failed.command=true
 PROPS
 

@@ -13,10 +13,11 @@ x-body: &body
       condition: service_healthy
   mem_limit: 2g
   environment: &body-env
-    BODY_XMX: "${BODY_XMX:-1G}"
+    BODY_XMX: "${BODY_XMX:-768M}"   # same default as the body Dockerfile ENV (review R1-2)
     BODY_RENDER_DISTANCE: "${BODY_RENDER_DISTANCE:-2}"
     BODY_SIM_DISTANCE: "${BODY_SIM_DISTANCE:-5}"   # vanilla client minimum; lower falls back to 12
     BODY_MAX_FPS: "${BODY_MAX_FPS:-10}"
+    MALLOC_ARENA_MAX: "2"   # glibc arenas: 8 per thread by default, 2 is plenty for a JVM body
 
 services:
   mc-server:

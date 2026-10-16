@@ -86,3 +86,39 @@ $ docker compose -f docker/compose.yml up mind-1  # tools/body_probe.py --kill
 ### Вызовы надзора
 - 2026-10-16 — попытка headless-ревью отклонена самим скриптом: diff задевает `docker/`
   (критичная зона по протоколу), нужна обычная проверка оператором/Claude.
+
+## Раунд 2 · 2026-10-16
+Коммиты: (этот раунд)
+
+### Ответ на ревью
+- R1-1 · fixed · цель «тело ≤ 1,2 ГБ в покое» теперь реально достигнута, а не объявлена.
+  К раунду 1 добавлены: `BODY_XMX=768M` и нативные лимиты — `-XX:MaxMetaspaceSize=256M`,
+  `-XX:ReservedCodeCacheSize=128M` в jvmargs (entrypoint), `MALLOC_ARENA_MAX=2` (compose).
+  Замеры тела на финальном конфиге (Xmx768M + нативные лимиты, rd2/sd5/fps10):
+
+  | Состояние | Раунд 1 (Xmx1G) | Финал (Xmx768M + лимиты) |
+  |---|---|---|
+  | покой после входа | 1170–1305 МиБ | **1078–1118 МиБ** |
+  | покой сразу после `body_probe --kill` (методика надзора) | 1451 МиБ (замер надзора) | **1099 МиБ** |
+  | `@get log 3` в процессе (пустой инвентарь, свежая местность) | 1355 МиБ | **1118–1122 МиБ** |
+
+  `tools/body_probe.py --kill` на этом конфиге — 30 шагов [ok], 0 FAIL, exit 0.
+  Дефолты закреплены без env-переопределений и проверены живым стартом. Компромисс
+  зафиксирован в docker-topology.md: куча 768M впритык для длинных сессий с большой
+  базой, ручка `BODY_XMX` в compose перекрывает дефолт без пересборки.
+- R1-2 · fixed · дефолт `BODY_XMX=768M` теперь один в обоих местах: compose (x-body)
+  и `ENV` Dockerfile; проверено стартом без переопределений (`-Xmx768M -Xms256M
+  -XX:MaxMetaspaceSize=256M -XX:ReservedCodeCacheSize=128M` в config.properties).
+- R1-3 · fixed · `parse_mem` разбирает число и единицу регуляркой; проверено на
+  `0B / 0B`, `1234MiB`, `1.55GiB`, `976KiB`, `3.2GB` (вывод ниже).
+
+### Проверки
+```
+$ uv run python -c 'from dev.measure_resources import parse_mem; …'
+0B / 0B -> 0.000; 1234MiB -> 1234.000; 1.55GiB -> 1587.200; 976KiB -> 0.953; 3.2GB -> 3276.800
+$ uv run pytest / uv run python tools/check.py
+28 passed / Every workplace is intact
+$ docker compose -f docker/compose.yml build body-1 && up -d body-1   # дефолты
+$ docker compose -f docker/compose.yml up mind-1                       # probe --kill: 0 FAIL
+$ uv run python dev/measure_resources.py …                             # таблицы выше
+```

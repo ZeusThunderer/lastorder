@@ -29,5 +29,6 @@ RUN chmod +x /opt/body/entrypoint.sh
 
 # /data keeps downloaded versions, libraries and the game dir between restarts (one volume per body).
 VOLUME /data
-ENV HOME=/data MC_VERSION=1.21.11 BODY_RENDER=headless BODY_XMX=2G
+# The heap default matches compose (x-body BODY_XMX): one value, two places, kept equal (T-003).
+ENV HOME=/data MC_VERSION=1.21.11 BODY_RENDER=headless BODY_XMX=768M
 ENTRYPOINT ["/opt/body/entrypoint.sh"]

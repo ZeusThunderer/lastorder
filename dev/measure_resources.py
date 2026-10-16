@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import statistics
 import subprocess
 import sys
@@ -22,21 +23,25 @@ import time
 
 MEM_UNITS = {  # to MiB
     "b": 1 / 1024**2,
-    "kb": 1 / 1024,
-    "mb": 1.0,
-    "gb": 1024.0,
-    "tb": 1024.0**2,
-    "kib": 1 / 1024,
-    "mib": 1.0,
-    "gib": 1024.0,
-    "tib": 1024.0**2,
+    "kb": 1 / 1024, "kib": 1 / 1024,
+    "mb": 1.0, "mib": 1.0,
+    "gb": 1024.0, "gib": 1024.0,
+    "tb": 1024.0**2, "tib": 1024.0**2,
+    "pb": 1024.0**3, "pib": 1024.0**3,
 }
+_MEM_USED_RE = re.compile(r"^\s*([0-9]*\.?[0-9]+)\s*([a-z]*)", re.IGNORECASE)
 
 
 def parse_mem(value: str) -> float:
-    """'1234MiB / 3GiB' -> 1234.0 (MiB, the used part only)."""
-    used = value.split("/")[0].strip()
-    number, unit = used[:-3], used[-3:].lower()
+    """'1234MiB / 3GiB' -> 1234.0 (MiB, the used part only).
+
+    A freshly started container can report '0B / 0B': number first, unit second,
+    both taken by the pattern rather than by slicing fixed widths.
+    """
+    m = _MEM_USED_RE.match(value.split("/")[0])
+    if not m:
+        raise ValueError(f"cannot parse memory value {value!r}")
+    number, unit = m.group(1), m.group(2).lower() or "b"
     if unit not in MEM_UNITS:
         raise ValueError(f"unknown memory unit in {value!r}")
     return float(number) * MEM_UNITS[unit]
