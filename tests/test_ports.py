@@ -84,6 +84,6 @@ def test_decider_receives_the_step_intent():
     assert "intent" in params
 
 
-def test_node_registry_declares_the_stuck_report():
-    params = inspect.signature(ports.NodeRegistry.report_stuck).parameters
-    assert {"serial", "idle_s"} <= set(params)
+def test_node_registry_declares_the_death_request():
+    params = inspect.signature(ports.NodeRegistry.request_death).parameters
+    assert {"serial", "cause"} <= set(params)
