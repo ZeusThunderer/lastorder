@@ -18,3 +18,4 @@ docker/run/
 .zcode/skills/lo-plan
 .zcode/skills/lo-review
 .zcode/skills/lo-direct-edit
+.worktrees/

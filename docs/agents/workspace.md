@@ -21,6 +21,8 @@
 | `docs/agents/coop-protocol.md`, `docs/agents/work/` | протокол двух агентов (ADR-019): задачи, отчёты, ревью, журнал прямых правок |
 | `.claude/skills/`, `.zcode/skills/` | скилы Claude (`lo-plan`, `lo-review`, `lo-direct-edit`) и ZCode (`lo-take`, `lo-submit`, `lo-blocked`, `lo-call-supervisor`). ZCode сам ставит junction-ссылки на скилы Claude в `.zcode/skills/` — они в `.gitignore` |
 | `dev/call_supervisor.sh` | headless-вызов Claude Code из ZCode для проверки плана или результата |
+| `dev/task_worktree.sh`, `dev/merge_task.sh`, `dev/tasks.sh`, `dev/on_main.sh` | параллельные задачи: worktree на задачу, merge под блокировкой `main`, реальные статусы и синхронизация BOARD |
+| `.worktrees/` | worktree задач, игнорируется git. Корень всегда на `main` |
 | `.env` | секреты, игнорируется git. Не читать |
 
 Сокращения в документах: `aw`, `uc`, `nt`, `mca` — rmalde/minecraft-agent (PoC на Mineflayer, локально не лежит).

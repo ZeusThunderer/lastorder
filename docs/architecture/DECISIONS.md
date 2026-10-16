@@ -230,7 +230,8 @@ GPU свободен для LLM. **Риск:** uc без OpenGL может не 
 **Решение.** Код пишет ZCode (worker), Claude Code ставит задачи, проверяет и мержит (supervisor).
 - Обмен — файлы в git (`docs/agents/work/T-NNN-*/task.md|report.md|review.md`); задачи между
   харнессами передаёт человек.
-- Одна задача — одна ветка `z/T-NNN-<slug>`. В `main` ZCode не коммитит.
+- Одна задача — одна ветка `z/T-NNN-<slug>` и свой worktree `.worktrees/T-NNN-<slug>`: задачи идут
+  параллельно, корень всегда на `main`. В `main` ZCode не коммитит, merge — скриптом под блокировкой.
 - Claude правит код сам только по четырём основаниям: критичная зона, два раунда без исправления,
   блокер, приёмочный тест-контракт. Каждая правка — запись `D-NNN` в `docs/agents/work/DIRECT_EDITS.md`
   и трейлер `Agent: claude-direct`.

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Headless supervisor call from ZCode: Claude Code CLI, Opus, medium effort.
-# Protocol: docs/agents/coop-protocol.md, "Вызов надзора из ZCode". Run from the repo root (Git Bash on Windows).
+# Protocol: docs/agents/coop-protocol.md, "Вызов надзора из ZCode". Run from the task worktree
+# .worktrees/T-NNN-<slug> (Git Bash on Windows), never from the repo root.
 #   dev/call_supervisor.sh plan   T-NNN   # review the plan in report.md (status in_progress)
 #   dev/call_supervisor.sh result T-NNN   # review the submitted work (status review)
 set -uo pipefail
@@ -10,7 +11,9 @@ die() { echo "call_supervisor: $*" >&2; exit 2; }
 mode="${1:-}"; id="${2:-}"
 [[ "$mode" =~ ^(plan|result)$ ]] || die "usage: dev/call_supervisor.sh plan|result T-NNN"
 [[ "$id" =~ ^T-[0-9]{3}$ ]] || die "bad task id '$id'"
-[ -f CLAUDE.md ] && [ -d docs/agents/work ] || die "run from the repo root"
+[ -f CLAUDE.md ] && [ -d docs/agents/work ] || die "run from the top of the task worktree"
+root="$(git worktree list --porcelain | sed -n '1s/^worktree //p')"
+[ "$(git rev-parse --show-toplevel)" != "$root" ] || die "run from the task worktree .worktrees/$id-*, not from the repo root"
 command -v claude >/dev/null || die "claude CLI not found in PATH"
 
 shopt -s nullglob
@@ -58,7 +61,7 @@ out="$(claude -p "$prompt" \
   --model opus --effort medium \
   --permission-mode dontAsk \
   --allowedTools Read Grep Glob Edit Write Skill \
-    "Bash(git *)" "Bash(uv run *)" "Bash(python tools/*)" \
+    "Bash(git *)" "Bash(uv run *)" "Bash(python tools/*)" "Bash(bash dev/*)" \
   --disallowedTools "Bash(git push*)" "Bash(git reset*)" "Bash(git clean*)" "Bash(git branch -D*)" \
     "Bash(git checkout -- *)" "Bash(git restore*)" "Bash(git rebase*)" \
   --max-budget-usd "${SUPERVISOR_BUDGET_USD:-3}" \

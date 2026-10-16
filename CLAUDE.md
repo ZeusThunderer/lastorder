@@ -67,6 +67,8 @@
 ## Два агента (ADR-019)
 Код пишет ZCode (worker), Claude Code — надзор: ставит задачи, проверяет, мержит.
 - Протокол — docs/agents/coop-protocol.md, задачи — docs/agents/work/.
+- Корень репозитория всегда на `main`. Каждая задача — свой worktree `.worktrees/T-NNN-<slug>`
+  (`dev/task_worktree.sh`). Merge — только `dev/merge_task.sh`, статусы — `dev/tasks.sh`.
 - Скилы Claude: `lo-plan`, `lo-review`, `lo-direct-edit`.
 - Код Claude правит сам только через `lo-direct-edit` и только по основаниям из протокола.
   Каждая правка — в DIRECT_EDITS.md. Файлы в `docs/agents/work/` и документы — не прямые правки.
