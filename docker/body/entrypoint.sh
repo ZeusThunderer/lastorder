@@ -24,17 +24,19 @@ cat > "$GAME/altoclef/altoclef_settings.json" <<JSON
 }
 JSON
 
-if [ ! -f "$GAME/options.txt" ]; then
-  cat > "$GAME/options.txt" <<OPT
+# options.txt is rewritten on every start like every other file: a volume from an
+# older stand must not pin stale render settings. The body does not need to see far,
+# and a low fps cap is plenty for uc. simulationDistance stays at the vanilla
+# minimum: the client rejects lower values and falls back to the default 12 (T-003).
+cat > "$GAME/options.txt" <<OPT
 pauseOnLostFocus:false
 onboardAccessibility:false
-renderDistance:4
-simulationDistance:5
-maxFps:20
+renderDistance:${BODY_RENDER_DISTANCE:-2}
+simulationDistance:${BODY_SIM_DISTANCE:-5}
+maxFps:${BODY_MAX_FPS:-10}
 soundCategory_master:0.0
 narrator:0
 OPT
-fi
 
 LWJGL=""
 if [ "$BODY_RENDER" = "headless" ]; then
@@ -49,7 +51,10 @@ hmc.mcdir=/data/.minecraft
 hmc.java.versions=/opt/java/openjdk/bin/java
 hmc.auto.download.java=false
 hmc.jline.enabled=false
-hmc.jvmargs=-Xmx${BODY_XMX} -Xms512M
+# Native-memory caps: metaspace and the code cache are uncapped by default, and glibc
+# keeps up to 8 arenas per thread (MALLOC_ARENA_MAX comes from compose); with Xmx ≤ 1G
+# they decide whether the body fits the T-003 idle budget.
+hmc.jvmargs=-Xmx${BODY_XMX} -Xms${BODY_XMS:-256M} -XX:MaxMetaspaceSize=256M -XX:ReservedCodeCacheSize=128M
 hmc.exit.on.failed.command=true
 PROPS
 
