@@ -107,3 +107,30 @@ Blocked: нужен оператор — headless-надзор не может �
 
 ### Чек-лист проекта
 Без замечаний.
+
+## Раунд 4 · 2026-10-16 · вердикт: accept
+Проверено: `git diff ddecbb4..4c402d5` и полный `git diff main...z/T-006-py4j-body` @ 4c402d5
+
+### Проверки (прогнаны надзором)
+- `uv run pytest` — 60 passed.
+- `python tools/check.py` — все рабочие места целы.
+- `docker compose -f docker/compose.yml run --build -T --rm mind-1 python - < dev/body_smoke.py` — «smoke passed», 0 FAIL:
+  - `goto moved the body`: x +6.4 (цель +5, допуск 2);
+  - очистка инвентаря через kill/respawn, затем `@get log 1` → `+4 log(s)` за 53 с;
+  - kill → `dead=True hp=0.0`, respawn → hp 20;
+  - строки `[Alto Clef]`/`[Tungsten]` все `service=True`, ванильные — False.
+
+### Ответ на находки раунда 3
+- R3-1 · закрыта: мёртвый старт → respawn, смещение по x и прирост брёвен проверяются по факту.
+- R3-2 · закрыта: строка в docstring `act`.
+
+### Критерии приёмки
+- [x] все семь.
+
+### Находки
+- R4-1 · minor · `dev/body_smoke.py:137` · после очистки `logs_before = 0` подставляется, а не
+  перемеряется: при `keepInventory=true` брёвна останутся, `@get` завершится без работы, а шаг
+  засчитает прирост. Сейчас на стенде keepInventory выключен (прирост +4 за 53 с). Не блокирует.
+
+### Чек-лист проекта
+Без замечаний.
