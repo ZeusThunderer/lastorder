@@ -29,5 +29,7 @@ created: 2026-10-16
   или аварийным завещанием.
 - [ ] `docker stats` трёх слотов в отчёте, в пределах бюджета T-003.
 - [ ] Секреты только через env, новых bind-mount нет.
+- [ ] `.env.example`: node = `openrouter/qwen/qwen3.7-flash`, smart = `openrouter/deepseek/deepseek-v4.1-flash`
+  (выбор пользователя, NETWORK.md §6; закрывает T-004 R1-1).
 
 ## Заметки надзора

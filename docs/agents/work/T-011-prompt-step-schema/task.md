@@ -16,7 +16,7 @@ created: 2026-10-16
 JSON по схеме с валидацией.
 
 ## Контекст
-- После T-007, T-008, T-009. Модель уровня `node` — из отчёта T-004.
+- После T-007, T-008, T-009. Модель уровня `node` — `openrouter/qwen/qwen3.7-flash` (выбор пользователя по T-004, NETWORK.md §6).
 - ADR-018, ADR-020, ADR-021, ADR-022; текущие `agent/last_order/prompt_template.md`,
   `runtime/lastorder/persona.py` (строгая подстановка, комментарий шаблона вырезается).
 
