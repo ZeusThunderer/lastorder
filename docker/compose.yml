@@ -73,13 +73,13 @@ services:
       - 0.0.0.0
       - --allow-unauthenticated
       - --model
-      - ${JEV_MODEL:-openbmb/MiniCPM5-2B}
+      - ${JEV_MODEL:-Qwen/Qwen3-0.6B}
       - --revision
-      - ${JEV_REVISION:-12a3808a956f869c767195e9266b59c4d21d92e2}
+      - ${JEV_REVISION:-c1899de289a04d12100db370d81485cdf75e47ca}
       - --served-model
       - fastjev-2070
       - --served-model-description
-      - ${JEV_DESCRIPTION:-MiniCPM5-2B BF16 torch direct option-logit on the RTX 2070}
+      - ${JEV_DESCRIPTION:-Qwen3-0.6B BF16 torch direct option-logit on the RTX 2070}
       - --served-model-release-date
       - "2026-10-16"
     ports:
