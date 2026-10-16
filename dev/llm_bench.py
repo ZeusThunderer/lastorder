@@ -235,6 +235,7 @@ def main() -> int:
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--max-usd", type=float, default=0.5)
     ap.add_argument("--out", help="raw JSONL path; default docs/agents/llm-bench/raw/<date>-<tier>.jsonl")
+    ap.add_argument("--from", dest="from_file", help="recompute the summary from a saved raw JSONL, no calls")
     ap.add_argument("--report-md", action="store_true", help="print a markdown metrics table")
     args = ap.parse_args()
 
@@ -249,6 +250,16 @@ def main() -> int:
     os.environ.setdefault("LLM_SMART_MAX_TOKENS", "2000")
 
     models = [m.strip() for m in args.models.split(",")] if args.models else DEFAULT_MODELS[args.tier]
+
+    if args.from_file:
+        records = [json.loads(line) for line in Path(args.from_file).read_text(encoding="utf-8").splitlines()]
+        models = [m for m in models if any(r["model"] == m for r in records)]
+        summary = summarize(models, records, args.tier)
+        print_summary(summary)
+        if args.report_md:
+            print_markdown(summary)
+        return 0
+
     persona = persona_system()
     perception = Perception(SAMPLE, salt="snapshot")
     cases = load_cases(args.tier, persona, perception)
@@ -314,14 +325,14 @@ def main() -> int:
     print(f"calls: {len(records)} (failed {sum(1 for r in records if not r.get('ok'))}), spent ${spent:.4f}"
           + (", STOPPED on budget" if stopped else ""))
 
-    summary = summarize(models, records)
+    summary = summarize(models, records, args.tier)
     print_summary(summary)
     if args.report_md:
         print_markdown(summary)
     return 0
 
 
-def summarize(models: list[str], records: list[dict]) -> list[dict]:
+def summarize(models: list[str], records: list[dict], tier: str) -> list[dict]:
     rows = []
     for model in models:
         mine = [r for r in records if r["model"] == model]
@@ -349,18 +360,21 @@ def summarize(models: list[str], records: list[dict]) -> list[dict]:
             "cyr": statistics.mean([s for s in shares if s is not None]) if any(s is not None for s in shares) else float("nan"),
             "style": len(style),
             "style_kinds": sorted({f.split("=")[0].split(":")[0] for f in style}),
-            "usd_h": dollars_per_hour(model, ok),
+            "usd_h": dollars_per_hour(model, tier, ok),
         })
     return rows
 
 
-def dollars_per_hour(model: str, ok_records: list[dict]) -> float | None:
+def dollars_per_hour(model: str, tier: str, ok_records: list[dict]) -> float | None:
+    """3-node $/h of the calls of one tier: measured tokens per bench case, nominal for the rest."""
     prices = PRICE_TABLE.get(model)
     if not prices:
         return None
     pin, pout = prices
     total = 0.0
-    for kind, tier, per_hour, in_nom, out_nom in REGISTRY:
+    for kind, reg_tier, per_hour, in_nom, out_nom in REGISTRY:
+        if reg_tier != tier:
+            continue
         mine = [r for r in ok_records if r["case"] == kind]
         if mine and all(r["stats"]["prompt_tokens"] for r in mine):
             in_t = statistics.mean(r["stats"]["prompt_tokens"] for r in mine)
