@@ -1,0 +1,69 @@
+# T-008. Отчёт исполнителя
+
+## Раунд 1 · 2026-10-17
+Коммиты: 34410db (документ), далее схемы и тесты.
+
+### Сделано
+- `docs/architecture/GOALS_COMMS.md` (новый, 277 строк): §1 цели сети — сигналы без LLM (лестница
+  прогресса из 5 ступеней по сводке живых и базе, пробелы базы, топ причин смертей за окно),
+  детерминированная таблица «сигнал → цель», выбор ≤3 и приоритет, TTL цели 60 мин, точное условие
+  вызова `smart` (0 целей | топ-2 смертей в пределах 1.5× | падение ступени без смертей), вход
+  `CouncilInput` и выход `CouncilOutput`, бюджет 5000/800, сбой → правила, иначе прежние; формат
+  `NetworkGoal` и блок промпта «совет сети»; §2 личная цель (рождение, пересмотр, core memory,
+  полосы trust_in_chat_and_nodes со словами для промпта, без чисел в речи); §3 попутные сообщения
+  (каналы net/chat, `to` = номер|all, доставка в наблюдении следующего шага, лимиты 4/мин и 160
+  символов, TTL 600 c, логи); §4 типы координации и отсутствие пути «сообщение → рычаг»; §5
+  болтовня (события открытия нити, выбор говорящего, K=6, таймаут 180 c, лимиты 30/ч сеть и 15/ч
+  узел, вход/выход вызова 1200/150, 4 антизеркальных правила — все проверяются кодом, ход по
+  ADR-024); §6 видимость игрокам (что уходит в чат, общий `SAY_MIN_INTERVAL_S` = 20, приоритет
+  очереди, пресет ADR-018); §7 карта схем и канонические примеры JSON; §8 реестр вызовов — новых
+  нет, цели smart ≤4/ч, болтовня node ≤30/ч.
+- `runtime/hive/__init__.py`, `runtime/hive/goals_schema.py`: `GoalSignal`, `NetworkGoalRecord`,
+  `CouncilInput`, `CouncilOutput`, `DeathCount`, `KbGap`, `LivingStatus`; константы лимитов и
+  `LADDER`; строгие `from_dict` (мусор → `GoalSchemaError`).
+- `runtime/comms/__init__.py`, `runtime/comms/schema.py`: `OutboundMessage` (канал + тип +
+  адресат), `ChatterReply`, `ChatterLine`, `ChatterThread` (для knowledge-нитей `quote` и
+  `quote_entry_id` обязательны — правило 4 зашито в схему); константы лимитов со значениями по
+  умолчанию.
+- `tests/test_goals_comms_schema.py`: 48 тестов — все канонические примеры документа разбираются
+  (метки `<!-- schema:… -->`; набор меток = набор схем), битые мутации отклоняются, константы
+  сверены с NETWORK §6, документ ≤ 300 строк и называет каждую константу.
+- `docs/architecture/NETWORK.md` — только §8: две ссылки на GOALS_COMMS.md.
+
+### Предложения по runtime/ports.py (по задаче, менять нельзя)
+1. **P1 · MessageDraft → OutboundMessage.** Поле `msg` шага по GOALS_COMMS.md §3 несёт `to`
+   (номер или `all`), `channel` (`net`|`chat`), `type` (4 типа координации) и `text`.
+   `MessageDraft(to_serial, text)` не хватает канала и типа; предложить замену на
+   `runtime.comms.schema.OutboundMessage` (from_serial проставляет mind).
+2. **P2 · ChatterTurn и chatter_turn.** Для исполнения хода нужны история нити и цитата:
+   расширить `ChatterTurn` полями `thread_id, channel, quote, history: tuple[ChatterLine, ...]`;
+   сигнатуру — `chatter_turn(serial, last_line: ChatterLine | None = None) -> ChatterTurn | None`
+   (ответ сдаётся тем же обращением, ADR-024, без входящих соединений).
+3. **P3 · сводка живых.** Сигналы лестницы и событие «встреча» (§5) требуют инвентаря и позиций
+   живых узлов в hive. Предлагаю попутно, без нового эндпоинта: необязательный аргумент
+   `Memory.knowledge(serial, handles, status: LivingStatus | None = None)`; hive обновляет сводку
+   живых при каждом обращении mind.
+4. **P4 · NodeMessage.** Добавить поле `msg_type`, чтобы получатель видел тип сообщения без
+   разбора текста (типы координации §4).
+
+### Проверки
+```
+$ uv run pytest
+123 passed
+$ uv run python tools/check.py
+CHARACTERS: last_order, vesper
+Every workplace is intact: files present, links resolve, boxes parse.
+```
+
+### Отклонения от задачи
+- Нет.
+
+### Вне задачи
+- В `runtime/comms/schema.py` `SAY_MIN_INTERVAL_S = 20` дублирует дефолт T-014 (env): одна
+  величина в двух местах; при реализации T-017 свести к одному источнику (env).
+
+### Вопросы
+- Нет.
+
+### Вызовы надзора
+- нет.
