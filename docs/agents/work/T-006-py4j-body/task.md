@@ -2,7 +2,7 @@
 id: T-006
 title: Py4jBody — порт GameBody поверх моста uc
 stage: E2
-status: review
+status: blocked
 criticality: normal
 branch: z/T-006-py4j-body
 created: 2026-10-16
@@ -68,3 +68,5 @@ docker compose -f docker/compose.yml run --rm mind-1 python dev/body_smoke.py
 - Никаких вызовов LLM.
 
 ## Заметки надзора
+Blocked: нужен оператор — headless-надзор не может прогнать `docker compose … run --rm mind-1 python dev/body_smoke.py`
+(отказ в правах), живой критерий не подтверждён надзором. Код и юнит-тесты — без blocker/major, см. review.md раунд 1.
