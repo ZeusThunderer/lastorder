@@ -2,7 +2,7 @@
 id: T-002
 title: Архитектура сети узлов (NETWORK.md) и порты
 stage: E2
-status: done
+status: changes
 criticality: critical
 branch: z/T-002-network-architecture
 created: 2026-10-16
