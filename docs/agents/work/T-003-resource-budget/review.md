@@ -44,3 +44,40 @@
 ### Чек-лист проекта
 Без замечаний: правки в пределах «Можно трогать», сеть, порты, volumes, `network_mode` и
 `RCON_PASSWORD` не тронуты, bind-mount не добавлены, LF сохранён.
+
+## Раунд 2 · 2026-10-16 · вердикт: accept
+Проверено: `git diff 29e10e7..b0e2206` и полный `git diff main...z/T-003-resource-budget` @ b0e2206, `docker/` построчно.
+
+### Проверки (прогнаны надзором)
+- `uv run pytest` — 28 passed.
+- `python tools/check.py` — все рабочие места целы.
+- `docker compose -f docker/compose.yml build` — body и mind собраны.
+- `docker compose -f docker/compose.yml up -d --force-recreate mc-server body-1` — у живого java в теле
+  `-Xmx768M -Xms256M -XX:MaxMetaspaceSize=256M -XX:ReservedCodeCacheSize=128M`, `MALLOC_ARENA_MAX=2`.
+- `docker compose -f docker/compose.yml up mind-1` — `body_probe.py --kill` целиком, 0 FAIL, exit 0.
+- `uv run python dev/measure_resources.py --samples 12 --interval 5`, покой сразу после пробы:
+
+| service | RAM avg | RAM max | CPU avg | CPU max |
+|---|---|---|---|---|
+| mc-server | 1438 MiB | 1454 MiB | 3.9% | 4.6% |
+| body-1 | 1154 MiB | 1192 MiB | 30.9% | 68.0% |
+
+### Ответ на находки раунда 1
+- R1-1 · закрыта: тело ≤ 1,2 ГБ на итоговом конфиге, подтверждено замером надзора.
+- R1-2 · закрыта: `BODY_XMX=768M` и в compose, и в Dockerfile.
+- R1-3 · закрыта: `parse_mem` разбирает число и единицу регуляркой.
+
+### Критерии приёмки
+- [x] все шесть.
+
+### Находки
+- R2-1 · minor · `docs/agents/docker-topology.md` «Ресурсы» · замер надзора (1154/1192 МиБ) выше
+  диапазона отчёта (1078–1118), запас до 1,2 ГБ — десятки МиБ. Цифра надзора дописана в документ
+  при ревью (документ, не прямая правка кода). Для T-018 (три слота): при росте тела первая ручка —
+  `BODY_XMX`, а не `mem_limit`.
+- R2-2 · minor · `docs/agents/docker-topology.md` · из «Ресурсов» выпала строка «мозг и hive < 0,5 ГБ».
+  Вернуть цифрой после T-012, когда hive появится. Не блокирует.
+
+### Чек-лист проекта
+Без замечаний: правки в пределах «Можно трогать», сеть, порты, volumes, `network_mode`, `RCON_PASSWORD`
+не тронуты, bind-mount не добавлены, новых модов нет.
