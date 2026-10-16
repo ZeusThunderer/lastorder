@@ -70,8 +70,13 @@ $ docker compose -f docker/compose.yml up mind-1  # tools/body_probe.py --kill
   это разовые затраты в volume `body-N`, на RAM в покое не влияет.
 
 ### Вне задачи
-- Registry-таймауты ломают пересборку образов (`python:3.12-slim`, `eclipse-temurin`) —
-  сеть хоста; воспроизводимо в течение дня, сборки удаются со 2-й–3-й попытки.
+- Registry-таймауты ломали пересборку образов (`python:3.12-slim`, `eclipse-temurin`) —
+  сеть хоста. **Починено 2026-10-16 по решению оператора**: Docker Desktop переведён на
+  прокси `socks5://host.docker.internal:25344` (пользовательский SOCKS5 слушает 0.0.0.0:25344;
+  HTTP-порт 25345 только на loopback и демону недоступен). После этого `docker compose build`
+  собирается целиком без ретраев; образы тела и mind пересобраны начисто, стенд поднят на
+  тюнингованном конфиге (проверено: options.txt rd2/sd5/fps10, `hmc.jvmargs=-Xmx1G -Xms256M`,
+  `mem_limit` 2 ГБ, env BODY_*), `tools/body_probe.py --kill` перепрогнан — 0 FAIL, exit 0.
 - Смерть от зомби во время замеров подтверждает: `onDeath` молчит и на смерти от мобов
   (в чате «was slain by Zombie», колбэк не пришёл) — учтено в T-006/T-013.
 
