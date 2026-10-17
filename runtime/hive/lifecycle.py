@@ -38,11 +38,11 @@ from typing import Callable, Mapping
 from runtime.config import env
 from runtime.knowledge.schema import BirthFile, emergency_will
 from runtime.knowledge.slice import format_serial, parse_utc
-from runtime.knowledge.store import KnowledgeStore, UnknownNodeError
+from runtime.knowledge.store import AlreadyRetiredError, KnowledgeStore, UnknownNodeError
 from runtime.lastorder.naming import node_name, preset as naming_preset
 from runtime.lastorder.traits import Traits
 from runtime.ports import BirthRecord, NodeBrief
-from runtime.hive.rcon import RconClient, kill_confirmed
+from runtime.hive.rcon import RconClient, RconError, kill_confirmed
 
 MAX_LIFE_MIN = 45  # CLAUDE.md: forced death after this many minutes; env MAX_LIFE_MIN overrides
 TTL_SCAN_S = 30  # background scan cadence (task T-022); env HIVE_TTL_SCAN_S overrides
@@ -125,7 +125,7 @@ class Lifecycle:
     # --- persistence -----------------------------------------------------------------
 
     def _save(self) -> None:
-        payload = {"nodes": [asdict(n) for n in sorted(self._nodes.values())]}
+        payload = {"nodes": [asdict(n) for n in sorted(self._nodes.values(), key=lambda n: n.serial)]}
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._state_path.with_name(self._state_path.name + ".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -243,9 +243,11 @@ class Lifecycle:
 
     def require_node(self, serial: int) -> NodeState:
         node = self._nodes.get(serial)
-        if node is None:
-            raise UnknownNodeError(f"unknown node {format_serial(serial)}")
-        return node
+        if node is not None:
+            return node
+        if (self._store.root / "nodes" / format_serial(serial) / "will.md").exists():
+            raise AlreadyRetiredError(f"node {format_serial(serial)} is retired")
+        raise UnknownNodeError(f"unknown node {format_serial(serial)}")
 
     def request_death(self, serial: int, cause: str) -> None:
         if cause != CAUSE_STUCK:
