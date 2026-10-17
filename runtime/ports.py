@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
+from runtime.comms.schema import OutboundMessage
 from runtime.lastorder.persona import Inheritance, Node
 from runtime.lastorder.traits import Traits
 
@@ -174,7 +175,7 @@ class ChatterTurn:
     max_lines: int = 1
 
 
-# --- the step reply (schema is preliminary; T-011 finalizes it) --------------------
+# --- the step reply (NETWORK.md section 5; finalized by T-011) ----------------------
 
 
 @dataclass(frozen=True)
@@ -184,21 +185,16 @@ class NewTerm:
 
 
 @dataclass(frozen=True)
-class MessageDraft:
-    """The `msg` field of a step reply; the mind stamps the sender and sends it on."""
-
-    to_serial: int
-    text: str
-
-
-@dataclass(frozen=True)
 class StepReply:
+    """What one step returns. `msg` is a comms OutboundMessage (GOALS_COMMS.md 3):
+    channel, type and the addressee travel with the text; the mind stamps from_serial."""
+
     option_id: str
     why: str
     say: str | None = None
     new_term: NewTerm | None = None
     note: str | None = None
-    msg: MessageDraft | None = None
+    msg: OutboundMessage | None = None
     votes: tuple[Vote, ...] = ()
 
 

@@ -4,17 +4,18 @@ Estimates are offline and conservative on purpose: an overestimate trims a block
 underestimate silently breaks the step-call ceiling. Block constants B_* are the per-block
 budgets of the step prompt, each bound to its real source (tests pin the binding):
 
-- B_PERSONA — the rendered prompt_template.md with an empty inheritance (measured 926 lab /
-  986 misaka, both presets must fit);
+- B_PERSONA — the rendered prompt_template.md with an empty inheritance (measured 1205-1265
+  across presets and perception modes after T-011 added the knowledge-rule variants, step
+  rules and the reply format; both presets and both rules must fit);
 - B_PRIMER — PRIMER_MAX_ENTRIES records of primer/<topic>.json;
 - B_INHERITANCE — INHERITANCE_WILLS wills of at most WILL_BODY_MAX_TOKENS each, plus the
   summaries and terms quotas;
 - B_CORE — CORE_MEMORY_LIMIT_BYTES of pure Cyrillic (the byte-heaviest case).
 
-The honest sum of the ten blocks is 3860, which EXCEEDS STEP_INPUT_BUDGET = 2500 of
-NETWORK.md section 6 by 1360. The ceiling is not raised silently: the conflict and the two
-ways out are recorded in KNOWLEDGE.md section 9 and its "Предлагаемые ADR"; the operator
-decides (spending growth is the operator's call).
+The honest sum of the ten blocks is 4160, under STEP_INPUT_BUDGET = 4500. The ceiling was
+raised from 2500 by the operator's decision of 2026-10-17 (passed through the dispatcher;
+ADR-029), which also let B_PERSONA follow the T-011 template growth. Both constants stay
+bound to their sources: the tests pin the sum and the rendered template.
 """
 
 from __future__ import annotations
@@ -42,10 +43,10 @@ def estimate_tokens(text: str) -> int:
 
 # --- step prompt (KNOWLEDGE.md v2 section 9; ceiling from NETWORK.md section 6) --------
 
-STEP_INPUT_BUDGET = 2500  # ceiling of NETWORK.md section 6; see the module docstring
+STEP_INPUT_BUDGET = 4500  # step input ceiling; operator decision 2026-10-17, ADR-029
 
 # order = prefix-cache order: static-for-life first, per-step last
-B_PERSONA = 1000  # rendered template, empty inheritance; covers both naming presets
+B_PERSONA = 1300  # rendered template, empty inheritance; both presets, both knowledge rules (T-011)
 B_PRIMER = 500  # game basics, plain mode only; PRIMER_MAX_ENTRIES records
 B_INHERITANCE = 920  # wills + predecessor/active summaries + collective terms
 B_CATALOG = 90  # layer-1 catalog snapshot taken at birth
@@ -60,7 +61,7 @@ STEP_BLOCKS_TOTAL = sum(
     value
     for name, value in list(globals().items())
     if name.startswith("B_") and isinstance(value, int)
-)  # 3860 > 2500: the deliberate, documented overflow (KNOWLEDGE.md section 9)
+)  # 4160 <= 4500 after ADR-029 (operator, 2026-10-17): B_PERSONA followed the T-011 template
 
 # --- other calls and files (NETWORK.md section 6; KNOWLEDGE.md v2 sections 5-10) -------
 
