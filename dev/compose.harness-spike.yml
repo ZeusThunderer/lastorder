@@ -1,0 +1,76 @@
+# T-024 harness spike overlay. From the repo root:
+#   docker compose -f docker/compose.yml -f dev/compose.harness-spike.yml up -d mc-server body-1 mind-1
+#   docker compose -f docker/compose.yml -f dev/compose.harness-spike.yml --profile opencode up -d harness
+#
+# mind-1 becomes the minimal body MCP server (runtime/mind/mcp_body.py, T-024) instead of the
+# one-shot body probe. The harness container sits in its OWN `harness-spike` network together
+# with body-1 only (review P2-1): the uc py4j bridge (localhost-only inside body-1's netns)
+# and mc-server's RCON stay unreachable; the spike script verifies both and records the result.
+#
+# The workplace is a throwaway dir on the host (SPIKE_RUN_DIR), built by sister_prompt.py;
+# secrets are passed as single variables, never env_file (review P1-6).
+name: lastorder
+
+services:
+  mind-1:
+    command: ["python", "-m", "runtime.mind.mcp_body"]
+    environment:
+      MC_USERNAME: LastOrder01
+      MCP_BODY_PORT: "8700"
+      MCP_LOG_PATH: /spike-run/mind-calls.jsonl
+      MCP_RESPAWN_DELAY_S: "${MCP_RESPAWN_DELAY_S:-45}"
+    volumes:
+      - mind-spike-run:/spike-run
+    restart: "no"
+
+  body-1:
+    networks: [default, harness-spike]
+
+  harness:
+    build:
+      context: ..
+      dockerfile: dev/harness_spike/Dockerfile
+    image: lastorder-harness:spike
+    networks: [harness-spike]
+    mem_limit: 2g
+    working_dir: /workplace
+    environment:
+      # opencode: the node model straight from OpenRouter for the spike (the gateway is T-026)
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      SPIKE_MINUTES: "${SPIKE_MINUTES:-15}"
+      SPIKE_MODEL: "${SPIKE_MODEL:-openrouter/qwen/qwen3.7-flash}"
+      # zcode: the GLM Coding Plan key through the built-in zai-api provider (step 0)
+      ANTHROPIC_API_KEY: "${ZAI_API_KEY}"
+    command: ["run_opencode.sh"]
+    volumes:
+      - type: bind
+        source: ${SPIKE_RUN_DIR:?set SPIKE_RUN_DIR to the throwaway workplace dir}
+        target: /workplace
+    restart: "no"
+    profiles: ["opencode"]
+
+  harness-zcode:
+    image: lastorder-harness:spike
+    build:
+      context: ..
+      dockerfile: dev/harness_spike/Dockerfile
+    networks: [harness-spike]
+    mem_limit: 2g
+    working_dir: /workplace
+    environment:
+      ANTHROPIC_API_KEY: "${ZAI_API_KEY}"
+      SPIKE_MINUTES: "${SPIKE_MINUTES:-15}"
+    command: ["run_zcode.sh"]
+    volumes:
+      - type: bind
+        source: ${SPIKE_RUN_DIR:?set SPIKE_RUN_DIR to the throwaway workplace dir}
+        target: /workplace
+    restart: "no"
+    profiles: ["zcode"]
+
+networks:
+  harness-spike:
+    name: lastorder-harness-spike
+
+volumes:
+  mind-spike-run:

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "openrouter/qwen/qwen3.7-flash",
+  "autoupdate": false,
+  "share": "disabled",
+  "mcp": {
+    "body": {
+      "type": "remote",
+      "url": "http://body-1:8700/mcp",
+      "enabled": true,
+      "timeout": { "startup": 20000, "catalog": 20000, "execution": 620000 }
+    }
+  }
+}

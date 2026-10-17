@@ -1,0 +1,10 @@
+{
+  "mcpServers": [
+    {
+      "name": "body",
+      "type": "http",
+      "url": "http://body-1:8700/mcp",
+      "headers": []
+    }
+  ]
+}
