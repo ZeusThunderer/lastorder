@@ -348,9 +348,6 @@ def test_respawn_failure_with_hive_down_leaves_the_will_parked(tmp_path):
 # --- the emergency path rides the same rails ---------------------------------------------
 
 
-# --- the emergency path rides the same rails ---------------------------------------------
-
-
 def test_an_emergency_will_still_reaches_retire(tmp_path):
     journal: list[str] = []
     llm = StubLLM(error=RuntimeError("smart tier is down"))

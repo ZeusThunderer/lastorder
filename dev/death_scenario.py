@@ -60,7 +60,7 @@ from runtime.lastorder.lifecycle import Lifecycle
 from runtime.lastorder.naming import preset
 from runtime.lastorder.persona import Node
 from runtime.lastorder.traits import load_quirks, roll
-from runtime.llm.client import LLMClient, LLMConfig
+from runtime.llm.client import LLMClient, LLMConfig, LLMError
 from runtime.ports import BirthRecord
 
 POLL_S = 2.0
