@@ -2,16 +2,37 @@
 birth -> request_death(stuck) -> will -> birth, on the real stack.
 
 Runs inside mind-1 (network_mode: service:body-1), like dev/body_smoke.py; the mind
-image ships runtime/ but not dev/, so the script is piped through stdin:
+image ships runtime/ but not dev/, so the script is piped through stdin. The compose
+service mind-1 passes NO LLM variables (only MC_USERNAME/RCON_*), and the image has no
+repo .env inside, so the smart tier and the provider key must ride along explicitly —
+this is the exact command that works (from the worktree root; the key value is never
+printed, it goes straight from the host .env into the container environment):
 
     docker compose -f docker/compose.yml build mind-1
     docker compose -f docker/compose.yml up -d mc-server hive body-1
-    docker compose -f docker/compose.yml run -T --rm mind-1 python - < dev/death_scenario.py
+    KEY="$(grep '^OPENROUTER_API_KEY=' ../../.env | cut -d= -f2- | tr -d '\\r\\"')" && \\
+    docker compose -f docker/compose.yml run -T --rm \\
+      -e OPENROUTER_API_KEY="$KEY" \\
+      -e LLM_SMART_MODEL=openrouter/deepseek/deepseek-v4.1-flash \\
+      -e LLM_SMART_TIMEOUT_S=90 -e LLM_SMART_MAX_TOKENS=1000 \\
+      -e LLM_SMART_TEMPERATURE=0.7 -e LLM_SMART_REASONING_OFF=1 \\
+      mind-1 python - < dev/death_scenario.py
+
+Without the LLM_* set, for_tier("smart") would fall back to the legacy CORE_LLM_MODEL_NAME
+(a node-level model, not smart) or die — the script refuses early and prints the command
+above instead of quietly writing wills with a wrong-level model. openrouter.ai is
+reachable from the container directly; no proxy variables are passed (the host .env
+proxy points at host loopback and would break the call).
+
+The emergency branch can be demonstrated on the same stand by pointing the smart tier at
+a model that cannot answer (both wills then come from the template, the path still ends
+in `scenario passed`):
+
+    ... -e LLM_SMART_MODEL=openrouter/no-such/model ...
 
 Env: HIVE_URL (default http://hive:8000), MC_USERNAME (the slot, default LastOrder01 —
 the RCON /kill touches this slot only), RCON_HOST/RCON_PASSWORD, RUN_DIR (default run),
-NODE_NAMING_PRESET (default lab); the smart tier comes from the LLM_* env or a repo-root
-.env (config.load_dotenv, no secrets printed).
+NODE_NAMING_PRESET (default lab).
 
 Checks printed at the end: two wills in the knowledge base via the heir's inheritance
 (causes game and stuck), the serial grown by 2, the slot holding exactly the last node,
@@ -117,7 +138,7 @@ def report_rebirth(tag: str, rebirth) -> None:
         f"lifetime_s={will.meta.lifetime_s}",
     )
     if rebirth.emergency:
-        print(f"  emergency reason: {rebirth.error}", flush=True)
+        print(f"  emergency reason: {rebirth.will_error}", flush=True)
     print("  will body:", flush=True)
     for line in will.body.split("\n"):
         print(f"    | {line}", flush=True)
@@ -152,7 +173,21 @@ def main() -> int:
     slot = env("MC_USERNAME") or "LastOrder01"
     run_dir = Path(env("RUN_DIR") or "run")
     naming = preset(env("NODE_NAMING_PRESET", default="lab") or "lab")
-    llm = LLMClient(LLMConfig.for_tier("smart"))
+    try:
+        llm = LLMClient(LLMConfig.for_tier("smart"))
+    except LLMError as exc:
+        # mind-1 carries no LLM_* env and the image has no repo .env (checker C-2):
+        # refuse loudly instead of silently writing wills on a wrong-level model.
+        fail("smart tier config", str(exc))
+        print(
+            "pass the tier explicitly, see the docstring command:\n"
+            "  docker compose -f docker/compose.yml run -T --rm \\\n"
+            "    -e OPENROUTER_API_KEY=... \\\n"
+            "    -e LLM_SMART_MODEL=openrouter/deepseek/deepseek-v4.1-flash \\\n"
+            "    mind-1 python - < dev/death_scenario.py",
+            flush=True,
+        )
+        return 2
     ok("config", f"slot={slot}, preset={naming.key}, smart={llm.config.model}, run_dir={run_dir}")
 
     body = Py4jBody()
@@ -237,11 +272,14 @@ def main() -> int:
 
     total = sum(stats.cost_usd or 0.0 for _, stats in COSTS)
     known = all(stats.cost_usd is not None for _, stats in COSTS) and COSTS
-    check(
-        "llm cost within $0.01",
-        (not known) or total <= 0.01,
-        f"${total:.4f}" + ("" if known else " (provider did not report the price)"),
-    )
+    if not COSTS:
+        ok("llm cost within $0.01", "no successful smart calls — emergency wills only, $0.0000")
+    else:
+        check(
+            "llm cost within $0.01",
+            (not known) or total <= 0.01,
+            f"${total:.4f}" + ("" if known else " (provider did not report the price)"),
+        )
     tokens = sum((stats.completion_tokens or 0) for _, stats in COSTS)
     ok("llm tokens (completion, both wills)", tokens)
 

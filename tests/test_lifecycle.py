@@ -348,6 +348,9 @@ def test_respawn_failure_with_hive_down_leaves_the_will_parked(tmp_path):
 # --- the emergency path rides the same rails ---------------------------------------------
 
 
+# --- the emergency path rides the same rails ---------------------------------------------
+
+
 def test_an_emergency_will_still_reaches_retire(tmp_path):
     journal: list[str] = []
     llm = StubLLM(error=RuntimeError("smart tier is down"))
@@ -355,7 +358,41 @@ def test_an_emergency_will_still_reaches_retire(tmp_path):
     rebirth = life.on_death(node(), birth(), DeathCause("stuck"), reflection(cause="stuck"))
     assert rebirth.emergency is True
     assert rebirth.model == "template"
+    assert rebirth.will_error is not None and "RuntimeError" in rebirth.will_error
     serial, cause, text = registry.retire_calls[0]
     assert (serial, cause) == (14, "stuck")
     assert "голова уже молчит" in text
     assert rebirth.will_delivered is True
+
+
+# --- the race the checker closed (C-3) ---------------------------------------------------
+
+
+def test_retire_down_birth_up_delivers_the_parked_will_after_birth(tmp_path):
+    # The C-3 race: retire raised HiveUnavailable twice (the park and the round),
+    # but hive came back and the very first birth succeeds — the after-birth attempt
+    # delivers the parked will instead of leaving it with nobody to deliver it.
+    journal: list[str] = []
+    registry = FakeRegistry(journal)
+    registry.retire_failures = [HiveUnavailable("read timeout")] * 2
+    life, _, _ = make_life(tmp_path, journal=journal, registry=registry)
+    rebirth = life.on_death(node(), birth(), DeathCause("game"), reflection())
+    assert len(registry.birth_calls) == 1
+    # the park attempt, the round attempt, the after-birth delivery
+    assert len(registry.retire_calls) == 3
+    assert rebirth.will_delivered is True
+    assert not pending_path(tmp_path).exists()
+    assert "log:will.retired" in journal
+
+
+def test_retire_down_birth_up_leaves_the_will_parked_when_hive_is_still_flaky(tmp_path):
+    # The after-birth delivery fails too: the will stays parked, the path completes.
+    journal: list[str] = []
+    registry = FakeRegistry(journal)
+    registry.retire_failures = [HiveUnavailable("read timeout")] * 3
+    life, _, _ = make_life(tmp_path, journal=journal, registry=registry)
+    rebirth = life.on_death(node(), birth(), DeathCause("game"), reflection())
+    assert rebirth.will_delivered is False
+    assert pending_path(tmp_path).exists()
+    assert len(registry.birth_calls) == 1  # the heir is born regardless
+    assert "log:will.still_parked" in journal

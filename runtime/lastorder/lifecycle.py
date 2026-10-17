@@ -63,6 +63,7 @@ class Rebirth:
     emergency: bool
     model: str
     will_delivered: bool  # False when the will is still parked in run/<slot>/pending/
+    will_error: str | None = None  # why the smart reply was refused, when it was
     stats: CallStats | None = None
 
 
@@ -156,6 +157,7 @@ class Lifecycle:
             emergency=written.emergency,
             model=written.model,
             will_delivered=delivered,
+            will_error=written.error,
             stats=written.stats,
         )
 
@@ -216,6 +218,32 @@ class Lifecycle:
         seed = self._seed_factory()
         return roll(seed, load_quirks(self._quirks_path))
 
+    def _deliver_after_birth(self, serial: int, cause: str, will: Will) -> bool:
+        """The race closer (checker C-3): a retire that raised HiveUnavailable can be
+        followed by a birth that already succeeds — hive came back mid-path — and the
+        parked will would outlive the path with nobody left to deliver it. One more
+        attempt right after the successful birth; whatever it answers stands. A
+        permanent 4xx is not retried here (the caller checks given_up_delivery)."""
+        try:
+            self._registry.retire(serial, cause, will.to_markdown())
+            self._unpark(serial)
+            self._log("will.retired", {"serial": serial, "cause": cause, "via": "after_birth"})
+            return True
+        except HiveRejected as exc:
+            if exc.kind == "already_retired":
+                self._unpark(serial)
+                self._log(
+                    "will.retired", {"serial": serial, "cause": cause, "via": "already_retired"}
+                )
+                return True
+            self._log(
+                "will.delivery_rejected",
+                {"serial": serial, "status": exc.status, "kind": exc.kind},
+            )
+        except HiveUnavailable as exc:
+            self._log("will.still_parked", {"serial": serial, "error": str(exc)})
+        return False
+
     def _birth_and_deliver(
         self, serial: int, cause: str, will: Will, traits: Traits, delivered: bool
     ) -> tuple[BirthRecord, bool]:
@@ -253,6 +281,8 @@ class Lifecycle:
             try:
                 record = self._registry.birth(self._slot, traits)
                 self._log("life.birth", {"serial": record.serial, "slot": self._slot})
+                if not delivered and not given_up_delivery:
+                    delivered = self._deliver_after_birth(serial, cause, will)
                 return record, delivered
             except HiveRejected:
                 raise  # permanent: retrying the same payload cannot help
