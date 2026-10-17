@@ -2,7 +2,8 @@
 id: T-010
 title: Праймер — основы Minecraft как стартовая база сети
 stage: E2
-status: in_progress
+status: blocked
+Blocked: свежий праймер ломает 14 негерметичных тестов T-012 — нужен допуск к правке их фикстур; текст записей ждёт подтверждения пользователя.
 criticality: normal
 branch: z/T-010-primer
 created: 2026-10-16
