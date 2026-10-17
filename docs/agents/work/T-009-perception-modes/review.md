@@ -58,3 +58,40 @@
 Без замечаний. LLM-вызовов нет, `unionclef/` и `NetTyan/` не тронуты, изменения в пределах
 «Можно трогать» (в `py4j_body.py` — только импорт вместо копии и строка докстринга), трейлеры
 `Agent: zcode` на месте.
+
+## Раунд 2 · 2026-10-17 · вердикт: accept · headless
+Проверено: `git diff main...z/T-009-perception-modes` @ e220f87, построчно (critical). Ветка
+содержит текущий `main` (4b88a1c).
+
+### Проверки (прогнаны надзором)
+- `uv run pytest` — 293 passed
+- `uv run python tools/check.py` — Every workplace is intact
+- Прогон `pytest` с `PERCEPTION_MODE=masked` в окружении не дали запустить права; тесты, где режим
+  важен, задают его явно или через `monkeypatch`.
+
+### Ответы на находки раунда 1
+- R1-1 · закрыта. `mode=None` → `perception_mode()`, неизвестное значение из env и явное — `ValueError`
+  при создании `Perception`. Тесты `test_default_mode_comes_from_the_environment`,
+  `test_bad_env_mode_fails_at_perception_creation`.
+- R1-2 · закрыта: один список `PERCEPTION_MODES` в `runtime/config.py`.
+- R1-3 · принято как оставлено: ограничение описано в докстринге `normalize`, остаётся за T-002/T-011.
+- R1-4 · закрыта: `str(line)` один раз в начале итерации, тест.
+
+### Критерии приёмки
+- [x] `PERCEPTION_MODE=plain|masked`, по умолчанию `plain`, неизвестное — ошибка при старте.
+- [x] Стабильный ключ в обоих режимах, display-форма и `minecraft:` дают один ключ.
+- [x] `plain`: `see()` даёт ключ, имя и термин в «», `raw()` работает для ключей обоих режимов.
+- [x] `masked`: 8 прежних тестов зелёные, их проверки не тронуты (изменена только фикстура: явный
+  `mode="masked"`); `scrub/leaks` в masked прежние.
+- [x] `chat.py`: `strip_formatting`, `is_service_line` со списком и источником, `clean_chat`.
+- [x] Ни одна служебная строка из образцов не проходит `clean_chat` в обоих режимах.
+
+### Находки
+- R2-1 · minor · вне задачи · `runtime/knowledge/store.py:236` · hive читает `PERCEPTION_MODE` сам,
+  мимо `config.perception_mode()`: опечатка в значении молча даёт «не plain» (праймер не грузится),
+  а не ошибку. · Перевести на `perception_mode()` в задаче, которая трогает hive (T-010 / T-022).
+
+### Чек-лист проекта
+Без замечаний. Сырые id в masked не проходят (тесты на утечки не ослаблены, режим из env
+соблюдается). Служебные строки uc отсекаются в обоих режимах. LLM-вызовов нет. `unionclef/` и
+`NetTyan/` не тронуты. Изменения в пределах «Можно трогать», трейлеры на месте.
