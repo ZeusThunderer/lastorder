@@ -2,7 +2,8 @@
 id: T-011
 title: Промпт узла под режимы восприятия и схема ответа шага
 stage: E2
-status: in_progress
+status: blocked
+Blocked: потолок входа шага 2500 против 3860 из KNOWLEDGE v2 §9 — ждёт решения оператора (заметка надзора от 2026-10-17)
 criticality: critical
 branch: z/T-011-prompt-step-schema
 created: 2026-10-16
