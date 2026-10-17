@@ -40,12 +40,13 @@ class FakeRcon:
     def __init__(self, response: str = "Killed LastOrder01"):
         self.kills: list[str] = []
         self.fail = False
+        self.error = "connection refused"
         self.response = response
 
     def kill(self, player: str) -> str:
         self.kills.append(player)
         if self.fail:
-            raise RconError("connection refused")
+            raise RconError(self.error)
         return self.response
 
 
@@ -156,8 +157,48 @@ def test_offline_player_answer_is_not_a_confirmed_kill(tmp_path: Path) -> None:
 
 def test_kill_confirmed_helper() -> None:
     assert kill_confirmed("Killed LastOrder01")
+    assert kill_confirmed("  killed LastOrder02  ")
     assert not kill_confirmed("No entity was found")
+    assert not kill_confirmed("Unknown or incomplete command, see below for error")  # R1-4
     assert not kill_confirmed("")
+
+
+def test_rcon_failed_event_is_not_spammed(tmp_path: Path) -> None:
+    rcon = FakeRcon()
+    rcon.fail = True
+    store, life, log, clock = make(tmp_path, rcon=rcon)
+    life.birth("LastOrder01", traits())
+    clock.advance(minutes=46)
+    life.scan()
+    life.scan()
+    life.scan()  # the same failure every 30 s is one line, not three (R1-3)
+    assert len([e for e in log.read() if e["type"] == "life.rcon_failed"]) == 1
+    assert len(rcon.kills) == 3  # the kill itself is still retried
+
+    rcon.error = "auth rejected"
+    life.scan()  # a changed failure is a new line
+    assert len([e for e in log.read() if e["type"] == "life.rcon_failed"]) == 2
+
+    rcon.fail = False
+    life.scan()
+    assert life._nodes[1].kill_confirmed  # recovery still works
+    assert "life.killed" in [e["type"] for e in log.read()]
+
+
+def test_no_rcon_password_means_no_kill_no_guess(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("RCON_PASSWORD", raising=False)
+    client = RconClient.from_env()
+    assert client.password == ""  # no fallback default in code (R1-5)
+    with pytest.raises(RconError) as info:
+        client.kill("LastOrder01")
+    assert "RCON_PASSWORD" in str(info.value)
+
+    store, life, log, clock = make(tmp_path, rcon=RconClient.from_env())
+    life.birth("LastOrder01", traits())  # hive starts fine without the password
+    clock.advance(minutes=46)
+    life.scan()  # the missing password turns into an event, not into a guess
+    failures = [e for e in log.read() if e["type"] == "life.rcon_failed"]
+    assert len(failures) == 1 and "RCON_PASSWORD" in failures[0]["payload"]["error"]
 
 
 def test_ttl_kill_corrects_the_cause_at_retire(tmp_path: Path) -> None:
@@ -224,6 +265,29 @@ def test_parallel_births_into_one_slot_leave_one_living_node(tmp_path: Path) -> 
     living = [brief.serial for brief in life.alive()]
     assert len(living) == 1 and living[0] == serials[1]  # the newest stays (P1-4)
     assert len([e for e in log.read() if e["type"] == "life.lost"]) == 1
+
+
+def test_failed_lost_close_is_retried_by_the_next_birth(tmp_path: Path) -> None:
+    from runtime.knowledge.store import StoreError
+
+    store, life, log, clock = make(tmp_path, rcon=FakeRcon())
+    first = life.birth("LastOrder01", traits(seed=1))
+
+    real_retire = store.retire
+    store.retire = lambda *a, **k: (_ for _ in ()).throw(StoreError("git failed"))
+    with pytest.raises(StoreError):  # the emergency will did not land
+        life.birth("LastOrder01", traits(seed=2))
+    assert life._nodes[first.serial].lost  # marked, still waiting to be closed
+    with pytest.raises(UnknownNodeError):  # and no longer a participant (R1-8)
+        life.request_death(first.serial, "stuck")
+    with pytest.raises(UnknownNodeError):
+        life.require_node(first.serial)
+
+    store.retire = real_retire
+    second = life.birth("LastOrder01", traits(seed=3))  # retries the close
+    assert [b.serial for b in life.alive()] == [second.serial]
+    assert will_of(store, first.serial).meta.emergency is True
+    assert len([e for e in log.read() if e["type"] == "life.lost"]) == 1  # said once
 
 
 def test_startup_reconcile_closes_slot_duplicates(tmp_path: Path) -> None:

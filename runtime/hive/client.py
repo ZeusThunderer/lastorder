@@ -7,7 +7,7 @@ the top of this file are the single source of the JSON shape: the server
 from drifting apart. Payloads are the frozen dataclasses of `runtime/ports.py`;
 tuples become JSON lists and are rebuilt as tuples on the way back.
 
-Offline contract (NETWORK.md section 9, review P1-3/P1-7):
+Offline contract (NETWORK.md section 9, reviews P1-3/P1-7, R1-1/R1-2):
 - connect errors are retried with a growing pause; a read timeout is not retried
   immediately (the request may have landed — a duplicate `send` is possible and
   accepted: a message is an observation, and the store-side writes are idempotent);
@@ -15,11 +15,15 @@ Offline contract (NETWORK.md section 9, review P1-3/P1-7):
   `store_core_memory` go to an on-disk buffer (`run/hive_outbox.jsonl`, one JSON
   per line, flushed strictly in order before any next call and always before
   `retire` — a buffered write that only lands after its node retired is dropped
-  with a client event, never silently);
+  with a client event, never silently). If the buffer cannot be drained, nothing
+  overtakes it: a new buffered write joins the end of the queue, and the direct
+  writes (`birth`, `request_death`, `retire`) refuse with `HiveUnavailable`;
 - reads answer from the last successful response with `client.stale = True`
   (payload dataclasses are frozen, so the mark cannot ride the value itself);
-  a read with no cached answer raises `HiveUnavailable`, except `chatter_turn`,
-  which degrades to None — a turn can simply be skipped;
+  a read with no cached answer raises `HiveUnavailable`. Two reads are never
+  cached: `inbox` (consuming — offline it answers [] with stale=True, so delivered
+  messages are not replayed as new) and `chatter_turn` (a permission — offline it
+  answers None, so no turn is granted around the director's limit, ADR-022);
 - `birth`, `request_death`, `retire` are never buffered: the serial, the kill and
   the will belong to hive alone; when it is down they raise `HiveUnavailable` and
   the mind falls back to its local emergency path (T-013).
@@ -369,12 +373,13 @@ class HiveClient:
         tmp.write_text("".join(line + "\n" for line in lines), encoding="utf-8")
         tmp.replace(self._outbox_path)
 
-    def _flush_locked(self) -> None:
+    def _flush_locked(self) -> bool:
         """Deliver buffered writes strictly in order; 4xx drops with an event, the
-        rest of the file waits for the next call (review P1-3/P1-5)."""
+        rest of the file waits for the next call (review P1-3/P1-5). True when the
+        buffer is empty afterwards."""
         lines = self._outbox_lines()
         if not lines:
-            return
+            return True
         remaining = True
         kept: list[str] = []
         for line in lines:
@@ -397,6 +402,7 @@ class HiveClient:
                 remaining = False
                 kept.append(line)
         self._write_outbox(kept)
+        return not kept
 
     def _call(
         self,
@@ -407,21 +413,31 @@ class HiveClient:
         decode: Callable[[httpx.Response], Any] | None = None,
         cache_key: str | None = None,
         buffered: bool = False,
+        offline: Any | None = None,
     ) -> Any:
         with self._lock:
-            self._flush_locked()
+            flushed = self._flush_locked()
+            if not flushed:
+                # Order first (review R1-2): nothing new may overtake the buffer. A
+                # buffered write joins the end of the queue; a direct write (birth,
+                # request_death, retire) refuses to go past undelivered older ones.
+                if buffered:
+                    self._append_outbox(method, path, payload)
+                    return None
+                if decode is None:
+                    raise HiveUnavailable("hive outbox not flushed; write order preserved")
             try:
                 response = self._request(method, path, payload)
             except HiveUnavailable:
                 if buffered:
                     self._append_outbox(method, path, payload)
                     return None
-                if decode is not None:
-                    if cache_key is not None and cache_key in self._cache:
-                        self.stale = True
-                        return self._cache[cache_key]
-                    if path == "/comms/chatter_turn":  # a turn is skippable
-                        return None
+                if offline is not None:  # a consuming read answers empty, never from cache
+                    self.stale = True
+                    return offline()
+                if decode is not None and cache_key is not None and cache_key in self._cache:
+                    self.stale = True
+                    return self._cache[cache_key]
                 raise
             self.stale = False
             if decode is None:
@@ -513,22 +529,26 @@ class HiveClient:
     # --- NodeComms -------------------------------------------------------------------------
 
     def inbox(self, serial: int) -> Sequence[NodeMessage]:
+        # A consuming read (review R1-1): never cached — offline answers [] with
+        # stale=True instead of replaying already delivered messages as new.
         return self._call(
             "post",
             "/comms/inbox",
             {"serial": serial},
             decode=lambda r: [message_from_json(item) for item in r.json()],
-            cache_key=f"inbox:{serial}",
+            offline=list,
         )
 
     def send(self, message: NodeMessage) -> None:
         self._call("post", "/comms/send", {"message": message_to_json(message)}, buffered=True)
 
     def chatter_turn(self, serial: int) -> ChatterTurn | None:
+        # Never cached either (review R1-1): a replayed turn would grant chatter
+        # every step around the director's limit (ADR-022). Offline -> None.
         return self._call(
             "post",
             "/comms/chatter_turn",
             {"serial": serial},
             decode=lambda r: chatter_turn_from_json(r.json()),
-            cache_key=f"chatter_turn:{serial}",
+            offline=lambda: None,
         )

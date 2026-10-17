@@ -81,7 +81,7 @@ services:
         condition: service_healthy
     environment:
       KNOWLEDGE_DIR: /knowledge
-      RUN_DIR: /run
+      RUN_DIR: /hive-run
       RCON_HOST: mc-server
       RCON_PASSWORD: "${RCON_PASSWORD:-lastorder}"
       MAX_LIFE_MIN: "${MAX_LIFE_MIN:-45}"
@@ -97,7 +97,7 @@ services:
       - "1"
     volumes:
       - knowledge:/knowledge
-      - hive-run:/run
+      - hive-run:/hive-run   # not over the image's system /run (review R1-6)
     restart: unless-stopped
 
   # FastJev decision server for C1 (T-005, ADR-004/023). Raises only under --profile jev.

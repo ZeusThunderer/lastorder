@@ -46,15 +46,24 @@ def client_events(client: HiveClient) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def born_via_client(client: HiveClient, slot: str = "LastOrder01", seed: int = 42):
-    return client.birth(slot, traits(seed))
+def born_via_client(api, slot: str = "LastOrder01", seed: int = 42):
+    return api.birth(slot, traits(seed))
 
 
-def candidate_id_of(client: HiveClient, serial: int, handle: str) -> str:
-    sl = client.knowledge(serial, [handle])
+def candidate_id_of(api, serial: int, handle: str) -> str:
+    sl = api.knowledge(serial, [handle])
     for entry in sl.pending_votes + sl.about + sl.fresh:
         return entry.id
     raise AssertionError("no record to vote on")
+
+
+@pytest.fixture(params=["service", "client"])
+def frontends(tmp_path: Path, request):
+    """The same scenarios against the server core and the client (review R1-7):
+    `HiveService` in-process and `HiveClient` over a TestClient transport."""
+    stack = make_app_stack(tmp_path)
+    client = HiveClient(transport=stack.client, run_dir=tmp_path / "mind-run")
+    return (stack.app.state.hive if request.param == "service" else client), stack
 
 
 # --- the ports ----------------------------------------------------------------------------
@@ -68,18 +77,17 @@ def test_client_is_all_three_ports(tmp_path: Path) -> None:
     assert isinstance(client, NodeComms)
 
 
-def test_memory_over_the_wire(tmp_path: Path) -> None:
-    stack = make_app_stack(tmp_path)
-    client = HiveClient(transport=stack.client, run_dir=tmp_path / "mind-run")
-    node = born_via_client(client)
+def test_memory_over_the_wire(frontends) -> None:
+    api, stack = frontends
+    node = born_via_client(api)
 
-    inheritance = client.inheritance(node.serial)
+    inheritance = api.inheritance(node.serial)
     assert inheritance.active_nodes_summary  # a real Inheritance, not a dict
 
-    client.store_core_memory(node.serial, "goal: выжить у спавна")
-    assert client.core_memory(node.serial).startswith("goal:")
+    api.store_core_memory(node.serial, "goal: выжить у спавна")
+    assert api.core_memory(node.serial).startswith("goal:")
 
-    client.submit_candidate(
+    api.submit_candidate(
         node.serial,
         KnowledgeCandidate(
             kind="danger",
@@ -88,44 +96,41 @@ def test_memory_over_the_wire(tmp_path: Path) -> None:
             evidence_event_ids=("e-918",),
         ),
     )
-    sl = client.knowledge(node.serial, ["ent:zombie"])
+    sl = api.knowledge(node.serial, ["ent:zombie"])
     assert any("Стонущий" in e.claim for e in sl.about + sl.pending_votes + sl.fresh)
 
-    other = born_via_client(client, "LastOrder02", seed=7)
-    entry_id = candidate_id_of(client, other.serial, "ent:zombie")
-    client.submit_vote(other.serial, Vote(entry_id=entry_id, accept=True, why="видел то же"))
+    other = born_via_client(api, "LastOrder02", seed=7)
+    entry_id = candidate_id_of(api, other.serial, "ent:zombie")
+    api.submit_vote(other.serial, Vote(entry_id=entry_id, accept=True, why="видел то же"))
     assert any(
         v.node == other.serial for r in stack.store.records() for v in r.votes
     )
-    assert client.stale is False
 
 
-def test_registry_over_the_wire(tmp_path: Path) -> None:
-    stack = make_app_stack(tmp_path)
-    client = HiveClient(transport=stack.client, run_dir=tmp_path / "mind-run")
-    node = born_via_client(client)
-    assert [(b.serial, b.slot) for b in client.alive()] == [(node.serial, "LastOrder01")]
+def test_registry_over_the_wire(frontends) -> None:
+    api, stack = frontends
+    node = born_via_client(api)
+    assert [(b.serial, b.slot) for b in api.alive()] == [(node.serial, "LastOrder01")]
 
-    other = born_via_client(client, "LastOrder02", seed=7)
+    other = born_via_client(api, "LastOrder02", seed=7)
     assert other.serial == node.serial + 1 and other.ttl_min == 45
 
-    client.request_death(other.serial, "stuck")  # the node asked (ADR-026)
+    api.request_death(other.serial, "stuck")  # the node asked (ADR-026)
     assert stack.rcon.kills == ["LastOrder02"]
-    client.retire(other.serial, "game", will_text(other.serial, other.born_at))
-    assert [b.serial for b in client.alive()] == [node.serial]
+    api.retire(other.serial, "game", will_text(other.serial, other.born_at))
+    assert [b.serial for b in api.alive()] == [node.serial]
 
 
-def test_comms_over_the_wire(tmp_path: Path) -> None:
-    stack = make_app_stack(tmp_path)
-    client = HiveClient(transport=stack.client, run_dir=tmp_path / "mind-run")
-    node = born_via_client(client)
-    other = born_via_client(client, "LastOrder02", seed=7)
+def test_comms_over_the_wire(frontends) -> None:
+    api, stack = frontends
+    node = born_via_client(api)
+    other = born_via_client(api, "LastOrder02", seed=7)
 
-    client.send(NodeMessage(from_serial=node.serial, to_serial=other.serial, text="у спавна стонущий"))
-    inbox = client.inbox(other.serial)
+    api.send(NodeMessage(from_serial=node.serial, to_serial=other.serial, text="у спавна стонущий"))
+    inbox = api.inbox(other.serial)
     assert len(inbox) == 1 and inbox[0].text == "у спавна стонущий"
-    assert client.inbox(other.serial) == []  # delivered once
-    assert client.chatter_turn(node.serial) is None  # the director is T-017
+    assert api.inbox(other.serial) == []  # delivered once
+    assert api.chatter_turn(node.serial) is None  # the director is T-017
 
 
 # --- the switchable transport ------------------------------------------------------------------
@@ -236,6 +241,129 @@ def test_retire_flushes_the_buffer_first(offline) -> None:
     assert any(
         r.claim.startswith("Лава под гравием") for r in stack.store.records()
     ), "the buffered candidate must survive its author's retire"
+
+
+# --- reviews R1-1 and R1-2 -------------------------------------------------------------------
+
+
+def test_offline_inbox_is_empty_not_replayed(offline) -> None:
+    client = offline.client
+    node = born_via_client(client)
+    other = born_via_client(client, "LastOrder02", seed=7)
+    client.send(NodeMessage(from_serial=node.serial, to_serial=other.serial, text="первая"))
+    assert [m.text for m in client.inbox(other.serial)] == ["первая"]  # delivered
+    client.send(NodeMessage(from_serial=node.serial, to_serial=other.serial, text="вторая"))
+
+    offline.switch.down = True
+    assert client.inbox(other.serial) == []  # a consuming read never replays (R1-1)
+    assert client.stale is True
+
+    offline.switch.down = False
+    assert [m.text for m in client.inbox(other.serial)] == ["вторая"]  # nothing lost
+
+
+class _Response:
+    def __init__(self, status_code: int, payload):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class ChatterServer:
+    """A stub server that hands out a real ChatterTurn, then goes down."""
+
+    def __init__(self):
+        self.down = False
+
+    def post(self, path, json=None):
+        if self.down:
+            raise httpx.ConnectError("hive is down")
+        return _Response(200, {"topic": "страховка у воды", "max_lines": 1})
+
+    def get(self, path):
+        return _Response(200, [])
+
+
+def test_offline_chatter_turn_is_none_not_cached(tmp_path: Path) -> None:
+    server = ChatterServer()
+    client = HiveClient(transport=server, run_dir=tmp_path / "mind-run")
+    turn = client.chatter_turn(7)
+    assert turn is not None and turn.topic == "страховка у воды"  # a real turn came once
+
+    server.down = True
+    assert client.chatter_turn(7) is None  # never replayed from cache (R1-1)
+    assert client.stale is True
+
+
+def _flaky_submit(stack, on: bool):
+    """Make submit_candidate answer 503 (a transient store error) while `on`."""
+    service = stack.app.state.hive
+    real = service.submit_candidate
+
+    def maybe_fail(serial, candidate):
+        if on:
+            raise StoreError("knowledge base lock timeout")
+        return real(serial, candidate)
+
+    service.submit_candidate = maybe_fail
+    return lambda: setattr(service, "submit_candidate", real)
+
+
+def test_retire_waits_behind_a_stuck_buffer(offline) -> None:
+    stack, client = offline.stack, offline.client
+    node = born_via_client(client)
+    offline.switch.down = True
+    client.submit_candidate(
+        node.serial,
+        KnowledgeCandidate(kind="fact", claim="Гравий над лавой слышен по шипению.", about=("blk:gravel",)),
+    )
+    offline.switch.down = False
+
+    restore = _flaky_submit(stack, on=True)  # the buffered line hits 503 three times
+    try:
+        with pytest.raises(HiveUnavailable):
+            client.retire(node.serial, "game", will_text(node.serial, node.born_at))  # R1-2
+    finally:
+        restore()
+    assert [line["path"] for line in outbox_lines(client)] == ["/memory/submit_candidate"]
+
+    client.retire(node.serial, "game", will_text(node.serial, node.born_at))
+    assert outbox_lines(client) == []
+    assert any(
+        r.claim.startswith("Гравий над лавой") for r in stack.store.records()
+    ), "the candidate must land before its author's retire, not die of a 409"
+
+
+def test_new_write_joins_behind_a_stuck_buffer(offline) -> None:
+    stack, client = offline.stack, offline.client
+    node = born_via_client(client)
+    offline.switch.down = True
+    client.submit_candidate(
+        node.serial,
+        KnowledgeCandidate(kind="fact", claim="Первая запись ждёт своей очереди.", about=("blk:stone",)),
+    )
+    offline.switch.down = False
+
+    restore = _flaky_submit(stack, on=True)
+    try:
+        client.submit_candidate(
+            node.serial,
+            KnowledgeCandidate(kind="fact", claim="Вторая не обгоняет первую.", about=("blk:dirt",)),
+        )  # the queue is stuck -> this joins the end, it does not overtake (R1-2)
+    finally:
+        restore()
+    assert [line["path"] for line in outbox_lines(client)] == [
+        "/memory/submit_candidate",
+        "/memory/submit_candidate",
+    ]
+
+    claims = [r.claim for r in stack.store.records()]
+    assert not any("очереди" in c or "обгоняет" in c for c in claims)  # neither was sent yet
+    client.alive()  # recovery: both land, in order
+    claims = [r.claim for r in stack.store.records()]
+    assert claims.index("Первая запись ждёт своей очереди.") < claims.index("Вторая не обгоняет первую.")
 
 
 def test_critical_calls_are_not_buffered(offline) -> None:

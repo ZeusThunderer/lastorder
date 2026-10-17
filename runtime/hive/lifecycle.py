@@ -95,6 +95,7 @@ class NodeState:
     stuck: bool = False  # the node asked for its own death (ADR-026)
     kill_reason: str | None = None  # "ttl" (deadline passed) | "stuck" (the node asked)
     kill_confirmed: bool = False  # the server answered a real kill
+    kill_error: str | None = None  # last failure signature, to not spam the event log (R1-3)
 
 
 class Lifecycle:
@@ -209,16 +210,20 @@ class Lifecycle:
 
     def birth(self, slot: str, traits: Traits) -> BirthRecord:
         with self._lock:
-            for node in [n for n in self._nodes.values() if n.slot == slot and not n.lost]:
+            # Every node of the slot, including one already marked lost whose close
+            # failed mid-way (a store error): the next birth retries it (R1-8).
+            for node in [n for n in self._nodes.values() if n.slot == slot]:
+                first_lost = not node.lost
                 node.lost = True
-                self._log.event(
-                    "life.lost",
-                    {
-                        "serial": node.serial,
-                        "slot": slot,
-                        "reason": "mind restarted without a will",
-                    },
-                )
+                if first_lost:
+                    self._log.event(
+                        "life.lost",
+                        {
+                            "serial": node.serial,
+                            "slot": slot,
+                            "reason": "mind restarted without a will",
+                        },
+                    )
                 self._close_lost(node)
             record = self._store.birth(slot, traits, ttl_min=self._max_life_min)
             self._nodes[record.serial] = NodeState(
@@ -244,6 +249,8 @@ class Lifecycle:
     def require_node(self, serial: int) -> NodeState:
         node = self._nodes.get(serial)
         if node is not None:
+            if node.lost:  # closed or closing: not a participant anymore (R1-8)
+                raise UnknownNodeError(f"node {format_serial(serial)} is lost")
             return node
         if (self._store.root / "nodes" / format_serial(serial) / "will.md").exists():
             raise AlreadyRetiredError(f"node {format_serial(serial)} is retired")
@@ -255,9 +262,7 @@ class Lifecycle:
                 f'request_death accepts only "{CAUSE_STUCK}" (ADR-026), got {cause!r}'
             )
         with self._lock:
-            node = self.require_node(serial)
-            if node.lost:
-                raise UnknownNodeError(f"node {format_serial(serial)} is lost")
+            node = self.require_node(serial)  # also refuses lost nodes (R1-8)
             node.stuck = True
             if node.kill_reason is None:
                 node.kill_reason = CAUSE_STUCK
@@ -303,20 +308,25 @@ class Lifecycle:
         try:
             response = self._rcon.kill(node.slot)
         except RconError as exc:
+            ok, detail_key, detail = False, "error", str(exc)
+        else:
+            ok, detail_key, detail = kill_confirmed(response), "response", response[:200]
+        if ok:
+            node.kill_confirmed = True
+            node.kill_error = None
+            self._save()
             self._log.event(
-                "life.rcon_failed",
-                {"serial": node.serial, "slot": node.slot, "error": str(exc)},
+                "life.killed",
+                {"serial": node.serial, "slot": node.slot, "reason": node.kill_reason},
             )
             return
-        if not kill_confirmed(response):
+        # Retried every scan, but logged once per failure and again only when the
+        # failure changes — a 30-second event spam helps nobody (review R1-3).
+        signature = f"{detail_key}: {detail}"
+        if node.kill_error != signature:
+            node.kill_error = signature
+            self._save()
             self._log.event(
                 "life.rcon_failed",
-                {"serial": node.serial, "slot": node.slot, "response": response[:200]},
+                {"serial": node.serial, "slot": node.slot, detail_key: detail},
             )
-            return
-        node.kill_confirmed = True
-        self._save()
-        self._log.event(
-            "life.killed",
-            {"serial": node.serial, "slot": node.slot, "reason": node.kill_reason},
-        )

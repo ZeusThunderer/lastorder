@@ -45,10 +45,12 @@ class RconClient:
 
     @classmethod
     def from_env(cls) -> "RconClient":
+        # No password fallback (review R1-5): the only default lives in compose;
+        # without RCON_PASSWORD the kill refuses instead of guessing.
         return cls(
             host=env("RCON_HOST") or "mc-server",
             port=int(env("RCON_PORT") or 25575),
-            password=env("RCON_PASSWORD") or "lastorder",
+            password=env("RCON_PASSWORD") or "",
             timeout_s=float(env("RCON_TIMEOUT_S") or 10.0),
         )
 
@@ -61,6 +63,8 @@ class RconClient:
         return struct.pack("<i", len(data)) + data
 
     def command(self, command: str) -> str:
+        if not self.password:
+            raise RconError("RCON_PASSWORD is not set; refusing to guess")
         try:
             with socket.create_connection((self.host, self.port), timeout=self.timeout_s) as sock:
                 sock.settimeout(self.timeout_s)
@@ -84,10 +88,9 @@ class RconClient:
 
 
 def kill_confirmed(response: str) -> bool:
-    """Did the server actually kill anyone? An empty answer or "No entity was found"
-    means the kill did not happen (an offline player), whatever the transport says."""
+    """Did the server actually kill anyone? A positive match only (review R1-4):
+    the vanilla answer to `/kill` starts with "Killed". Anything else — the empty
+    answer, "No entity was found" (an offline player), "Unknown or incomplete
+    command" — means the kill did not happen, whatever the transport says."""
 
-    low = response.lower()
-    if not low.strip():
-        return False
-    return "no entity" not in low
+    return response.strip().lower().startswith("killed")
