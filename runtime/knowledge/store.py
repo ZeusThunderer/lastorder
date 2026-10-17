@@ -590,7 +590,7 @@ class KnowledgeStore:
         """Layer-1 catalog: one line per live non-primer record, newest kept when trimmed."""
         lines = [
             f"{r.id} {r.kind} {' '.join(r.about)}".rstrip()
-            for r in sorted(records, key=lambda r: r.id)
+            for r in sorted(records, key=lambda r: int(r.id[2:]))
             if r.source != "primer" and r.status != "retired"
         ]
         kept: list[str] = []
