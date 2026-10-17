@@ -193,13 +193,15 @@ def build_step_prompt(
     # about entries down to the most relevant one, vote candidates down to the first,
     # the oldest chat, the oldest messages; beyond section 9, the last about entry and
     # the last vote candidate go too, and only then the build fails.
-    while about or fresh:
+    while len(about) > 1 or fresh:
         if estimate_tokens("\n".join(about + fresh)) <= B_ABOUT:
             break
         if fresh:
             fresh.pop()  # one entry per pass, then the budget is re-measured
+        elif len(about) > 1:
+            about.pop()  # section-9 floor: the most relevant entry stays
         else:
-            about.pop()
+            break  # a single over-budget about entry: the claim quota owns that, not us
     _fit_lines(votes, B_VOTES)
     while estimate_tokens("\n".join(messages + chat_lines)) > B_COMMS:
         if chat_lines:

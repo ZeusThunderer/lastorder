@@ -203,6 +203,18 @@ def test_about_and_fresh_fit_budget_and_fresh_trims_first():
     assert any("длинное наблюдение" in l for l in lines)  # about survives longest
 
 
+def test_single_overweight_about_entry_stays():
+    """The B_ABOUT guard has the section-9 floor too: one about entry bigger than the
+    budget is the source's problem (claim quotas), not a reason to empty the block."""
+    fat = slice_(
+        about=(KnowledgeEntry(id="k-fat", kind="fact", claim="очень длинное наблюдение о мире " * 80, status="confirmed", about=("ent:zombie",)),),
+        fresh=(),
+    )
+    system, user = build(slice=fat)
+    assert "k-fat" in user
+    assert estimate_tokens(system + "\n" + user) <= STEP_INPUT_BUDGET
+
+
 def test_votes_fit_budget():
     many = slice_(
         pending_votes=tuple(
