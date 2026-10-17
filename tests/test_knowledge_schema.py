@@ -282,7 +282,7 @@ def test_emergency_will_survives_broken_inputs():
     assert len(lines) == 4  # exactly the template: fields never add lines
     assert "третье" in will.body and "четвёртое" not in will.body  # at most 3 events
     assert "шёл к болоту и ждал у воды" in will.body  # one line, no embedded newline
-    assert "узел 00014 с лишним уточнением откуда-то" in will.body
+    assert "это узел 00014 с лишним уточ;" in will.body  # one line, capped
     assert budget.estimate_tokens(will.body) <= budget.WILL_BODY_MAX_TOKENS
     # the file stays readable for the heir and T-012
     assert schema.Will.from_markdown(will.to_markdown()) == will
@@ -305,10 +305,11 @@ def test_emergency_will_worst_case_fits_will_cap():
         born_at="2026-10-17T12:04:11+00:00",
         died_at="2026-10-17T12:41:53+00:00",
         traits=traits,
-        last_action="а" * budget.EMERGENCY_ACTION_CHARS,  # capped action
-        last_events=["б" * budget.EMERGENCY_EVENT_CHARS] * budget.EMERGENCY_MAX_EVENTS,
-        node_name="узел 00014",
-        heir_address="следующая Мисака",
+        # every field over its cap, all Cyrillic (the token-heaviest case)
+        last_action="а" * 200,
+        last_events=["б" * 200] * 5,
+        node_name="ж" * 200,
+        heir_address="щ" * 200,
     )
     assert budget.estimate_tokens(will.body) <= budget.WILL_BODY_MAX_TOKENS
 
@@ -320,6 +321,8 @@ def test_will_missing_field_and_broken_yaml_are_schema_errors():
         schema.Will.from_dict(data)
     with pytest.raises(schema.SchemaError):  # broken YAML is wrapped, not yaml.YAMLError
         schema.Will.from_markdown("---\nserial: [oops\n---\nстрока\nстрока")
+    with pytest.raises(schema.SchemaError):  # int and str unknown keys must not TypeError
+        schema.Will.from_markdown("---\n1: a\nfoo: b\n---\nстрока\nстрока")
 
 
 def test_will_body_token_cap():

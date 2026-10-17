@@ -87,5 +87,6 @@ VOTE_CANDIDATES = 2  # pending candidates handed to a node to vote on
 # --- emergency will field caps (schema.emergency_will keeps its body 4 lines) -----------
 
 EMERGENCY_ACTION_CHARS = 60  # last action, collapsed to one line
-EMERGENCY_EVENT_CHARS = 40  # one last-seen event, collapsed to one line
+EMERGENCY_EVENT_CHARS = 32  # one last-seen event, collapsed to one line
 EMERGENCY_MAX_EVENTS = 3
+EMERGENCY_NAME_CHARS = 24  # node name and heir address; all caps together fit WILL_BODY_MAX_TOKENS

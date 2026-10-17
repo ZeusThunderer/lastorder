@@ -23,6 +23,7 @@ from runtime.knowledge.budget import (
     EMERGENCY_ACTION_CHARS,
     EMERGENCY_EVENT_CHARS,
     EMERGENCY_MAX_EVENTS,
+    EMERGENCY_NAME_CHARS,
     WILL_BODY_MAX_TOKENS,
     estimate_tokens,
 )
@@ -88,7 +89,7 @@ def _plain(value: Any) -> Any:
 def _want(data: Any, allowed: tuple[str, ...]) -> None:
     if not isinstance(data, Mapping):
         raise SchemaError(f"expected an object, got {type(data).__name__}")
-    unknown = sorted(set(data) - set(allowed))
+    unknown = sorted(set(data) - set(allowed), key=str)  # YAML keys may be ints
     if unknown:
         raise SchemaError(f"unknown fields: {unknown}")
 
@@ -653,11 +654,12 @@ def emergency_will(
         if isinstance(e, str) and e.strip()
     ][:EMERGENCY_MAX_EVENTS]
     action = _one_line(last_action, EMERGENCY_ACTION_CHARS, "last_action")
-    name = _one_line(node_name, 40, "node_name")
+    name = _one_line(node_name, EMERGENCY_NAME_CHARS, "node_name")
+    heir = _one_line(heir_address, EMERGENCY_NAME_CHARS, "heir_address")
     body = _will_body(
         "\n".join(
             [
-                f"{_one_line(heir_address, 40, 'heir_address')}, это {name}; "
+                f"{heir}, это {name}; "
                 "пишу без своей головы, голова уже молчит.",
                 f"Смерть: {CAUSE_TEXT[cause]}; последнее действие: {action or 'неизвестно'}.",
                 f"Перед концом видел: {', '.join(events) or 'ничего приметного'}.",
