@@ -2,7 +2,8 @@
 id: T-011
 title: Промпт узла под режимы восприятия и схема ответа шага
 stage: E2
-status: in_progress
+status: blocked
+Blocked: критерии 1–2 расширяют шаблон за B_PERSONA=1000 (тест test_knowledge_schema.py:394 краснеет, budget.py вне «Можно трогать») — нужен подъём B_PERSONA до ~1250 надзором или перенос формата ответа из шаблона
 criticality: critical
 branch: z/T-011-prompt-step-schema
 created: 2026-10-16
