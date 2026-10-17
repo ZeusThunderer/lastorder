@@ -2,7 +2,7 @@
 id: T-008
 title: Проект целей сети и общения узлов
 stage: E2
-status: review
+status: changes
 criticality: critical
 branch: z/T-008-goals-comms-design
 created: 2026-10-16
