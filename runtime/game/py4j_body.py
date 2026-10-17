@@ -170,6 +170,52 @@ def _lever_command(mc, a):
     return mc.ExecuteCommand(cmd)
 
 
+def _lever_mine(mc, a):
+    # {"pos": [x,y,z]} for one block or {"positions": [[x,y,z], ...]} for a patch;
+    # uc's mineBlocks takes the list form and queues every cell into the break queue.
+    cells = [list(a["pos"])] if "pos" in a else [list(p) for p in a.get("positions") or ()]
+    queue = [[int(x), int(y), int(z)] for x, y, z in cells]
+    return mc.mineBlocks(queue)
+
+
+def _lever_attack(mc, a):
+    # tungsten punkAny: allow/avoid are player NAME lists (lowercased inside uc);
+    # mobs never match — PunkPlayerTask.isAcceptable takes PlayerEntity only.
+    return mc.punkAny(list(a.get("allow") or ()), list(a.get("avoid") or ()))
+
+
+def _lever_attack_stop(mc, a):
+    return mc.punkStop()
+
+
+def _lever_strike(mc, a):
+    # One melee hit at whatever entity stands at pos: lookAt it, then a physical
+    # left click, which vanilla routes to the entity under the crosshair. The
+    # mob-combat path — punkAny and every name-based lever in uc hit players only.
+    x, y, z = (float(c) for c in a["pos"])
+    mc.lookAt(x, y, z)
+    return mc.mouseClick("left")
+
+
+def _lever_use_held(mc, a):
+    return mc.useHeldItem()
+
+
+def _lever_eat(mc, a):
+    # Eating needs the use key HELD (32 game ticks): one useHeldItem() is a single
+    # interaction and leaves food and count untouched (stand, review R2-4).
+    mc.selectHotbar(int(a["slot"]))
+    return mc.holdKey("use", int(a.get("ms", 1700)))
+
+
+def _lever_get(mc, a):
+    return mc.ExecuteCommand(f"@get {a['item']} {int(a.get('count', 1))}")
+
+
+def _lever_equip(mc, a):
+    return mc.ExecuteCommand(f"@equip {a['item']}")
+
+
 LEVERS: Mapping[str, Callable[[Any, dict[str, Any]], Any]] = {
     "goto": _lever_goto,
     "goto_far": _lever_goto_far,
@@ -182,6 +228,14 @@ LEVERS: Mapping[str, Callable[[Any, dict[str, Any]], Any]] = {
     "hold_key": _lever_hold_key,
     "chat": _lever_chat,
     "command": _lever_command,
+    "mine": _lever_mine,
+    "attack": _lever_attack,
+    "attack_stop": _lever_attack_stop,
+    "strike": _lever_strike,
+    "use_held": _lever_use_held,
+    "eat": _lever_eat,
+    "get": _lever_get,
+    "equip": _lever_equip,
 }
 
 
@@ -196,6 +250,22 @@ def _parse_pos(value: Any) -> tuple[float, float, float]:
         return (float(x), float(y), float(z))
     except ValueError:
         return (0.0, 0.0, 0.0)
+
+
+def _parse_cell_pos(value: Any) -> tuple[int, int, int] | None:
+    """A cell coordinate from getEntitiesInfo/getBlocksAround ("x, y, z").
+
+    uc formats both with %.0f / block ints, so a whole tuple fits. A broken or
+    missing string is an observation gap, not an exception: None, and the caller
+    falls back to name+distance.
+    """
+    if not value:
+        return None
+    try:
+        x, y, z = str(value).replace(" ", "").split(",")
+        return (int(float(x)), int(float(y)), int(float(z)))
+    except ValueError:
+        return None
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -359,20 +429,37 @@ class Py4jBody:
     def state(self) -> BodyState:
         return parse_game_state(dict(self._call(lambda mc: mc.getGameState())))
 
-    def entities(self, radius: int = 16) -> tuple[EntityInfo, ...]:
-        raw = self._call(lambda mc: mc.getEntitiesInfo(radius))
+    def entities(self, radius: int = 16, limit: int = 32) -> tuple[EntityInfo, ...]:
+        """Entities within `radius` metres.
+
+        The T-006 defect fixed here: getEntitiesInfo(int) caps the COUNT, it is not
+        a radius, so the limit (uc's own arg) and the distance filter are separate —
+        uc hands back the nearest `limit`, Python drops the ones beyond `radius`.
+        """
+        raw = self._call(lambda mc: mc.getEntitiesInfo(limit))
         out = []
         for e in raw:
             e = dict(e)
             kind = str(e.get("type", "unknown"))
+            dist = _to_float(e.get("distance"))
+            if dist > radius:
+                continue
             out.append(
-                EntityInfo(kind=kind, name=str(e.get("name") or kind), dist_m=_to_float(e.get("distance")))
+                EntityInfo(
+                    kind=kind,
+                    name=str(e.get("name") or kind),
+                    dist_m=dist,
+                    pos=_parse_cell_pos(e.get("position")),
+                )
             )
         return tuple(out)
 
     def blocks_around(self, radius: int = 4) -> tuple[BlockInfo, ...]:
         raw = self._call(lambda mc: mc.getBlocksAround(radius))
-        return tuple(BlockInfo(name=str(dict(b).get("block", ""))) for b in raw)
+        return tuple(
+            BlockInfo(name=str(dict(b).get("block", "")), pos=_parse_cell_pos(dict(b).get("position")))
+            for b in raw
+        )
 
     def inventory(self) -> tuple[ItemStack, ...]:
         raw = dict(self._call(lambda mc: mc.getInventoryFull()))
@@ -421,11 +508,16 @@ class Py4jBody:
         return self._call(lambda mc: handler(mc, dict(args or {})))
 
     def busy(self) -> bool:
-        return bool(self._call(lambda mc: mc.hasActiveTask()))
+        """Two engines can hold the body: an altoclef task and a tungsten fight
+        (punk). A task with no fight and a fight with no task both read busy."""
+        if self._call(lambda mc: bool(mc.hasActiveTask())):
+            return True
+        return bool(dict(self._call(lambda mc: mc.punkStatus())).get("active"))
 
     def stop(self) -> None:
         self._call(lambda mc: mc.stopPathing())
         self.command("stop")
+        self._call(lambda mc: mc.punkStop())
 
     def respawn(self, timeout: float = 60.0, poll: float = 1.0) -> BodyState:
         """respawnPlayer() and wait for a living body: uc does not auto-respawn
