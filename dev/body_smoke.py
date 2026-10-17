@@ -311,8 +311,10 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
         print(f"       eating {held} from slot {slot}, food={food0:.0f}")
         if food0 >= 20:
             # MC refuses to eat at full food: drain some so the check can see a meal.
+            # Hunger V: since 1.21.2 exhaustion is 40 per food point (x10 scale), and
+            # Hunger I (0.1/tick) proved too slow on the stand (90 s moved nothing).
             step("drain hunger for the eat check (rcon)",
-                 lambda: rcon(f"effect give {name} minecraft:hunger 60 0"))
+                 lambda: rcon(f"effect give {name} minecraft:hunger 60 4"))
             food0 = step("food drained below 18", lambda: wait_food_below(body, 18, 90))
             if food0 is None:
                 food0 = body.state().food  # drain failed: run the check anyway, it fails honestly
