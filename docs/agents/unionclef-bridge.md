@@ -72,6 +72,9 @@ Fabric-мод: altoclef (`src/main/java/adris/altoclef`) + tungsten (pathfinder,
 - `@get <item> <n>` — «обеспечить ≥ n»: с уже имеющимся предметом завершается
   сразу (3 с), с нуля у дерева ~13 с. `@equip <item>` — только броня/щит
   (`EquipCommand.EquipmentItemArg`), обычные предметы — `selectHotbar`.
+
+### События и Python-образцы
+
 - События: Python реализует `PythonCallback.java` и поднимает callback-сервер, затем `InitPythonCallback()`.
   Колбэки: `onChatMessage`, `onDeath`, `onKill`, `onDamage`, `onAutoclefEvent`, `onUpdateServerInfo`,
   `onVoiceFeed`, `agentCommandRequest`. Без callback-сервера события молча теряются.

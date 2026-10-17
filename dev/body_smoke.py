@@ -181,12 +181,24 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
         step("respawn (dead at start)", lambda: body.respawn())
     print("baseline:", snapshot(body))
 
-    # -- mine the block under the feet, cell picked from blocks_around positions
-    st = step("state for the cell", lambda: body.state())
-    feet = (math.floor(st.pos[0]), math.floor(st.pos[1]), math.floor(st.pos[2]))
-    under = (feet[0], feet[1] - 1, feet[2])
-    cell = step("block under feet found in blocks_around",
-                lambda: next(b for b in body.blocks_around(2) if b.pos == under))
+    # -- mine the block under the feet, cell picked from blocks_around positions.
+    #    A previous run can leave the body on dug-up ground where the under cell is
+    #    air: hop sideways until the ground under the feet is actually listed.
+    def find_ground_under_feet():
+        st = body.state()
+        for hop in range(4):
+            feet = (math.floor(st.pos[0]), math.floor(st.pos[1]), math.floor(st.pos[2]))
+            cell = next((b for b in body.blocks_around(2)
+                         if b.pos == (feet[0], feet[1] - 1, feet[2])), None)
+            if cell is not None:
+                return cell
+            if hop == 3:
+                raise AssertionError(f"no listed ground under the feet within 4 hops (at {feet})")
+            body.act("goto", {"x": feet[0] + 8, "y": feet[1], "z": feet[2]})
+            wait_busy_clears(body, 60)
+            st = body.state()
+
+    cell = step("block under feet found in blocks_around", find_ground_under_feet)
     if cell is not None:
         print(f"       mining {cell.name} at {cell.pos}")
         step("before mine", lambda: snapshot(body))
@@ -222,10 +234,18 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
     #    taken (review R2-1), and it carries a tag so selectors touch only this cow.
     st = step("state fresh for summon (post-@get)", lambda: body.state())
     feet = (math.floor(st.pos[0]), math.floor(st.pos[1]), math.floor(st.pos[2]))
+    # Summon at the body's own cell: the body stands on it, so the cow cannot
+    # spawn over a dug hole (feet+3 once dropped a cow into an old tunnel).
     step("summon cow (rcon, tag t020)", lambda: rcon(
-        f'summon minecraft:cow {feet[0] + 3} {feet[1]} {feet[2]} {{Tags:["{COW_TAG}"]}}'))
+        f'summon minecraft:cow {feet[0]} {feet[1]} {feet[2]} {{Tags:["{COW_TAG}"]}}'))
     cow = step("cow visible in entities", lambda: wait_for_kind(body, "cow", 30))
-    hp0 = step("cow health before attack (rcon)", lambda: mob_health(rcon, COW_SEL))
+
+    def tagged_cow_readable() -> float:
+        hp = mob_health(rcon, COW_SEL)
+        assert hp is not None, "tagged cow visible to the client but unreadable by RCON"
+        return hp
+
+    hp0 = step("cow health before attack (rcon)", tagged_cow_readable)
     if cow is None or hp0 is None:
         # No cow to fight: the FAIL above already fails the run, and a strike that
         # swings at nothing must not count as a pass (review R2-2).
@@ -235,62 +255,87 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
         print(f"       punkAny reply: {punk}")
         step("busy sees the fight", lambda: body.busy())
         time.sleep(10)  # give tungsten every chance to swing at the cow
-        hp1 = step("cow health after 10s of punkAny", lambda: mob_health(rcon, COW_SEL))
-        print(f"       punkAny on a mob: hp {hp0} -> {hp1}"
-              f" ({'NO DAMAGE: players-only confirmed' if hp1 == hp0 else 'mob took damage'})")
+
+        def cow_health_after_punk() -> float:
+            # An unreadable cow after the fight is an anomaly worth a FAIL, not
+            # a value: skipping the strike on it once made a green run without
+            # a single entity hit (review R2-2, checker C-1).
+            hp = mob_health(rcon, COW_SEL)
+            assert hp is not None, "tagged cow lost during punkAny (unreadable by RCON)"
+            return hp
+
+        hp1 = step("cow health after 10s of punkAny", cow_health_after_punk)
+        if hp1 is not None:
+            verdict = "NO DAMAGE: players-only confirmed" if hp1 == hp0 else \
+                "hp changed during punkAny (environmental? punkAny is players-only)"
+            print(f"       punkAny on a mob: hp {hp0} -> {hp1} ({verdict})")
         step("act attack_stop", lambda: body.act("attack_stop", {}))
         step("fight over (busy False)", lambda: not body.busy())
+
+        if hp1 is None:
+            # The probe above FAILed: the cow is gone, and the strike check must not
+            # vanish with it — summon a fresh tagged cow and keep the same rules.
+            def resummon_cow() -> str:
+                st_now = body.state()
+                x = math.floor(st_now.pos[0])
+                y, z = math.floor(st_now.pos[1]), math.floor(st_now.pos[2])
+                rcon(f'summon minecraft:cow {x} {y} {z} {{Tags:["{COW_TAG}"]}}')
+                time.sleep(1)
+                hp = mob_health(rcon, COW_SEL)
+                assert hp is not None, "re-summoned cow unreadable by RCON"
+                return f"re-summoned at ({x},{y},{z}), hp={hp}"
+
+            step("re-summon cow for the strike (rcon, tag t020)", resummon_cow)
 
         # -- the mob path: lookAt + left click (strike), the lever that does hit mobs.
         #    Two stand facts from the first run: melee reach is 3 blocks (chase first,
         #    the cow wanders off), and the feet cell aims UNDER the hitbox (aim mid-torso).
-        #    A pass needs >= 1 ENTITY hit AND the tagged cow dead (review R2-2).
-        if hp1 is None:
-            print("[skip] strike: tagged cow unreadable after punkAny (see the FAIL above)")
-        elif hp1 == hp0:
-            step("grant iron sword (rcon)", lambda: rcon(f"give {name} iron_sword 1"))
-            time.sleep(2)
-            sword = next((s for s in body.inventory() if "sword" in s.name and s.slot <= 8), None)
-            if sword is not None:
-                step("hold the sword", lambda: body.act("select_hotbar", {"slot": sword.slot}))
+        #    Runs in every case — probe undamaged, environmentally damaged, or a
+        #    re-summon — and a pass needs >= 1 ENTITY hit AND the tagged cow dead.
+        step("grant iron sword (rcon)", lambda: rcon(f"give {name} iron_sword 1"))
+        time.sleep(2)
+        sword = next((s for s in body.inventory() if "sword" in s.name and s.slot <= 8), None)
+        if sword is not None:
+            step("hold the sword", lambda: body.act("select_hotbar", {"slot": sword.slot}))
 
-            def strike_the_cow() -> str:
-                hits = 0
-                for _ in range(40):
-                    if mob_health(rcon, COW_SEL) is None:
-                        break  # the tagged cow left the world: dead
-                    ents = [e for e in body.entities(24) if e.kind == "cow"]
-                    if not ents:
-                        # Alive per the server but out of the entities window: walk to it.
-                        target = mob_pos(rcon, COW_SEL)
-                        if target is None:
-                            break
-                        body.act("goto", {"x": target[0], "y": target[1], "z": target[2]})
-                        wait_busy_clears(body, 45)
-                        continue
-                    near = min(ents, key=lambda e: e.dist_m)
-                    if near.dist_m > 4:
-                        body.act("goto", {"x": near.pos[0], "y": near.pos[1], "z": near.pos[2]})
-                        wait_busy_clears(body, 45)
-                        continue
-                    reply = body.act("strike",
-                                     {"pos": [near.pos[0] + 0.5, near.pos[1] + 0.7, near.pos[2] + 0.5]})
-                    hits += bool(reply.get("hit") == "ENTITY")
-                    time.sleep(0.7)
-                assert hits >= 1, "0 entity hits landed: the cow was never in reach"
-                return f"cow down, {hits} entity hit(s) landed"
+        def strike_the_cow() -> str:
+            hits = 0
+            deadline = time.monotonic() + 180  # hops are wait-heavy: bound the chase
+            for _ in range(40):
+                if time.monotonic() > deadline:
+                    break
+                if mob_health(rcon, COW_SEL) is None:
+                    break  # the tagged cow left the world: dead
+                ents = [e for e in body.entities(24) if e.kind == "cow"]
+                if not ents:
+                    # Alive per the server but out of the entities window: walk to it.
+                    target = mob_pos(rcon, COW_SEL)
+                    if target is None:
+                        break
+                    body.act("goto", {"x": target[0], "y": target[1], "z": target[2]})
+                    wait_busy_clears(body, 45)
+                    continue
+                near = min(ents, key=lambda e: e.dist_m)
+                if near.dist_m > 4:
+                    body.act("goto", {"x": near.pos[0], "y": near.pos[1], "z": near.pos[2]})
+                    wait_busy_clears(body, 45)
+                    continue
+                reply = body.act("strike",
+                                 {"pos": [near.pos[0] + 0.5, near.pos[1] + 0.7, near.pos[2] + 0.5]})
+                hits += bool(reply.get("hit") == "ENTITY")
+                time.sleep(0.7)
+            assert hits >= 1, "0 entity hits landed: the cow was never in reach"
+            return f"cow down, {hits} entity hit(s) landed"
 
-            step("strike the cow (lookAt + left click)", strike_the_cow)
+        step("strike the cow (lookAt + left click)", strike_the_cow)
 
-            def tagged_cow_dead() -> str:
-                hp = mob_health(rcon, COW_SEL)
-                assert hp is None, f"tagged cow still alive after the strike (hp={hp})"
-                return "tagged cow removed from the world"
+        def tagged_cow_dead() -> str:
+            hp = mob_health(rcon, COW_SEL)
+            assert hp is None, f"tagged cow still alive after the strike (hp={hp})"
+            return "tagged cow removed from the world"
 
-            step("tagged cow dead (rcon witness)", tagged_cow_dead)
-            step("after combat", lambda: snapshot(body))
-        else:
-            print("       strike skipped: punkAny already damaged the mob")
+        step("tagged cow dead (rcon witness)", tagged_cow_dead)
+        step("after combat", lambda: snapshot(body))
     step("cleanup cow (rcon, tag t020)", lambda: rcon(f"kill @e[type=cow,tag={COW_TAG}]"))
 
     # -- eat, if there is food (bread granted if the hotbar has none). The lever
