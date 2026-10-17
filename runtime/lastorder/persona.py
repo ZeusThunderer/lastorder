@@ -4,9 +4,9 @@ The prompt is static for a node's life (identity, traits, inheritance at birth),
 in every request and the provider's prefix cache can keep it. Per-step content goes elsewhere.
 
 The template carries one placeholder each for the perception-mode variants (ADR-020): the
-knowledge rule ({knowledge_rule}) and the primer block ({knowledge_rule}'s neighbor, section 9
-block 2). The code fills them from the mode: `plain` knows the game basics from the primer,
-`masked` does not know the world at all and gets no primer.
+knowledge rule ({knowledge_rule}) and the primer block ({primer}, section 9 block 2). The
+code fills them from the mode: `plain` knows the game basics from the primer, `masked` does
+not know the world at all and gets no primer.
 """
 
 from __future__ import annotations
@@ -65,12 +65,13 @@ def primer_block(primer: str, mode: str) -> str:
     """The primer as one template value: heading plus lines in `plain`, nothing in `masked`.
 
     A masked node must not learn the game from the primer (ADR-020), so the whole section 9
-    block 2 disappears rather than staying as an empty heading.
+    block 2 disappears rather than staying as an empty heading. The empty value is a bare
+    newline: the template keeps one blank line between the knowledge rule and Node variables.
     """
 
     text = primer.strip()
     if not text or mode == "masked":
-        return ""
+        return "\n"
     return f"{PRIMER_HEAD}\n{text}\n\n"
 
 

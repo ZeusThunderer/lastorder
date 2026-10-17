@@ -3,9 +3,11 @@
 build_step_prompt lays the ten section-9 blocks out in prefix-cache order — static-for-life
 blocks 1-6 close the system part, per-step blocks 7-10 fill the user part — and keeps the
 whole prompt under budget.STEP_INPUT_BUDGET (ADR-029) by trimming the refillable blocks in
-the documented order: the fresh tail first, then about entries, then the second vote
-candidate, then the oldest chat lines. Blocks 1-6 and 10 are never trimmed here: their size
-is bound to their sources (template, inheritance quotas, core.md cap, the option builder).
+the documented order: the fresh tail, about entries down to the most relevant one, vote
+candidates down to the first, the oldest chat, the oldest messages; beyond section 9, the
+last about entry and the last vote candidate go too, and only then the build fails. Blocks
+1-6 and 10 are never trimmed here: their size is bound to their sources (template,
+inheritance quotas, core.md cap, the option builder).
 
 parse_step_reply turns the model's JSON into a StepReply: a bad option_id or anything that is
 not a JSON object loses the step (StepError), while a broken msg, new_term or votes payload is
@@ -15,7 +17,7 @@ dropped alone — the step survives without it. The step is the only node-level 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Sequence
 
 from runtime.comms.schema import CommsSchemaError, OutboundMessage
@@ -36,6 +38,7 @@ from runtime.lastorder.persona import NOTHING_YET, PRIMER_HEAD, Inheritance, Nod
 from runtime.llm.client import LLMError, parse_json_object
 from runtime.perception import Perception
 from runtime.perception.chat import clean_chat
+from runtime.perception.translate import NAMESPACED, normalize
 from runtime.ports import KnowledgeSlice, NewTerm, NodeMessage, Option, StepReply, Vote
 
 MAX_SAY_SENTENCES = 3
@@ -106,11 +109,19 @@ def build_step_prompt(
     """The step's (system, user) pair, blocks in section-9 order, total <= STEP_INPUT_BUDGET.
 
     `observation` is the JSON of NETWORK.md section 5 (self, entities, blocks, inventory,
-    events) already rendered through perception; chat lines and inbox messages arrive raw —
-    service uc lines are dropped and, in `masked`, free texts are scrubbed by `perception`,
-    which a masked call must provide (a missing scrubber is an error, not a silent leak).
-    `primer` entries fill block 2 in `plain` only. `naming` defaults to the
-    NODE_NAMING_PRESET environment variable (ADR-018; lab is the documented default).
+    events) already rendered through perception; the observation and the option titles are
+    the only texts taken as-is. Every other free text — the Inheritance fields, core memory,
+    council goals, record claims, chat lines and inbox messages — goes through
+    `perception.scrub` when a perception is at hand (`minecraft:` namespaced ids are a leak
+    in `plain` too, ADR-020); in `plain` without one, the namespace forms are at least
+    normalized away. A `masked` call must provide a perception: a missing scrubber is an
+    error, not a silent leak. `primer` entries fill block 2 in `plain` only. `naming`
+    defaults to the NODE_NAMING_PRESET environment variable (ADR-018; lab is the documented
+    default).
+
+    Prefix-cache note: scrub output depends on what the perception has already seen, so the
+    system part can shift the first time the body meets an id mentioned in the inheritance
+    or the goals — the same trade the goals alone already made, accepted here.
     """
 
     mode = _check_mode(mode)
@@ -122,22 +133,38 @@ def build_step_prompt(
         )
 
     def washed(text: str) -> str:
-        return perception.scrub(text) if mode == "masked" else text
+        if perception is not None:
+            return perception.scrub(text)
+        return NAMESPACED.sub(lambda m: normalize(m.group(0)), text)  # plain without a body
 
     naming = naming or preset(env("NODE_NAMING_PRESET", default="lab") or "lab")
     primer_text = "\n".join(_primer_lines(primer))
+    # Wills, summaries, terms and the catalog are free texts written by smart and hive;
+    # nothing upstream scrubs them, so the step washes them itself (ADR-020, KNOWLEDGE 9).
+    inheritance = replace(
+        inheritance,
+        **{
+            name: washed(getattr(inheritance, name))
+            for name in (
+                "predecessors_summary",
+                "active_nodes_summary",
+                "inherited_notes",
+                "collective_terms",
+                "knowledge_catalog",
+            )
+        },
+    )
     system = PersonaProvider(naming).system_prompt(
         node, inheritance, mode=mode, primer=primer_text
     )
-    system += f"\n\n# Core memory (yours)\n{_core_block(core_memory)}"
-    # Council goals are free text a smart model wrote; they take the same road as chat (ADR-025)
+    system += f"\n\n# Core memory (yours)\n{_core_block(washed(core_memory))}"
     goals = _goals_block(slice.network_goals)
     if goals:
         system += f"\n\n# Network council (advice, not an order)\n{washed(goals)}"
 
-    about = [entry_line(e) for e in slice.about]
-    fresh = [entry_line(e) for e in slice.fresh]
-    votes = [entry_line(e) for e in slice.pending_votes]
+    about = [washed(entry_line(e)) for e in slice.about]
+    fresh = [washed(entry_line(e)) for e in slice.fresh]
+    votes = [washed(entry_line(e)) for e in slice.pending_votes]
     messages = [
         f"node {format_serial(m.from_serial)}: {washed(m.text)}" for m in inbox if m.text
     ]
@@ -162,8 +189,10 @@ def build_step_prompt(
         return "\n\n".join(parts)
 
     # Block budgets first (sources already cap themselves; this guards the assembly),
-    # then the section-9 trim order against the whole-prompt ceiling: fresh tail, about
-    # entries, the second vote candidate, the oldest chat, then the oldest messages.
+    # then the section-9 trim order against the whole-prompt ceiling: the fresh tail,
+    # about entries down to the most relevant one, vote candidates down to the first,
+    # the oldest chat, the oldest messages; beyond section 9, the last about entry and
+    # the last vote candidate go too, and only then the build fails.
     while about or fresh:
         if estimate_tokens("\n".join(about + fresh)) <= B_ABOUT:
             break
@@ -182,14 +211,18 @@ def build_step_prompt(
     while estimate_tokens(system + "\n" + user()) > STEP_INPUT_BUDGET:
         if fresh:
             fresh.pop()
-        elif about:
-            about.pop()
-        elif votes:
-            votes.pop()
+        elif len(about) > 1:
+            about.pop()  # keep the most relevant entry (section 9)
+        elif len(votes) > 1:
+            votes.pop()  # keep the first candidate, drop the second (section 9)
         elif chat_lines:
-            chat_lines.pop(0)
+            chat_lines.pop(0)  # oldest chat first
         elif messages:
             messages.pop(0)
+        elif about:
+            about.pop()  # beyond section 9: the last entry before giving up
+        elif votes:
+            votes.pop()  # beyond section 9: the last candidate before giving up
         else:
             raise ValueError(
                 "step prompt cannot fit STEP_INPUT_BUDGET: the static blocks and the "
@@ -240,7 +273,10 @@ def _parse_votes(data) -> tuple[Vote, ...]:
         if not isinstance(accept, bool):
             continue
         why = item.get("why", "")
-        votes.append(Vote(entry_id=entry_id.strip(), accept=accept, why=str(why).strip()))
+        votes.append(
+            Vote(entry_id=entry_id.strip(), accept=accept,
+                 why=why.strip() if isinstance(why, str) else "")
+        )
     return tuple(votes)
 
 

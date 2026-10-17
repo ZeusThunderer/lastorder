@@ -10,6 +10,7 @@ from runtime.lastorder.persona import (
     Node,
     PersonaError,
     PersonaProvider,
+    primer_block,
     render,
 )
 from runtime.lastorder.traits import load_quirks, roll
@@ -74,6 +75,10 @@ def test_primer_section_is_plain_only():
     masked = provider.system_prompt(node, Inheritance(), mode="masked", primer=primer)
     assert PRIMER_HEAD in plain and primer in plain
     assert PRIMER_HEAD not in masked and primer not in masked
+    # an empty primer value is a bare newline: one blank line stays before Node variables
+    assert primer_block("", "plain") == "\n"
+    assert primer_block("  ", "masked") == "\n"
+    assert "\n\n# Node variables" in provider.system_prompt(node, Inheritance(), mode="plain")
 
 
 def test_mode_defaults_to_env(monkeypatch):

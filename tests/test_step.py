@@ -249,6 +249,43 @@ def test_big_goals_are_kept_whole_until_the_ceiling_forces_an_error():
         build(slice=slice_(network_goals=(NetworkGoal(text="жить и наблюдать " * 3000, why=""),)))
 
 
+def test_ceiling_trim_keeps_the_first_about_and_the_first_candidate():
+    """Section-9 trim order under the ceiling: the fresh tail goes first, about shrinks to
+    the most relevant entry, vote candidates to the first one, and only then the oldest
+    chat; messages outlive chat; the last about entry and the last candidate go only after
+    everything else (beyond section 9). The goal size is picked so the trim walks exactly
+    into that middle stage."""
+    heavy_goals = tuple(
+        NetworkGoal(text=f"цель {i}: " + "обезопасить периметр сети и записать итог в базу знаний " * 2,
+                    why="совет требует реакции и проверки")
+        for i in range(33)
+    )
+    heavy_slice = slice_(
+        network_goals=heavy_goals,
+        about=tuple(
+            KnowledgeEntry(id=f"k-a{i:03d}", kind="fact", claim=f"наблюдение о стонущем номер {i}" * 2, status="confirmed", about=("ent:zombie",))
+            for i in range(4)
+        ),
+        fresh=(KnowledgeEntry(id="k-fresh", kind="fact", claim="свежий хвост базы", status="hypothesis"),),
+        pending_votes=(
+            KnowledgeEntry(id="k-v1", kind="danger", claim="первый кандидат: ночь без света", status="hypothesis"),
+            KnowledgeEntry(id="k-v2", kind="danger", claim="второй кандидат: лава под тонким слоем", status="hypothesis"),
+        ),
+    )
+    system, user = build(
+        slice=heavy_slice,
+        chat=(f"<LastOrder0{i}> старая реплика номер {i} про разное" for i in range(5)),
+        inbox=(NodeMessage(from_serial=8, to_serial=7, text="сообщение узла"),),
+    )
+    assert estimate_tokens(system + "\n" + user) <= STEP_INPUT_BUDGET
+    assert "k-fresh" not in user      # the fresh tail was trimmed first
+    assert "k-a000" in user and "k-a001" not in user  # about shrank to the most relevant
+    assert "k-v1" in user and "k-v2" not in user      # candidates shrank to the first
+    assert "старая реплика номер 4" in user           # ...while chat was still there:
+    assert "старая реплика номер 0" not in user       # its oldest lines went after votes
+    assert "сообщение узла" in user   # messages outlive chat in the trim order
+
+
 # --- perception hygiene (ADR-020, ADR-025) -----------------------------------------------
 
 
@@ -258,15 +295,55 @@ def test_masked_prompt_has_no_leaks():
     p.see("birch_log", "block")
     dirty_slice = slice_(
         network_goals=(NetworkGoal(text="обезопасить сеть: zombie у спавна", why="minecraft:zombie в логах"),),
+        about=(KnowledgeEntry(id="k-0002", kind="danger", claim="zombie бьёт на сближении, birch log не спасает", status="confirmed", about=(p.handle("zombie", "entity"),)),),
+        fresh=(KnowledgeEntry(id="k-0003", kind="fact", claim="minecraft:birch_log рубится топором", status="hypothesis"),),
+    )
+    dirty_inheritance = Inheritance(
+        predecessors_summary="00001 game:zombie 8 мин, около birch log",
+        active_nodes_summary="00008 LastOrder02 у zombie",
+        inherited_notes="Узлу 00007: zombie приходит ночью, birch log не стена.",
+        collective_terms="«пятнистая колонна» — minecraft:birch_log",
+        knowledge_catalog="k-0001 [fact] zombie носит birch log",
     )
     system, user = build(
         mode="masked",
         perception=p,
         slice=dirty_slice,
+        inheritance=dirty_inheritance,
+        core_memory="goal: обойти zombie и minecraft:birch_log",
         chat=("<LastOrder02> zombie was slain near minecraft:birch_log",),
-        inbox=(NodeMessage(from_serial=8, to_serial=7, text="birch log рядом с водой"),),
+        inbox=(NodeMessage(from_serial=8, to_serial=7, text="birch log рядом с водой, zombie тоже"),),
     )
     assert p.leaks(system + user) == []
+
+
+def test_plain_namespaced_forms_are_normalized():
+    """`minecraft:` is a leak in plain too (ADR-020): free texts go through perception.scrub
+    when one is passed, and through NAMESPACED+normalize when the plain call has none."""
+    dirty_slice = slice_(
+        network_goals=(NetworkGoal(text="обезопасить сеть: ночной стон", why="minecraft:zombie в логах"),),
+    )
+    dirty_inheritance = inheritance().__class__(
+        predecessors_summary="00001 game:стон 8 мин",
+        active_nodes_summary="00008 LastOrder02",
+        inherited_notes="Узлу 00007: minecraft:birch_log не стена.",
+        collective_terms="«пятнистая колонна» — blk:birch_log",
+        knowledge_catalog="k-0001 [fact] еда лечит",
+    )
+    kwargs = dict(
+        slice=dirty_slice,
+        inheritance=dirty_inheritance,
+        core_memory="goal: minecraft:birch_log на верстак",
+        chat=("<LastOrder02> дай minecraft:bread",),
+        inbox=(NodeMessage(from_serial=8, to_serial=7, text="я рублю minecraft:birch_log"),),
+    )
+    with_perception = Perception(DESCRIPTIONS, salt="t", mode="plain")
+    system, user = build(mode="plain", perception=with_perception, **kwargs)
+    assert with_perception.leaks(system + user) == []
+    assert "minecraft:" not in system + user
+    system, user = build(mode="plain", **kwargs)  # no perception: at least normalized
+    assert "minecraft:" not in system + user
+    assert "birch_log" in system  # the normalized form stays readable
 
 
 def test_service_lines_never_reach_the_prompt():
@@ -350,12 +427,14 @@ def test_parse_drops_broken_optionals_one_by_one():
 def test_parse_keeps_valid_votes_next_to_broken_ones():
     reply = parse_step_reply(
         '{"option_id": "fell_birch", "votes": [7, {"entry_id": "k-0004", "accept": true}, '
-        '{"entry_id": "k-0005", "accept": false, "why": "не сходится"}]}',
+        '{"entry_id": "k-0005", "accept": false, "why": "не сходится"}, '
+        '{"entry_id": "k-0006", "accept": true, "why": null}]}',
         OPTIONS,
     )
     assert reply.votes == (
         Vote(entry_id="k-0004", accept=True, why=""),
         Vote(entry_id="k-0005", accept=False, why="не сходится"),
+        Vote(entry_id="k-0006", accept=True, why=""),  # null why is an empty string, not "None"
     )
 
 
