@@ -15,7 +15,7 @@
 | T-009 | Режимы восприятия plain/masked и фильтр служебных строк uc | E2 | changes | critical | z/T-009-perception-modes |
 | T-010 | Праймер — основы Minecraft как стартовая база сети | E2 | queued | normal | z/T-010-primer |
 | T-011 | Промпт узла под режимы восприятия и схема ответа шага | E2 | queued | critical | z/T-011-prompt-step-schema |
-| T-012 | Хранилище базы сети — записи, статусы, файлы узлов, git | E2 | in_progress | critical | z/T-012-hive-core |
+| T-012 | Хранилище базы сети — записи, статусы, файлы узлов, git | E2 | changes | critical | z/T-012-hive-core |
 | T-013 | Путь смерти — детектор, завещание, retire, respawn, birth | E2 | queued | critical | z/T-013-death-will-path |
 | T-014 | Цикл мозга — шаг узла C2 поверх C1, логи, один узел живёт | E2 | queued | critical | z/T-014-mind-loop |
 | T-015 | JevDecider в тактике C1 (облачный Jev, ADR-027) | E3 | queued | critical | z/T-015-jev-decider |
