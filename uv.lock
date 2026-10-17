@@ -517,6 +517,7 @@ hive = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "last-order", extra = ["hive"] },
     { name = "pytest" },
 ]
 
@@ -532,7 +533,10 @@ requires-dist = [
 provides-extras = ["hive"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8" }]
+dev = [
+    { name = "last-order", extras = ["hive"] },
+    { name = "pytest", specifier = ">=8" },
+]
 
 [[package]]
 name = "litellm"

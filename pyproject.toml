@@ -14,7 +14,9 @@ dependencies = [
 hive = ["fastapi>=0.115", "uvicorn>=0.30"]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+# The hive extra rides along in dev so plain `uv run pytest` covers the API tests too
+# (tests/test_hive_*.py); the image installs it explicitly (docker/mind/Dockerfile).
+dev = ["pytest>=8", "last-order[hive]"]
 
 [build-system]
 requires = ["hatchling"]

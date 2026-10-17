@@ -2,7 +2,7 @@
 id: T-022
 title: Сервис hive и HiveClient — HTTP API портов, срок жизни, RCON
 stage: E2
-status: ready
+status: done
 criticality: critical
 branch: z/T-022-hive-service
 created: 2026-10-17
@@ -81,3 +81,5 @@ docker compose -f docker/compose.yml up -d hive
 - Никаких вызовов LLM (цели сети — T-016, болтовня — T-017).
 
 ## Заметки надзора
+- Принято в раунде 2. Minor R2-1 (ядовитая строка outbox держит birth/retire) и R2-2 (двойные паузы
+  чтения при лежащем hive) — перенести в T-014, где мозг владеет outbox.
