@@ -55,3 +55,106 @@ mind-1, сохранность knowledge через рестарт hive.
 «нельзя трогать runtime/knowledge/» и сигнатур портов; готов сделать иначе по замечанию.
 
 ## Раунд 1 · 2026-10-17
+Коммиты: d9ab828 (план + зависимости), 3a2838a (ядро: app/lifecycle/rcon/client + docker), 2adf890 (тесты); настоящий коммит — отчёт раунда 1.
+
+### Сделано
+- `runtime/hive/rcon.py` — минимальный Source RCON-клиент (по `tools/body_probe.py`): адрес/пароль
+  из env, пароль вне repr/исключений/событий; `kill_confirmed()` отличает «Killed …» от
+  «No entity was found».
+- `runtime/hive/lifecycle.py` — `Lifecycle` + `HiveLog`: срок жизни (`MAX_LIFE_MIN` = 45, скан раз
+  `HIVE_TTL_SCAN_S` = 30 c, один подтверждённый `/kill` на узла с повторами при отказе),
+  `request_death(serial, "stuck")` — сразу без порога (ADR-026), поправка причины при `retire`
+  (`stuck` по факту запроса, `ttl` по подтверждённому kill), `lost` при повторном `birth` в слоте —
+  прежний закрывается аварийным завещанием (`emergency_will`, причина `game`), состояние в
+  `lifecycle.json` (volume `run`) со сверкой birth.json на старте, события в `events.jsonl`.
+- `runtime/hive/app.py` — FastAPI: 13 эндпоинтов один к одному с методами портов + `GET /health`;
+  `HiveService` реализует три порта напрямую (эндпоинты — механический мост через кодеки);
+  inbox в памяти с TTL `MSG_TTL_S` = 600 и доставкой один раз; `chatter_turn` → всегда `None`;
+  единая схема ошибок `{"error": {kind, message}}`; фоновый скан через `asyncio.to_thread`;
+  замок на состояние Lifecycle и на inbox.
+- `runtime/hive/client.py` — `HiveClient` (Memory+NodeRegistry+NodeComms поверх httpx) + общие
+  с сервером кодеки; повторы с растущей паузой на ошибку соединения и 5xx; офлайн: 4 операции в
+  буфер `run/hive_outbox.jsonl` (доливка по порядку перед любым следующим вызовом и перед
+  `retire`), чтения из кеша с `client.stale`, чтение без кеша — `HiveUnavailable`,
+  `chatter_turn` → None; `birth`/`request_death`/`retire` не буферизуются.
+- `docker/mind/Dockerfile` — `git` в образе и `--extra hive`; `docker/compose.yml` — сервис
+  `hive` (внутренний порт только, volumes `knowledge` + `hive-run`, `--workers 1` с комментарием).
+- `pyproject.toml`/`uv.lock` — dev-группа ссылается на `last-order[hive]`: обычный `uv run pytest`
+  видит fastapi.
+
+### Проверки
+```
+$ uv run pytest
+316 passed, 1 warning in 12.78s        # 1 warning — StarletteDeprecation про httpx в TestClient
+$ uv run python tools/check.py
+Every workplace is intact: files present, links resolve, boxes parse.
+$ docker compose -f docker/compose.yml up -d --build hive   # из worktree-копии compose
+Container lastorder-hive-1 Started
+# /health из mind-1 (docker compose exec; curl в python:3.12-slim нет — python urllib):
+health from mind-1: 200 {"status":"ok"}; birth → serial 1; alive → [{"serial":1,...}]
+$ docker compose -p lastorder restart hive && … exec mind-1 …
+health after restart: 200; alive после рестарта: serial 1 восстановлен из volume;
+вторая birth → serial 2 (номер не переиспользуется); core_memory записан и прочитан.
+$ docker compose -p lastorder exec hive git -C /knowledge log --oneline
+до рестарта:  097a69a init: layout / d0de7f2 birth: 00001 LastOrder01
+после:        + eeb9d67 birth: 00002 LastOrder02 / 106c505 core: 00002
+```
+Порт hive наружу не публикуется (`docker port lastorder-hive-1` — пусто), в логах пароля нет.
+Стенд оставлен поднятым (hive + mc-server + body-1; mind-1 завершает body_probe и гаснет сам —
+это его штатный `restart: no`).
+
+### Ответ на план-ревью (P1-1…P1-10)
+- P1-1 · fixed 3a2838a — `git` в `docker/mind/Dockerfile`, корень базы из env `KNOWLEDGE_DIR`,
+  volume `knowledge` объявлен; git-лог до/после рестарта в «Проверках».
+- P1-2 · fixed 3a2838a — `lost`-узел закрывается `emergency_will` → `store.retire(serial, "game", …)`
+  и при повторном birth, и при сверке на старте (дубли слота тоже); имя узла — из пресета
+  (`NAME_PRESET`, по умолчанию lab); обращение к наследнику — нейтральное «наследник»
+  (в `NamingPreset` нет формы наследника, а `runtime/lastorder/` вне объёма задачи).
+  Тесты: api (409 на запись, will.md с `emergency: true`), lifecycle, стартовая сверка.
+- P1-3 · fixed 2adf890 — буфер доливается перед любым вызовом и обязательно до `retire`;
+  `birth`/`request_death`/`retire` при недоступном hive бросают `HiveUnavailable`. Тест
+  «буфер → сервер вернулся → retire → кандидат в базе».
+- P1-4 · fixed 3a2838a — один замок на состояние Lifecycle и на inbox; sync-эндпоинты в пуле
+  потоков, скан через `asyncio.to_thread`; compose: `--workers 1` с комментарием. Тест двух
+  параллельных birth в один слот (один живой, один lost).
+- P1-5 · fixed 3a2838a — таблица: UnknownNode → 404, AlreadyRetired → 409, Invalid* и валидация
+  → 422, прочие StoreError → 503; доливка отбрасывает только 4xx и пишет событие
+  `outbox.drop` в `hive_client_events.jsonl`. Тесты 503-повтора и отбрасывания.
+- P1-6 · fixed 3a2838a — успех kill только по ответу сервера (`kill_confirmed`), иначе
+  `life.rcon_failed` и повтор на следующем проходе; `ttl` в retire подставляется только после
+  подтверждённого kill; `request_death` с причиной ≠ stuck → 422, неизвестный/мертвый serial →
+  404/409 без RCON. Тесты на оба ответа подставного RCON.
+- P1-7 · fixed 2adf890 — выбран вариант «дубль допустим»: при ошибке соединения повтор сразу,
+  при read-timeout — без повтора, запись в буфер (возможен дубль `send`; сообщение — наблюдение,
+  кандидат/голос/core в хранилище идемпотентны). Тест пауз и таймаута.
+- P1-8 · fixed — broadcast (`all`) не введён молча: `NodeMessage.to_serial: int` его не выражает,
+  развёртка по живым — за T-017; путь буфера клиента — env `RUN_DIR` (по умолчанию `run`),
+  у mind-1 volume `run` появится в его задачах, чужие сервисы compose не трогал.
+- P1-9 · fixed 2adf890 — тесты: пароля нет в repr RCON-клиента и в `events.jsonl`; кандидат с
+  `minecraft:…` → 422 в единой схеме и при доливке отбрасывается без бесконечных повторов.
+  `leak_check` хранилища в hive — `None`: словарь сырых id есть только у perception мозга.
+- P1-10 · принято к сведению — свежий volume `knowledge` праймер T-010 уже не получит (грузится
+  только в пустую базу); не чинил, риск для T-010.
+
+### Отклонения от задачи
+- `pyproject.toml` тронут шире фразы про httpx: dev-группа получила self-extra `last-order[hive]`
+  (fastapi/uvicorn уже были объявлены extra'ом) — иначе обычный `uv run pytest` из «Проверок» не
+  видит fastapi и красный. Согласовано план-ревью (P1-1/шапка).
+- «curl из mind-1»: в `python:3.12-slim` нет curl — проверка выполнена `python urllib` из того же
+  контейнера/сетевого пространства, суть критерия (HTTP 200 до `/health` из пространства тела)
+  соблюдена.
+- `docker compose restart hive` вместо даункаста: `down` запрещён протоколом стенда.
+
+### Вне задачи
+- `/run/lock` в volume `hive-run` — пустой каталог базового образа Debian, попавший в свежий
+  volume при первом монтировании; не трогал.
+- `fastapi.testclient` даёт StarletteDeprecationWarning («install httpx2») — шум новой версии
+  starlette, к задаче отношения не имеет.
+- Стоимость plan-вызова надзора не видна: вывод скрипта обрезан харнессом (вердикт и находки
+  зафиксированы в review.md полностью).
+
+### Вопросы
+- нет
+
+### Вызовы надзора
+- 2026-10-17 · plan · d9ab828 · VERDICT: revise · cost_usd: ? (вывод CLI обрезан харнессом)
