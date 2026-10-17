@@ -144,6 +144,15 @@ $ docker compose -p lastorder exec hive git -C /knowledge log --oneline
   контейнера/сетевого пространства, суть критерия (HTTP 200 до `/health` из пространства тела)
   соблюдена.
 - `docker compose restart hive` вместо даункаста: `down` запрещён протоколом стенда.
+- C-1 (minor, чекер): `uv.lock` изменён вне списка «Можно трогать» — механическое следствие правки
+  `pyproject.toml` (без него `uv sync --frozen` в образе и локально ломается); правка раскрыта ещё
+  в плане и согласована план-ревью.
+- C-2 (minor, чекер): `HEIR_ADDRESS` — строка в коде (`lifecycle.py`). Формы обращения к наследнику
+  нет в `NamingPreset` (ADR-018), а `runtime/lastorder/` вне объёма задачи; строка нейтральна к
+  пресетам («наследник»), имя самого узла берётся из пресета через `NAME_PRESET`.
+- C-3 (minor, чекер): запасной RCON-пароль по умолчанию в `RconClient.from_env` — то же значение,
+  что уже лежит в `docker/compose.yml` на main; из env переопределяется, в repr/логи/события не
+  попадает (тест P1-9 и стенд подтверждают).
 
 ### Вне задачи
 - `/run/lock` в volume `hive-run` — пустой каталог базового образа Debian, попавший в свежий
@@ -157,4 +166,9 @@ $ docker compose -p lastorder exec hive git -C /knowledge log --oneline
 - нет
 
 ### Вызовы надзора
-- 2026-10-17 · plan · d9ab828 · VERDICT: revise · cost_usd: ? (вывод CLI обрезан харнессом)
+- 2026-10-17 · plan · d9ab828 · VERDICT: revise · cost_usd: unknown
+
+### Самопроверка
+- lo-checker: раундов 1, CHECK: clean
+- Находок, требующих исправления, не было; три minor чекера (C-1 uv.lock вне списка, C-2
+  HEIR_ADDRESS строкой, C-3 запасной RCON-пароль) перечислены в «Отклонениях» выше с обоснованием.
