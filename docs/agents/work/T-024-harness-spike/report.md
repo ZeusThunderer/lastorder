@@ -88,6 +88,101 @@ probe-контейнере до прогона; если CLI не принима
 План 2 дорабатывать новым планом не буду (лимит 2 планов исчерпан): находки P2-1…P2-4 учтены
 непосредственно в работе, см. «Сделано» раунда 1.
 
+## Раунд 1 · 2026-10-17
+Коммиты: 96ff115, 1b0b79b, 9b1d395 (+ этот)
+
+### Сделано
+
+- **Шаг 0** (до остального) — итоги в `docs/agents/harness-spike.md` с пометками источников:
+  ZCode 3.15.3 в Linux-контейнере без GUI работает только через CLI-бандл
+  `resources/glm/zcode.cjs` (zcode 0.16.9, Node >= 22; Electron без X падает, под xvfb живёт);
+  квота ×1.5 — действующее условие ZCode (карточка «ZCode (1.5× Usage)»,
+  docs.z.ai/devpack/tool/others), квоты в кредитах; прокси LiteLLM условиями GLM Coding Plan
+  запрещён (список поддерживаемых инструментов закрыт, нарушения — риск-контроль до бана);
+  аутентификация headless-CLI — `ANTHROPIC_API_KEY` (провайдер zai-api, anthropic-messages).
+- **P1-1/P2-1 (сеть)**: `dev/compose.harness-spike.yml` — mind-1 заменён на MCP-сервер
+  (`python -m runtime.mind.mcp_body`), харнессы в отдельной сети `harness-spike` вместе с
+  body-1, mc-server/hive там нет. Проверено на стенде: из контейнера харнесса `body-1:8700`
+  открыт, `body-1:25333` (py4j) и `mc-server:25575` (RCON) закрыты.
+- **MCP тела** `runtime/mind/mcp_body.py`: observe/act/stop/say/wait_events; рычаги `LEVERS`
+  без `command`/`chat` (P1-2: item в plain → normalize → `^[a-z0-9_]+$`, count 1..64, числовые
+  диапазоны, unknown-аргументы — отказ); say после strip(): нет `/`, `@`, ведущего `#`
+  (Baritone-префикс), управляющих и `§`, длина ≤ 256, не чаще 1/4 с (P1-3); DeathDetector +
+  ровно один respawn на смерть через `MCP_RESPAWN_DELAY_S` (P1-4); JSONL-лог вызовов
+  с t_start/t_end, отказами, woke_by, effect_ms после act с 5 Гц burst 5 с (P1-5, P2-4);
+  tap_key/hold_key allowlist клавиш, ms ≤ 5000 (P1-8). Зависимость `mcp>=2.3.0`.
+- **Тесты** `tests/test_mcp_body.py`: 29 тестов на подставном теле через настоящий streamable
+  HTTP (uvicorn port 0 в потоке): набор инструментов, отказы `command`/`chat`, инъекции
+  `dirt; @gamer` / `dirt\n@goto` / `minecraft:dirt 1 x`, say-фильтры (P1-3 список), фильтр
+  служебных строк и plain-имена, wait_events по таймауту и по событию, смерть → respawn ×1,
+  лог вызовов и отказов.
+- **Инфраструктура спайка** `dev/harness_spike/`: Dockerfile (opencode 1.19.3; CLI-бандл ZCode
+  из AppImage с sha256 — P1-7), opencode.json + zcode .mcp.json (array-схема CLI),
+  run_opencode.sh (auth store из env — opencode 1.19.3 не берёт OPENROUTER_API_KEY из env
+  сам; проверено на probe-контейнере), run_zcode.sh, spike.sh (оркестратор на хосте: подъём
+  стека, sandbox-проверка, RCON /kill на 10-й минуте и аварийное завещание — на хосте, секретов
+  в контейнер харнесса кроме ключей LLM не идёт — P2-2; новый узел при остатке > 3 мин — P2-3;
+  docker stats; сбор логов; summarize.py — сводные цифры), sister_prompt.py (промпт сестры из
+  `prompt_template.md` через PersonaProvider с пресетом `lab` и чертами roll(seed); ядро
+  личности не правится).
+- **.env.example**: `ZAI_API_KEY`, `SPIKE_MODEL`, `SPIKE_MINUTES` (имена без значений).
+- **E2E без LLM**: из контейнера харнесса по JSON-RPC через body-1:8700 — initialize,
+  tools/list, observe с живого тела (in_game, plain-имена `blk:dirt dirt`). Команда проверки
+  из задачи `docker compose -f docker/compose.yml -f dev/compose.harness-spike.yml up -d
+  mc-server body-1 mind-1` выполняется (стек поднят, mind-1 работает как MCP-сервер).
+
+### Проверки
+```
+$ uv run pytest
+458 passed in 25.3s   (из них 29 — tests/test_mcp_body.py)
+$ uv run python tools/check.py
+CHARACTERS: last_order, vesper
+Every workplace is intact: files present, links resolve, boxes parse.
+$ docker compose -f docker/compose.yml -f dev/compose.harness-spike.yml up -d mc-server body-1 mind-1
+Container lastorder-mc-server-1 Running/Healthy; body-1-1, mind-1-1 Started
+(после --build mind-1; e2e MCP: инструменты и observe отвечают)
+```
+
+### Отклонения от задачи
+
+- Прогоны 15 мин не выполнены: оба уперлись в секреты (см. «Вопросы»). Техническая часть
+  прогонов доведена до LLM-вызова и проверена.
+- Праймер в промпте сестры пуст: файлов `agent/last_order/primer/` нет (T-010 не сделан);
+  `PersonaProvider` корректно рендерит шаблон без него.
+
+### Вне задачи
+
+- Скрипт `dev/call_supervisor.sh` в main падает на Windows-хосте этого стенда: `python` в Git
+  Bash — нерабочий Store-alias (печатает «Python» и не исполняет), вывод Claude теряется.
+  Обход в сессии: PATH с реальным python.exe. Не правил: скрипты протокола ведёт надзор.
+- `docs.z.ai/devpack/tool/opencode` и соседние страницы карточек описывают OpenCode как
+  «The Claude Code IDE plugin» — похоже на копипасту в доках Z.ai, не влияет на задачу.
+
+### Вопросы
+
+- **Q2 (блокер, оба прогона).** Ключи LLM недоступны:
+  - OpenRouter: ключ из корневого `.env` отклонён провайдером — `401 API key expired`
+    (прямой curl из контейнера с ключом из `.env`; имя переменной `OPENROUTER_API_KEY`).
+    Без него не идёт прогон OpenCode — критерий «15 мин в каждом из двух харнессов».
+  - Z.ai: токена нет ни в `.env`, ни в окружении; `zcode login zai` требует браузера.
+  Варианты: (а) оператор обновляет `OPENROUTER_API_KEY` в корневом `.env` и кладёт
+  `ZAI_API_KEY` (имя из `.env.example`) — прогоны запускаю `bash
+  dev/harness_spike/spike.sh opencode 15` и `… zcode 15`, сводки допишу в
+  `docs/agents/harness-spike.md`; (б) только OpenRouter-ключ — ZCode-прогон остаётся за
+  оператором по схеме OAuth в контейнере; (в) оператор сам прогоняет спайк по готовым
+  скриптам и прикладывает вывод. Мой выбор: (а) — оба прогона воспроизводимы одной командой.
+  По стоимости: технический расход на прогоны ≈ $0.05–0.10 (qwen3.7-flash, ~100 ходов,
+  ориентир NETWORK.md §8), лимит $1 соблюдается; проверка фактической стоимости на 3-й
+  минуте встроена (P1-7).
+
+### Вызовы надзора
+
+- 2026-10-17 · plan · 46f83f2 · VERDICT: revise (P1-1…P1-8; вывод до меня не дошёл из-за
+  сломанного `python`-алиаса Windows в `call_supervisor.sh`, вердикт взят из `review.md`
+  @ 368c165; повторный вызов не создал раунда) · cost_usd: 0.37 · effort: high
+- 2026-10-17 · plan · 939c5c7 · VERDICT: revise (P2-1…P2-4; лимит планов исчерпан, находки
+  учтены в работе) · cost_usd: 0.59 · effort: high
+
 ## План 2 · 2026-10-17
 
 Учтены P1-1…P1-8 ревью плана 1. Шаг 0 не меняется; его факты в `harness-spike.md` получат пометки
