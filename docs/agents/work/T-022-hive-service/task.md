@@ -2,7 +2,7 @@
 id: T-022
 title: Сервис hive и HiveClient — HTTP API портов, срок жизни, RCON
 stage: E2
-status: review
+status: changes
 criticality: critical
 branch: z/T-022-hive-service
 created: 2026-10-17
