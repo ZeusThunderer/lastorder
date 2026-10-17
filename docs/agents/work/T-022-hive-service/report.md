@@ -172,3 +172,63 @@ $ docker compose -p lastorder exec hive git -C /knowledge log --oneline
 - lo-checker: раундов 1, CHECK: clean
 - Находок, требующих исправления, не было; три minor чекера (C-1 uv.lock вне списка, C-2
   HEIR_ADDRESS строкой, C-3 запасной RCON-пароль) перечислены в «Отклонениях» выше с обоснованием.
+
+## Раунд 2 · 2026-10-17
+Коммиты: 921954e (take changes), a630116 (исправления R1-1..R1-8), 84a222e (C-1 чекера);
+настоящий коммит — отчёт раунда 2.
+
+### Сделано
+- Клиент: `inbox` и `chatter_turn` исключены из кеша — офлайн отвечают `[]` и `None` с
+  `stale = True` (R1-1). Порядок доливки усилен: при непродолившемся буфере новая буферизуемая
+  запись дописывается в хвост, прямые записи (`birth`, `request_death`, `retire` — явный флаг
+  `direct`) отказывают с `HiveUnavailable` (R1-2 + C-1 раунда 2: у `birth` есть `decode`, флаг
+  закрывает обход).
+- Lifecycle: `life.rcon_failed` пишется при первой неудаче и при смене ошибки/ответа, повтор kill
+  на каждом скане сохранён (R1-3). Неудачное закрытие `lost` ретраится следующим `birth` в слоте,
+  `require_node` для lost — отказ (R1-8).
+- RCON: `kill_confirmed` — положительное совпадение (ответ начинается с `Killed`) (R1-4);
+  запасного пароля в коде нет — без `RCON_PASSWORD` kill отказывает событием, hive стартует (R1-5).
+- Compose: volume `hive-run` монтируется в `/hive-run`, не поверх системного `/run` образа (R1-6).
+- Тесты: сценарии портов параметризованы по `HiveService` и `HiveClient` (R1-7, «по желанию» —
+  сделано); по тесту на каждое исправление.
+
+### Проверки
+```
+$ uv run pytest
+327 passed, 1 warning in 20.81s
+$ uv run python tools/check.py
+Every workplace is intact: files present, links resolve, boxes parse.
+$ docker compose -f docker/compose.yml up -d --build hive   # из worktree-копии compose
+lastorder-hive-1 Up; /health → 200; alive → [{serial 1},{serial 2}] — состояние и git-история
+базы пережили пересоздание контейнера; событий rcon_failed для офлайн-игрока — по одному на отказ.
+```
+
+### Отклонения от задачи
+- Как в раунде 1 (pyproject self-extra, uv.lock, curl→urllib, restart вместо down, HEIR_ADDRESS).
+
+### Вне задачи
+- В volume `hive-run` остался каталог `lock` от монтирования раунда 1 поверх системного `/run`;
+  `docker volume` запрещён протоколом — не удалял, при желании чистится оператором.
+
+### Вопросы
+- нет
+
+### Ответ на ревью
+- R1-1 · fixed a630116
+- R1-2 · fixed a630116
+- R1-3 · fixed a630116
+- R1-4 · fixed a630116
+- R1-5 · fixed a630116
+- R1-6 · fixed a630116
+- R1-7 · fixed a630116
+- R1-8 · fixed a630116
+
+### Вызовы надзора
+- 2026-10-17 · plan · d9ab828 · VERDICT: revise · cost_usd: unknown
+- 2026-10-17 · result · 3e46f97 · VERDICT: changes · cost_usd: unknown
+
+### Самопроверка
+- lo-checker: раундов 2, CHECK: clean
+- C-1 (birth обгонял зависший буфер из-за decode) · fixed 84a222e — явный флаг `direct`, тест
+  `test_birth_waits_behind_a_stuck_buffer`.
+- C-2 (раунд 2 отчёта не был дописан до сдачи) · закрыт этим раундом отчёта.
