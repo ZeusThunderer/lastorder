@@ -40,7 +40,7 @@ services:
       SPIKE_MINUTES: "${SPIKE_MINUTES:-15}"
       SPIKE_MODEL: "${SPIKE_MODEL:-openrouter/qwen/qwen3.7-flash}"
       # zcode: the GLM Coding Plan key through the built-in zai-api provider (step 0)
-      ANTHROPIC_API_KEY: "${ZAI_API_KEY}"
+      ANTHROPIC_API_KEY: "${ZCODE_API_KEY}"
     command: ["run_opencode.sh"]
     volumes:
       - type: bind
@@ -58,7 +58,7 @@ services:
     mem_limit: 2g
     working_dir: /workplace
     environment:
-      ANTHROPIC_API_KEY: "${ZAI_API_KEY}"
+      ANTHROPIC_API_KEY: "${ZCODE_API_KEY}"
       SPIKE_MINUTES: "${SPIKE_MINUTES:-15}"
     command: ["run_zcode.sh"]
     volumes:

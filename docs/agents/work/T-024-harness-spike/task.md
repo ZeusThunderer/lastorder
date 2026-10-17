@@ -2,8 +2,7 @@
 id: T-024
 title: Спайк харнесса — узел 15 мин в OpenCode и ZCode через MCP тела
 stage: E2
-status: blocked
-Blocked: нужен оператор — ключ OpenRouter просрочен (401 API key expired) и нет токена Z.ai; без них не выполняются оба 15-минутных прогона, вопрос Q2 в report.md
+status: in_progress
 criticality: critical
 branch: z/T-024-harness-spike
 created: 2026-10-17
