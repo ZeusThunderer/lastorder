@@ -34,9 +34,32 @@ task_status() {
 # Rewrite status in a task.md file on disk, keeping line endings.
 set_status_file() { sed -i "0,/^status: [a-z_]*/s//status: $2/" "$1"; }
 
+# Frontmatter field of a task.md file on disk: disk_field <file> <name>
+disk_field() { sed -n "s/^$2: *//p" "$1" | head -1 | tr -d '\r'; }
+
+# Queued tasks whose `after:` tasks are all done become ready (coop-protocol.md «Статусы»).
+# Edits task.md files in the main worktree on disk and prints the promoted folders; the caller commits.
+promote_queued() {
+  local f d deps dep ok
+  local -a dd
+  for f in "$ROOT/$WORK"/T-[0-9][0-9][0-9]-*/task.md; do
+    [ -f "$f" ] && [ "$(disk_field "$f" status)" = queued ] || continue
+    deps="$(disk_field "$f" after | tr -d '[] ' | tr ',' ' ')"
+    [ -n "$deps" ] || continue
+    ok=1
+    for dep in $deps; do
+      dd=("$ROOT/$WORK/$dep"-*/task.md)
+      [ -f "${dd[0]}" ] && [ "$(disk_field "${dd[0]}" status)" = done ] || { ok=0; break; }
+    done
+    [ "$ok" = 1 ] || continue
+    set_status_file "$f" ready
+    d="${f%/task.md}"; printf '%s\n' "${d##*/}"
+  done
+}
+
 # Set the status cell of a BOARD row in a file on disk.
 board_set() {
-  python - "$1" "$2" "$3" <<'PY'
+  uv run --project "$ROOT" python - "$1" "$2" "$3" <<'PY'
 import io, sys
 path, tid, status = sys.argv[1:]
 lines = io.open(path, encoding="utf-8", newline="").read().split("\n")
