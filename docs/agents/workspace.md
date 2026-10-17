@@ -17,6 +17,7 @@
 | `docs/character/LAST_ORDER.md` | бриф персонажа — источник истины |
 | `docs/context/` | исходные переписки: экспорт чата Cursor (949 строк, концепции разума на стр. 661–886) и обрывок про имя и план |
 | `task1.md` | домашка курса, сдана — не править |
+| `task2.md` | актуальный план по занятиям (ревизия task1, ADR-030/031) |
 | `AGENTS.md` (корень) | вход для ZCode (worker), отсылает к CLAUDE.md. Не путать с `agent/AGENTS.md` из aw |
 | `docs/agents/coop-protocol.md`, `docs/agents/work/` | протокол двух агентов (ADR-019): задачи, отчёты, ревью, журнал прямых правок |
 | `.claude/skills/`, `.zcode/skills/` | скилы Claude (`lo-plan`, `lo-review`, `lo-direct-edit`) и ZCode (`lo-take`, `lo-submit`, `lo-blocked`, `lo-call-supervisor`). ZCode сам ставит junction-ссылки на скилы Claude в `.zcode/skills/` — они в `.gitignore` |
