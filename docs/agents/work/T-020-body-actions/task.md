@@ -2,7 +2,7 @@
 id: T-020
 title: Тело — позиции в наблюдении и рычаги добычи, боя, еды
 stage: E2
-status: review
+status: changes
 criticality: normal
 branch: z/T-020-body-actions
 created: 2026-10-17
@@ -71,7 +71,8 @@ after: [T-006]
 uv run pytest
 uv run python tools/check.py
 docker compose -f docker/compose.yml up -d mc-server body-1
-docker compose -f docker/compose.yml run --rm mind-1 python dev/body_smoke.py --actions
+docker compose -f docker/compose.yml build mind-1
+docker compose -f docker/compose.yml run -T --rm mind-1 python - --actions < dev/body_smoke.py
 ```
 
 ## Ограничения
@@ -82,3 +83,5 @@ docker compose -f docker/compose.yml run --rm mind-1 python dev/body_smoke.py --
 ## Заметки надзора
 Разблокировано 2026-10-17 (ADR-028): headless-надзору открыт стенд (`docker compose`), задача снова на ревью — прогнать `body_smoke.py --actions` и вынести вердикт.
 2026-10-17, раунд 2: критерий `eat` изменён на `holdKey("use", ms)` по данным стенда (R2-4).
+2026-10-17, раунд 3: строка `body_smoke.py` в «Проверках» заменена на рабочий вызов через stdin
+(образ mind не содержит `dev/`).

@@ -77,3 +77,46 @@
 
 ### Чек-лист проекта
 Без замечаний. LLM не вызывается, `@gamer` нет в `LEVERS`, `unionclef/` и `runtime/perception/` не тронуты.
+
+## Раунд 3 · 2026-10-17 · вердикт: changes · headless
+Проверено: `git diff main...z/T-020-body-actions` @ 28279ca
+
+### Проверки (прогнаны надзором)
+- `uv run pytest` — 96 passed
+- `uv run python tools/check.py` — Every workplace is intact
+- `docker compose ... ps` — mc-server (healthy), body-1 Up
+- `docker compose -f docker/compose.yml build mind-1` — образ собран из ветки
+- `docker compose -f docker/compose.yml run -T --rm mind-1 python - --actions < dev/body_smoke.py` —
+  **exit 1, `1 step(s) failed: tagged cow dead (rcon witness)`**.
+  Пройдено: mine (`{'queued': 1, 'ok': True}`, блок исчез за 2,3 с); `@get log 2` (3 с, уже было 3);
+  `select_hotbar` → birch_log; summon с тегом → корова в 1,5 м, hp 10.0; punkAny 10.0 → 10.0;
+  `attack_stop`; `eat` beef — count 1 → 0, food 19 → 20.
+  Не пройдено: `strike the cow` — «cow down, 6 entity hit(s) landed» за 82 с, но по RCON
+  tagged-корова жива, hp 4.0.
+
+### Критерии приёмки
+- [x] `entities(radius, limit=32)`, `pos`, рычаги с тестами, `busy()`/`stop()` — как в раунде 1.
+- [x] `eat` = `selectHotbar` + `holdKey("use", ms)`, тесты есть; на стенде съел (R2-4 закрыта).
+- [ ] `body_smoke.py --actions` на стенде — красный (R3-1, R3-2).
+- [x] `punkAny` по мобу: только игроки, подтверждено и моим прогоном (hp 10.0 → 10.0).
+- [x] `unionclef-bridge.md` дополнен.
+
+R2-1, R2-3, R2-5 закрыты. R2-2 закрыта по существу: свидетель RCON поймал ложный успех — см. R3-2.
+
+### Находки
+- R3-1 · major · `dev/body_smoke.py:309-325` `strike_the_cow` · цель — ближайшая сущность
+  `kind == "cow"` из `entities(24)`, а не tagged-корова. В мире живут коровы прошлых сессий
+  (R2-3), и удары уходят в них: 6 попаданий `ENTITY` железным мечом (6 урона за удар, корове
+  хватает двух) сняли с tagged-коровы только 6 hp. Smoke красный. · целиться в tagged-корову:
+  позиция из `mob_pos(rcon, COW_SEL)` (дробные координаты, прицел y+0.7) или та сущность из
+  `entities`, что ближе всех к этой позиции; дистанцию до неё считать от `body.state().pos`.
+  Считать попаданием только удар, после которого hp tagged-коровы упало (RCON), а не `hit == ENTITY`.
+- R3-2 · minor · `dev/body_smoke.py:327-328` · `strike_the_cow` возвращает «cow down», когда цикл
+  просто исчерпал 40 итераций или дедлайн, а корова жива. Свидетель шагом ниже это ловит, но строка
+  вводит в заблуждение. · различать выход: корова исчезла по RCON → «cow down», иначе
+  «cow alive after N tries / deadline» (и FAIL уже здесь).
+
+### Чек-лист проекта
+Без замечаний. LLM не вызывается, `@gamer` нет в `LEVERS`, `unionclef/` и `runtime/perception/` не тронуты.
+Строка «Проверок» в `task.md` поправлена надзором на рабочий вызов через stdin (отклонение из отчёта
+раунда 2 принято).
