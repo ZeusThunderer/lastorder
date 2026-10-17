@@ -2,7 +2,7 @@
 id: T-020
 title: Тело — позиции в наблюдении и рычаги добычи, боя, еды
 stage: E2
-status: review
+status: changes
 criticality: normal
 branch: z/T-020-body-actions
 created: 2026-10-17
@@ -52,7 +52,8 @@ after: [T-006]
   - `mine` (`{"pos": [x,y,z]}` или список `positions`) → `mineBlocks`;
   - `attack` (`{"allow": [...], "avoid": [...]}`) → `punkAny`; `attack_stop` → `punkStop`;
   - `use_held` → `useHeldItem`;
-  - `eat` (`{"slot": n}`) → `selectHotbar(n)` + `useHeldItem`;
+  - `eat` (`{"slot": n, "ms": 1700}`) → `selectHotbar(n)` + `holdKey("use", ms)` (review R2-4:
+    одна `useHeldItem` не съедает еду);
   - `get` (`{"item": id, "count": n}`) → команда `@get <id> <n>`;
   - `equip` (`{"item": id}`) → `@equip <id>`.
 - [ ] `busy()` учитывает и активную задачу altoclef, и бой tungsten (`punkStatus`). `stop()` останавливает
@@ -80,3 +81,4 @@ docker compose -f docker/compose.yml run --rm mind-1 python dev/body_smoke.py --
 
 ## Заметки надзора
 Разблокировано 2026-10-17 (ADR-028): headless-надзору открыт стенд (`docker compose`), задача снова на ревью — прогнать `body_smoke.py --actions` и вынести вердикт.
+2026-10-17, раунд 2: критерий `eat` изменён на `holdKey("use", ms)` по данным стенда (R2-4).
