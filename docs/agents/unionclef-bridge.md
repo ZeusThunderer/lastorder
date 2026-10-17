@@ -51,7 +51,9 @@ Fabric-мод: altoclef (`src/main/java/adris/altoclef`) + tungsten (pathfinder,
   Python-int как Java-Long, uc читает через `Number.intValue()`. Ответ
   `{'ok': True, 'queued': 1}`; блок под ногами добыт за 2,3 с. Блоки вне reach
   остаются в очереди — подойти `gotoXYZ` и поллить `mineStatus()` → `{mining,
-  remaining}` или сам мир (`getBlocksAround`).
+  remaining}` или сам мир (`getBlocksAround`). Очередь изредка молча теряет
+  клетку (стенд: ok/queued, блок цел 90 с) — проверять мир и на таймауте
+  перекидывать очередь, лучше со свежего места.
 - `punkAny(allow, avoid)` → `{ok, allow, avoid}` — бой **только по игрокам**:
   `PunkPlayerTask.isAcceptable` принимает `PlayerEntity` и ничего больше.
   Проверено коровой: `allow=["cow"]`, 10 с — hp 10.0 → 10.0, урона нет.

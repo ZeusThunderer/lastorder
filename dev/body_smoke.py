@@ -132,26 +132,15 @@ def mob_health(rcon_fn, selector: str) -> float | None:
     return float(m.group()) if m else None
 
 
-def mob_pos(rcon_fn, selector: str) -> tuple[int, int, int] | None:
-    """Entity pos straight from the server: where to walk when entities() lost it."""
+def mob_pos(rcon_fn, selector: str) -> tuple[float, float, float] | None:
+    """Exact entity pos straight from the server (NBT doubles): aim and chase target."""
     raw = rcon_fn(f"data get entity {selector} Pos")
     if "entity data" not in raw:
         return None
     nums = re.findall(r"(-?[\d.]+)d", raw.split(":", 1)[-1])
     if len(nums) < 3:
         return None
-    return int(float(nums[0])), int(float(nums[1])), int(float(nums[2]))
-
-
-def wait_food_below(body: Py4jBody, level: float, timeout: float) -> float:
-    """MC refuses to eat at food = 20, so the eat check drains it first."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        food = body.state().food
-        if food < level:
-            return food
-        time.sleep(3)
-    raise TimeoutError(f"food still >= {level} after {timeout:.0f}s")
+    return float(nums[0]), float(nums[1]), float(nums[2])
 
 
 def wait_block_gone(body: Py4jBody, cell: tuple[int, int, int], timeout: float) -> str:
@@ -182,28 +171,35 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
     print("baseline:", snapshot(body))
 
     # -- mine the block under the feet, cell picked from blocks_around positions.
-    #    A previous run can leave the body on dug-up ground where the under cell is
-    #    air: hop sideways until the ground under the feet is actually listed.
-    def find_ground_under_feet():
-        st = body.state()
-        for hop in range(4):
-            feet = (math.floor(st.pos[0]), math.floor(st.pos[1]), math.floor(st.pos[2]))
-            cell = next((b for b in body.blocks_around(2)
-                         if b.pos == (feet[0], feet[1] - 1, feet[2])), None)
-            if cell is not None:
-                return cell
-            if hop == 3:
-                raise AssertionError(f"no listed ground under the feet within 4 hops (at {feet})")
-            body.act("goto", {"x": feet[0] + 8, "y": feet[1], "z": feet[2]})
-            wait_busy_clears(body, 60)
+    #    Two stand facts: earlier runs leave the body on dug-up ground (hop until
+    #    the under cell is listed), and tungsten's break queue once silently
+    #    dropped an under-feet cell (7th run of the day) — a fresh spot works.
+    def mine_under_the_feet() -> str:
+        for attempt in range(3):
             st = body.state()
+            for hop in range(4):
+                feet = (math.floor(st.pos[0]), math.floor(st.pos[1]), math.floor(st.pos[2]))
+                cell = next((b for b in body.blocks_around(2)
+                             if b.pos == (feet[0], feet[1] - 1, feet[2])), None)
+                if cell is not None:
+                    break
+                body.act("goto", {"x": feet[0] + 8, "y": feet[1], "z": feet[2]})
+                wait_busy_clears(body, 60)
+                st = body.state()
+            else:
+                raise AssertionError(f"no listed ground under the feet within 4 hops (at {feet})")
+            print(f"       before mine: {snapshot(body)}; target {cell.name} at {cell.pos}")
+            body.act("mine", {"pos": list(cell.pos)})
+            try:
+                gone = wait_block_gone(body, cell.pos, 30)
+                return f"{gone} (try {attempt + 1})"
+            except TimeoutError:
+                if attempt < 2:  # the queue dropped this cell: take a fresh spot
+                    body.act("goto", {"x": feet[0] + 8, "y": feet[1], "z": feet[2]})
+                    wait_busy_clears(body, 60)
+        raise AssertionError("under-feet mine timed out on 3 spots")
 
-    cell = step("block under feet found in blocks_around", find_ground_under_feet)
-    if cell is not None:
-        print(f"       mining {cell.name} at {cell.pos}")
-        step("before mine", lambda: snapshot(body))
-        step("act mine (pos from blocks_around)", lambda: body.act("mine", {"pos": list(cell.pos)}))
-        step("block mined", lambda: wait_block_gone(body, cell.pos, 90))
+    if step("mine the block under the feet (blocks_around pos)", mine_under_the_feet) is not None:
         step("after mine", lambda: snapshot(body))
 
     # -- @get log 2 through the lever, then hold the log
@@ -234,6 +230,9 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
     #    taken (review R2-1), and it carries a tag so selectors touch only this cow.
     st = step("state fresh for summon (post-@get)", lambda: body.state())
     feet = (math.floor(st.pos[0]), math.floor(st.pos[1]), math.floor(st.pos[2]))
+    # A red run can leave a live tagged cow behind: two t020 cows would make the
+    # limit=1 selector flap between them. Kill leftovers by the tag — only ours.
+    step("cleanup tagged leftovers (rcon)", lambda: rcon(f"kill @e[type=cow,tag={COW_TAG}]"))
     # Summon at the body's own cell: the body stands on it, so the cow cannot
     # spawn over a dug hole (feet+3 once dropped a cow into an old tunnel).
     step("summon cow (rcon, tag t020)", lambda: rcon(
@@ -288,10 +287,11 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
             step("re-summon cow for the strike (rcon, tag t020)", resummon_cow)
 
         # -- the mob path: lookAt + left click (strike), the lever that does hit mobs.
-        #    Two stand facts from the first run: melee reach is 3 blocks (chase first,
-        #    the cow wanders off), and the feet cell aims UNDER the hitbox (aim mid-torso).
+        #    Stand facts: melee reach is 3 blocks (chase first, the cow wanders off),
+        #    the feet cell aims UNDER the hitbox (aim mid-torso), and the nearest
+        #    `kind == "cow"` can be a stray from an older session (review R3-1).
         #    Runs in every case — probe undamaged, environmentally damaged, or a
-        #    re-summon — and a pass needs >= 1 ENTITY hit AND the tagged cow dead.
+        #    re-summon — and a pass needs >= 1 RCON-confirmed hit and a dead tagged cow.
         step("grant iron sword (rcon)", lambda: rcon(f"give {name} iron_sword 1"))
         time.sleep(2)
         sword = next((s for s in body.inventory() if "sword" in s.name and s.slot <= 8), None)
@@ -299,35 +299,38 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
             step("hold the sword", lambda: body.act("select_hotbar", {"slot": sword.slot}))
 
         def strike_the_cow() -> str:
+            # Target the TAGGED cow by its exact server-side pos: the world keeps
+            # cows from older sessions, and a strike at the nearest `kind == "cow"`
+            # lands on those (review R3-1). A hit counts only when the tagged cow's
+            # hp actually dropped (RCON), not when the client reported ENTITY —
+            # a stray cow under the crosshair also reports ENTITY.
             hits = 0
             deadline = time.monotonic() + 180  # hops are wait-heavy: bound the chase
-            for _ in range(40):
-                if time.monotonic() > deadline:
-                    break
-                if mob_health(rcon, COW_SEL) is None:
-                    break  # the tagged cow left the world: dead
-                ents = [e for e in body.entities(24) if e.kind == "cow"]
-                if not ents:
-                    # Alive per the server but out of the entities window: walk to it.
-                    target = mob_pos(rcon, COW_SEL)
-                    if target is None:
-                        break
-                    body.act("goto", {"x": target[0], "y": target[1], "z": target[2]})
+            for attempt in range(1, 41):
+                hp = mob_health(rcon, COW_SEL)
+                if hp is None:
+                    break  # gone from the server: dead — the assert below gates the pass
+                if attempt == 40 or time.monotonic() > deadline:
+                    # A loop that merely ran out is a FAIL, not a "cow down" (R3-2).
+                    raise AssertionError(
+                        f"tagged cow alive after {attempt} tries (hp={hp}, {hits} confirmed hit(s))")
+                rpos = mob_pos(rcon, COW_SEL)
+                if rpos is None:
+                    raise AssertionError("tagged cow alive but its Pos is unreadable by RCON")
+                if math.dist(body.state().pos, rpos) > 4:
+                    body.act("goto", {"x": math.floor(rpos[0]), "y": math.floor(rpos[1]),
+                                      "z": math.floor(rpos[2])})
                     wait_busy_clears(body, 45)
                     continue
-                near = min(ents, key=lambda e: e.dist_m)
-                if near.dist_m > 4:
-                    body.act("goto", {"x": near.pos[0], "y": near.pos[1], "z": near.pos[2]})
-                    wait_busy_clears(body, 45)
-                    continue
-                reply = body.act("strike",
-                                 {"pos": [near.pos[0] + 0.5, near.pos[1] + 0.7, near.pos[2] + 0.5]})
-                hits += bool(reply.get("hit") == "ENTITY")
-                time.sleep(0.7)
-            assert hits >= 1, "0 entity hits landed: the cow was never in reach"
-            return f"cow down, {hits} entity hit(s) landed"
+                body.act("strike", {"pos": [rpos[0], rpos[1] + 0.7, rpos[2]]})
+                time.sleep(0.6)  # let the hit land server-side before reading hp
+                hp_after = mob_health(rcon, COW_SEL)
+                if hp_after is None or hp_after < hp:
+                    hits += 1
+            assert hits >= 1, "tagged cow gone with 0 confirmed hits: the strike never landed"
+            return f"cow down, {hits} confirmed hit(s) landed"
 
-        step("strike the cow (lookAt + left click)", strike_the_cow)
+        step("strike the tagged cow (lookAt + left click, RCON-confirmed)", strike_the_cow)
 
         def tagged_cow_dead() -> str:
             hp = mob_health(rcon, COW_SEL)
@@ -343,26 +346,51 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
     inv = body.inventory()
     slot = next((s.slot for s in inv if any(h in s.name for h in FOOD_HINTS) and s.slot <= 8), None)
     if slot is None:
-        step("grant bread (rcon)", lambda: rcon(f"give {name} bread 3"))
-        time.sleep(2)
+        # /give lands items in the first free slot of the WHOLE inventory: with a
+        # hotbar full of smoke junk the bread lands beyond selectHotbar's reach
+        # (slot > 8), and the client cache can lag even a hotbar give. Force the
+        # slot with `item replace`, poll for it, and fail loud — a green run must
+        # not skip the meal it arranged.
+        def grant_bread_in_hotbar() -> str:
+            taken = {s.slot for s in body.inventory() if s.slot <= 8}
+            free = next((i for i in range(9) if i not in taken), 0)
+            rcon(f"item replace entity {name} hotbar.{free} with minecraft:bread 3")
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if any("bread" in s.name and s.slot == free for s in body.inventory()):
+                    return f"3 bread forced into hotbar slot {free}"
+                time.sleep(2)
+            raise AssertionError(f"bread forced into hotbar.{free} but never visible")
+
+        step("grant bread into the hotbar (rcon item replace)", grant_bread_in_hotbar)
         inv = body.inventory()
         slot = next((s.slot for s in inv if any(h in s.name for h in FOOD_HINTS) and s.slot <= 8), None)
     if slot is None:
-        print("[skip] eat: no food in the hotbar to eat")
+        print("[skip] eat: no food in the hotbar to eat (see the FAIL above)")
     else:
         held = next(s.name for s in inv if s.slot == slot)
         count0 = next((s.count for s in inv if s.slot == slot), 0)
         food0 = body.state().food
         print(f"       eating {held} from slot {slot}, food={food0:.0f}")
         if food0 >= 20:
-            # MC refuses to eat at full food: drain some so the check can see a meal.
-            # Hunger V: since 1.21.2 exhaustion is 40 per food point (x10 scale), and
-            # Hunger I (0.1/tick) proved too slow on the stand (90 s moved nothing).
-            step("drain hunger for the eat check (rcon)",
-                 lambda: rcon(f"effect give {name} minecraft:hunger 60 4"))
-            food0 = step("food drained below 18", lambda: wait_food_below(body, 18, 90))
+            # MC refuses to eat at full food: drain until eating becomes possible.
+            # Hunger V since 1.21.2 (x10 exhaustion scale — Hunger I moved nothing
+            # in 90 s); saturation from a previous meal slows it further, so the
+            # window is wide. The gate is the meal itself, not the drain speed:
+            # FAIL only if food is still 20 and eating is impossible.
+
+            def drain_hunger() -> float:
+                rcon(f"effect give {name} minecraft:hunger 120 4")
+                deadline = time.monotonic() + 120
+                while time.monotonic() < deadline and body.state().food >= 20:
+                    time.sleep(3)
+                food = body.state().food
+                assert food < 20, f"food still {food:.0f} after 120 s of Hunger V: MC will not eat"
+                return food
+
+            food0 = step("drain hunger for the eat check (rcon)", drain_hunger)
             if food0 is None:
-                food0 = body.state().food  # drain failed: run the check anyway, it fails honestly
+                food0 = body.state().food  # drain failed: the meal check fails honestly
         step("act eat (selectHotbar + hold use)", lambda: body.act("eat", {"slot": slot}))
         time.sleep(3)
         st1 = step("state after eat", lambda: body.state())
