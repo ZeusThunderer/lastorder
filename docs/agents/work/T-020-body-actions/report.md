@@ -78,3 +78,82 @@ actions smoke passed
 
 ### Вызовы надзора
 - нет
+
+## Раунд 2 · 2026-10-17
+Коммиты: b3899ef (eat = holdKey), 441a590 (smoke: свежий summon, тег, честный kill/meal),
+5b94ead (Hunger V в smoke), 0eb475a (C-1/C-3 чекера, устойчивость smoke к перепрогонам)
+
+### Ответ на ревью
+- R2-1 · fixed 441a590 — позиция перечитывается (`body.state()`) прямо перед summon,
+  после `@get log 2`; в 0eb475a корова дополнительно призывается на клетку самого тела
+  (feet+3 роняло её в старые туннели). Стенд: корова видна в 1,4–2,8 м от тела.
+- R2-2 · fixed 441a590 — бой гейтен на видимую tagged-корову; strike требует
+  ≥ 1 `hit == ENTITY` и смерть коровы по RCON-свидетелю, иначе FAIL. Ужесточено
+  в 0eb475a по C-1 чекера: нечитаемая после punkAny корова — FAIL + повторный summon,
+  strike выполняется всегда. Стенд: «cow down, 2 entity hit(s) landed» + «tagged cow
+  removed from the world».
+- R2-3 · fixed 441a590 — корова призывается с тегом `{Tags:["t020"]}`, здоровье и cleanup
+  по `@e[tag=t020]`; cleanup после убийства: «No entity was found» (чужих коров не трогаем).
+- R2-4 · fixed b3899ef — `eat` = `selectHotbar(slot)` + `holdKey("use", ms)`, `ms` из
+  аргументов, по умолчанию 1700; `use_held` без изменений; тесты на подставном `mc`
+  (последовательность вызовов и кастомный ms); строка в unionclef-bridge.md поправлена.
+  Стенд: beef count −1, food 17 → 20 (5b94ead — дренаж food для проверки: Hunger V).
+- R2-5 · fixed 441a590 — docstring: `python - --actions < dev/body_smoke.py`.
+
+### Сделано
+- `runtime/game/py4j_body.py::_lever_eat`: selectHotbar + holdKey("use", ms=1700) (R2-4),
+  тесты `test_act_eat_selects_the_slot_then_holds_the_use_key`,
+  `test_act_eat_takes_the_hold_ms_from_the_args`.
+- `dev/body_smoke.py`: summon по свежей позиции на клетке тела; hop до целой земли для
+  mine (прошлые прогоны перекапывают стартовую площадку — StopIteration); потолок 180 с
+  на погоню; drain food через Hunger V (в 1.21.2+ шкала истощения ×10: Hunger I за 90 с
+  не снижал food); проверка «eat consumed the food» (count −1 или food +).
+- `docs/agents/unionclef-bridge.md`: события и образцы — отдельный подраздел (C-3).
+
+### Проверки
+```
+$ uv run pytest
+96 passed
+$ uv run python tools/check.py
+Every workplace is intact: files present, links resolve, boxes parse.
+$ docker compose -f docker/compose.yml up -d mc-server body-1
+body-1 Running, mc-server Healthy
+$ docker compose -f docker/compose.yml build mind-1   # runtime/ менялся — образ из ветки
+Image lastorder-mind:dev Built
+$ docker compose -f docker/compose.yml run -T --rm mind-1 python - --actions < dev/body_smoke.py
+actions smoke passed
+```
+Ветка стенда: mine по клетке из `blocks_around` (hop до (8,63,-11), блок исчез за 2,3 с,
++1 grass block); `@get` ensured 2 logs; summon → корова в 1,4 м, hp 10.0; punkAny
+10.0 → 10.0 (players-only подтверждён); strike — «cow down, 2 entity hit(s) landed»,
+tagged cow dead по RCON; cleanup по тегу — никого лишнего; food 20 → 17 (Hunger V,
+34 с), `eat` beef: count 2 → 1, food +3.
+
+### Самопроверка
+- Раундов `lo-checker`: 1 с находками, повторная проверка чистая. Итог: CHECK: clean.
+- C-1 · fixed 0eb475a — проба hp после punkAny ассертует читаемость (потеря коровы =
+  FAIL, не тихий skip); потерянная корова → повторный summon; strike выполняется всегда
+  с обязательными проверками; та же дыра закрыта у hp0.
+- C-2 · fixed настоящим коммитом — «Раунд 2» отчёта дописан при сдаче.
+- C-3 · fixed 0eb475a — подраздел «События и Python-образцы» в unionclef-bridge.md.
+
+### Отклонения от задачи
+- Строка «Проверок» в task.md (`run --rm mind-1 python dev/body_smoke.py --actions`)
+  невоспроизводима: образ mind не содержит dev/, скрипт идёт через stdin
+  (`run -T --rm mind-1 python - --actions < dev/body_smoke.py`) — как в docstring smoke
+  после R2-5. task.md не правлю (файл надзора), рабочий вызов показан выше.
+- Отчёт раунда 2 пишется при сдаче, а не в момент `implemented` (по указанию
+  диспетчера): самопроверка раундом не считается.
+
+### Вне задачи
+- В 1.21.2+ шкала истощения ×10 (40 на единицу food): Hunger I за 90 с не снижал ни
+  food, ни saturation. Факт стенда, использован в smoke; в bridge не вносил (не про
+  uc-мост).
+- Прошлые прогоны оставляют в мире перекопанный рельеф и мобов сессий (rotten_flesh
+  в инвентаре — strike бил и по зомби в reach); мир стенда вне задачи, не чинил.
+
+### Вопросы
+- нет
+
+### Вызовы надзора
+- 2026-10-17 · result · 7854974 · VERDICT: changes · cost_usd: unknown (stdout-парсинг call_supervisor.sh упал на python-стабе Windows, вердикт взят из review.md)
