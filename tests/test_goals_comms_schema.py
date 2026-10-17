@@ -386,6 +386,14 @@ def test_chatter_thread_accepts_a_quoted_knowledge_thread():
     assert obj.lines[0].thread_id == obj.thread_id
 
 
+def test_knowledge_quote_matches_the_claim_limit():
+    """A quote is an exact record claim; KNOWLEDGE.md section 2 caps claims at 280 characters."""
+    exact = {**_thread([]), "quote": "ц" * 280}
+    assert len(comms.ChatterThread.from_dict(exact).quote) == comms.CHATTER_QUOTE_MAX_CHARS
+    with pytest.raises(comms.CommsSchemaError):
+        comms.ChatterThread.from_dict({**_thread([]), "quote": "ц" * 281})
+
+
 @pytest.mark.parametrize(
     "mutation",
     [

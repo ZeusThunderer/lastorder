@@ -37,6 +37,8 @@ CHATTER_THREAD_MAX_LINES = 6  # K: a thread closes after this many lines
 CHATTER_THREAD_IDLE_CLOSE_S = 180
 CHATTER_SILENCE_OPEN_MIN = 10  # this many quiet minutes let the director open a thread
 CHATTER_LINE_MAX_CHARS = 200
+CHATTER_QUOTE_MAX_CHARS = 280  # a knowledge-thread quote is the exact record claim; claims are
+# capped at 280 characters by KNOWLEDGE.md section 2, so a legal record must always fit
 MEETING_RADIUS_M = 32
 MEETING_COOLDOWN_MIN = 30  # the same pair of nodes opens a meeting thread at most this often
 
@@ -187,7 +189,7 @@ class ChatterThread:
         _require(channel in CHANNELS, f"channel must be one of {CHANNELS}")
         event = data.get("event", "")
         _require(event in THREAD_EVENTS, f"event must be one of {THREAD_EVENTS}")
-        quote = _optional_text(data, "quote", 200)
+        quote = _optional_text(data, "quote", CHATTER_QUOTE_MAX_CHARS)
         quote_entry_id = _optional_text(data, "quote_entry_id", 16)
         _require(
             event != "knowledge" or (quote and quote_entry_id),

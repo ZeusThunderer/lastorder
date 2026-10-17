@@ -71,7 +71,7 @@
    `MAX_NETWORK_GOALS`: новые вытесняют унаследованные, истёкшие удаляются.
 4. `KnowledgeSlice.network_goals` — весь активный набор после слияния, в этом порядке.
 
-Канонический пример слияния (t = 12:15; сигналы: deaths:game:ночный стон count 3 и kb_gap:recipe;
+Канонический пример слияния (t = 12:15; сигналы: deaths:game:ночной стон count 3 и kb_gap:recipe;
 smart не зовётся): до — первый список, после — второй; g-0001 продлена по text, g-0004 новая,
 g-0002 унаследована (сигнал ушёл из окна), g-0003 вытеснена обрезкой.
 
@@ -248,7 +248,7 @@ chat, излишек отбрасывается с событием в log.jsonl
 |---|---|---|
 | 1 | `GoalSignal`, `NetworkGoalRecord`, `goal_set_from_list`, `CouncilInput`, `CouncilOutput`, `DeathCount`, `KbGap`, `LivingStatus`; `LADDER`, `COUNCIL_*`, `MAX_NETWORK_GOALS`, `GOAL_TTL_MIN`, `DEATH_*` | runtime/hive/goals_schema.py |
 | 3–4 | `OutboundMessage`; `CHANNELS`, `MSG_TYPES`, `ALL_ADDRESSEE`, `MSG_MAX_CHARS`, `NET_MSG_PER_NODE_PER_MIN`, `MSG_TTL_S` | runtime/comms/schema.py |
-| 5–6 | `ChatterLine`, `ChatterReply`, `ChatterThread`; `STANCES`, `THREAD_EVENTS`, `CHATTER_*`, `SAY_MIN_INTERVAL_S`, `MEETING_*` | runtime/comms/schema.py |
+| 5–6 | `ChatterLine`, `ChatterReply`, `ChatterThread`; `STANCES`, `THREAD_EVENTS`, `CHATTER_*` (`CHATTER_QUOTE_MAX_CHARS` = 280 — предел claim, KNOWLEDGE §2), `SAY_MIN_INTERVAL_S`, `MEETING_*` | runtime/comms/schema.py |
 
 Константы — значения по умолчанию; рантайм читает env (`COUNCIL_SMART_PER_HOUR`,
 `CHATTER_CALLS_PER_HOUR`, `SAY_MIN_INTERVAL_S`, …) в T-016/T-017. `goals.json` — список записей
