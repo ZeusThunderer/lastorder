@@ -2,7 +2,7 @@
 id: T-012
 title: Хранилище базы сети — записи, статусы, файлы узлов, git
 stage: E2
-status: ready
+status: accepted
 criticality: critical
 branch: z/T-012-hive-core
 created: 2026-10-16
