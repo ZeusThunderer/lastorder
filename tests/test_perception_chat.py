@@ -48,6 +48,12 @@ def test_clean_chat_drops_service_keeps_speech_and_vanilla():
     assert clean_chat([]) == []
 
 
+def test_clean_chat_stringifies_each_line_once():
+    # non-str input is stringified once up front, so is_service_line sees the same text
+    assert clean_chat([13]) == ["13"]
+    assert clean_chat(["§r<LastOrder01> hi", 42]) == ["<LastOrder01> hi", "42"]
+
+
 @pytest.mark.parametrize("mode", ["plain", "masked"])
 def test_no_service_line_survives_clean_chat_in_either_mode(mode):
     p = Perception({}, salt="s", mode=mode)

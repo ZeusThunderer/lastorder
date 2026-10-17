@@ -21,9 +21,10 @@ from typing import Literal, Mapping
 
 import yaml
 
+from runtime.config import PERCEPTION_MODES, perception_mode
+
 Kind = Literal["block", "entity", "item"]
 Mode = Literal["plain", "masked"]
-MODES: tuple[str, ...] = ("plain", "masked")
 PREFIX: dict[str, str] = {"block": "blk", "entity": "ent", "item": "itm"}
 GENERIC: dict[str, str] = {
     "block": "незнакомый блок",
@@ -38,6 +39,8 @@ def normalize(raw_id: str) -> str:
 
     uc feeds display names ("Birch Leaves", "birch leaves") alongside registry ids
     ("minecraft:birch_leaves", "birch_leaves"); all four are one thing (E1 samples).
+    Known gap (review R1-3, for T-002/T-011): not every display name is the id with spaces
+    swapped — "Block of Iron" is `iron_block`, "Jack o'Lantern" is `jack_o_lantern`.
     """
     raw_id = raw_id.strip().lower().replace(" ", "_")
     return raw_id.split(":", 1)[1] if raw_id.startswith("minecraft:") else raw_id
@@ -72,10 +75,14 @@ class Perception:
         descriptions: Mapping[str, str],
         salt: str,
         terms: Mapping[str, str] | None = None,
-        mode: str = "plain",
+        mode: str | None = None,
     ):
-        if mode not in MODES:
-            raise ValueError(f"unknown perception mode {mode!r}: expected one of {MODES} (ADR-020)")
+        if mode is None:  # the environment decides (ADR-020); an explicit mode is for tests
+            mode = perception_mode()
+        if mode not in PERCEPTION_MODES:
+            raise ValueError(
+                f"unknown perception mode {mode!r}: expected one of {PERCEPTION_MODES} (ADR-020)"
+            )
         self.mode: Mode = mode  # type: ignore[assignment]
         self.descriptions = dict(descriptions)
         self.salt = salt

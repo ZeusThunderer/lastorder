@@ -40,9 +40,10 @@ def clean_chat(lines: Iterable[str]) -> list[str]:
     """
     out: list[str] = []
     for line in lines:
+        line = str(line)  # once: both checks below assume a str
         if is_service_line(line):
             continue
-        clean = strip_formatting(str(line)).strip()
+        clean = strip_formatting(line).strip()
         if clean:
             out.append(clean)
     return out

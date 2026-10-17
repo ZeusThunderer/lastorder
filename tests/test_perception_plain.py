@@ -65,3 +65,21 @@ def test_perception_mode_env_default_plain_and_validated(monkeypatch):
     monkeypatch.setenv("PERCEPTION_MODE", "stealth")
     with pytest.raises(ValueError):
         perception_mode()
+
+
+def test_default_mode_comes_from_the_environment(monkeypatch):
+    descriptions = {"birch_log": "светлый столб с тёмными штрихами"}
+    monkeypatch.setenv("PERCEPTION_MODE", "masked")
+    p = Perception(descriptions, salt="epoch-1")  # no explicit mode: PERCEPTION_MODE decides
+    assert p.mode == "masked"
+    seen = p.see("minecraft:birch_log", "block")
+    assert "birch" not in seen.render()  # fail-closed: masked from env is honored
+    assert p.leaks(seen.render()) == []
+    monkeypatch.setenv("PERCEPTION_MODE", "plain")
+    assert Perception(descriptions, salt="epoch-1").mode == "plain"
+
+
+def test_bad_env_mode_fails_at_perception_creation(monkeypatch):
+    monkeypatch.setenv("PERCEPTION_MODE", "stealth")
+    with pytest.raises(ValueError):
+        Perception({}, salt="s")
