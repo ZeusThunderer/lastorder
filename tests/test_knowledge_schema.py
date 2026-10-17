@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 
 from runtime.knowledge import budget, schema
+from runtime.lastorder.persona import Inheritance, Node, PersonaProvider
+from runtime.lastorder.naming import PRESETS
 from runtime.lastorder.traits import Traits
 from runtime.ports import KnowledgeEntry
 
@@ -27,6 +29,14 @@ JSON_TYPES = {
     "ReflectionInput": schema.ReflectionInput,
     "ReflectionOutput": schema.ReflectionOutput,
 }
+
+
+def example_body(name: str) -> str:
+    """The valid fenced example `name` from KNOWLEDGE.md (tests read the doc, not copies)."""
+    for m in BLOCK.finditer(KNOWLEDGE_MD.read_text(encoding="utf-8")):
+        if m.group(2) == name and not m.group(3):
+            return m.group(4)
+    raise AssertionError(f"no valid example {name!r} in KNOWLEDGE.md")
 
 
 def examples():
@@ -228,19 +238,106 @@ def test_emergency_will_assembles_without_llm():
         died_at="2026-10-17T12:41:53+00:00",
         traits=traits,
         last_action="шёл к болоту",
-        last_events=["простой 90 с", "pathStatus: FAILED"],
+        last_events=["простой 90 с", "видел стонущего у воды"],  # post-perception text
         node_name="узел 00014",
-        heir_name="узел 00015",
+        heir_address="следующий узел",  # the heir's serial is unknown at death
     )
     assert will.meta.emergency and will.meta.model == "template"
     assert will.meta.lifetime_s == 2262  # computed from the dates, not passed in
     lines = will.body.split("\n")
     assert 2 <= len(lines) <= 4
-    assert "шёл к болоту" in will.body and "узел 00015" in will.body
+    assert "шёл к болоту" in will.body and "следующий узел" in will.body
     assert "4213" not in will.body  # the seed and trait numbers never reach the text
     for trait in ("bravery", "greed", "talkativeness", "superstition"):
         assert trait not in will.body
     assert schema.Will.from_dict(will.to_dict()) == will  # it is a valid will as-is
+
+
+def test_emergency_will_survives_broken_inputs():
+    """The last line before "a death without a will" never throws on realistic corruption."""
+    traits = Traits(
+        bravery=7,
+        greed=2,
+        talkativeness=4,
+        trust_in_chat_and_nodes=5,
+        superstition=8,
+        quirk="боится воды",
+        seed=4213,
+    )
+    will = schema.emergency_will(
+        serial=14,
+        slot="LastOrder02",
+        cause="lava",  # unknown cause degrades to game
+        born_at="2026-10-17T12:04:11",  # naive: read as UTC, no aware-naive TypeError
+        died_at="2026-10-17T12:03:11+00:00",  # a second earlier: clock skew clamps to 0
+        traits=traits,
+        last_action="шёл к болоту\nи ждал у воды",  # newlines collapse to one line
+        last_events=["первое", "второе\nсобытие", "", None, "третье", "четвёртое"],
+        node_name="узел 00014",
+        heir_address="следующий узел",
+    )
+    assert will.meta.cause == "game" and will.meta.lifetime_s == 0
+    assert will.meta.born_at == "2026-10-17T12:04:11+00:00"  # normalized, not crashed
+    lines = will.body.split("\n")
+    assert len(lines) == 4  # exactly the template: fields never add lines
+    assert "третье" in will.body and "четвёртое" not in will.body  # at most 3 events
+    assert "шёл к болоту и ждал у воды" in will.body  # one line, no embedded newline
+    assert budget.estimate_tokens(will.body) <= budget.WILL_BODY_MAX_TOKENS
+    # the file stays readable for the heir and T-012
+    assert schema.Will.from_markdown(will.to_markdown()) == will
+
+
+def test_emergency_will_worst_case_fits_will_cap():
+    traits = Traits(
+        bravery=7,
+        greed=2,
+        talkativeness=4,
+        trust_in_chat_and_nodes=5,
+        superstition=8,
+        quirk="боится воды",
+        seed=4213,
+    )
+    will = schema.emergency_will(
+        serial=14,
+        slot="LastOrder02",
+        cause="stuck",
+        born_at="2026-10-17T12:04:11+00:00",
+        died_at="2026-10-17T12:41:53+00:00",
+        traits=traits,
+        last_action="а" * budget.EMERGENCY_ACTION_CHARS,  # capped action
+        last_events=["б" * budget.EMERGENCY_EVENT_CHARS] * budget.EMERGENCY_MAX_EVENTS,
+        node_name="узел 00014",
+        heir_address="следующая Мисака",
+    )
+    assert budget.estimate_tokens(will.body) <= budget.WILL_BODY_MAX_TOKENS
+
+
+def test_will_missing_field_and_broken_yaml_are_schema_errors():
+    data = _will_data()
+    del data["model"]  # a missing top-level field must not escape as KeyError
+    with pytest.raises(schema.SchemaError):
+        schema.Will.from_dict(data)
+    with pytest.raises(schema.SchemaError):  # broken YAML is wrapped, not yaml.YAMLError
+        schema.Will.from_markdown("---\nserial: [oops\n---\nстрока\nстрока")
+
+
+def test_will_body_token_cap():
+    data = _will_data(body="\n".join(["уходить от воды и не возвращаться сюда обратно"] * 4))
+    schema.Will.from_dict(data)  # ~110 tokens: fine
+    huge = _will_data(body="\n".join(["у" * 95] * 4))  # > WILL_BODY_MAX_TOKENS
+    with pytest.raises(schema.SchemaError):
+        schema.Will.from_dict(huge)
+
+
+def test_evidence_and_vote_to_dict_roundtrip():
+    evidence = schema.Evidence.from_dict(
+        {"node": 14, "event": None, "ts": "2026-10-17T12:03:40+00:00"}
+    )
+    assert schema.Evidence.from_dict(evidence.to_dict()) == evidence
+    vote = schema.RecordVote.from_dict(
+        {"node": 15, "accept": False, "why": "видел иначе", "ts": "2026-10-17T12:21:00+00:00"}
+    )
+    assert schema.RecordVote.from_dict(vote.to_dict()) == vote
 
 
 # --- reflection -----------------------------------------------------------------------
@@ -271,15 +368,83 @@ def test_reflection_output_caps_candidates_and_empty():
 # --- budgets --------------------------------------------------------------------------
 
 
-def test_block_budgets_fit_the_step_ceiling():
-    blocks = {
+def _blocks() -> dict[str, int]:
+    return {
         name: value
         for name, value in vars(budget).items()
         if name.startswith("B_") and isinstance(value, int)
     }
+
+
+def test_block_budgets_match_the_documented_total():
+    blocks = _blocks()
     assert len(blocks) == 10  # the ten blocks of section 9
-    assert sum(blocks.values()) == 2390  # documented: 2390 + 110 spare
-    assert sum(blocks.values()) <= budget.STEP_INPUT_BUDGET - 100
+    assert sum(blocks.values()) == budget.STEP_BLOCKS_TOTAL
+    # Honest sum, deliberately over the ceiling: the overflow (1360) is documented in
+    # KNOWLEDGE.md section 9 and goes to "Предлагаемые ADR" — the ceiling is not raised
+    # silently, and no constant here may paper over the conflict.
+    assert budget.STEP_BLOCKS_TOTAL == 3860
+    assert budget.STEP_BLOCKS_TOTAL > budget.STEP_INPUT_BUDGET
+
+
+def test_persona_template_fits_persona_budget():
+    """B_PERSONA is bound to its source: the rendered template with an empty inheritance,
+    both naming presets (misaka has the longer speech style)."""
+    node = Node(
+        serial=14,
+        traits=Traits(
+            bravery=3,
+            greed=7,
+            talkativeness=5,
+            trust_in_chat_and_nodes=4,
+            superstition=9,
+            quirk="считает крипера родственником",
+            seed=4213,
+        ),
+    )
+    for naming in PRESETS.values():
+        prompt = PersonaProvider(naming=naming).system_prompt(node, Inheritance())
+        assert budget.estimate_tokens(prompt) <= budget.B_PERSONA, naming.key
+
+
+def test_core_limit_fits_core_budget():
+    """B_CORE covers the byte-heaviest core.md: 1536 bytes of pure Cyrillic."""
+    worst = "я" * (budget.CORE_MEMORY_LIMIT_BYTES // 2)  # 2 bytes per Cyrillic char
+    assert len(worst.encode("utf-8")) <= budget.CORE_MEMORY_LIMIT_BYTES
+    assert budget.estimate_tokens(worst) == 461 <= budget.B_CORE
+
+
+def test_inheritance_budget_comes_from_quotas():
+    """B_INHERITANCE is exactly the section-7 quotas: K wills at the cap + summaries + terms."""
+    assert budget.B_INHERITANCE == (
+        budget.WILL_BODY_MAX_TOKENS * budget.INHERITANCE_WILLS
+        + budget.INHERITANCE_SUMMARY_TOKENS
+        + budget.INHERITANCE_TERMS_TOKENS
+    )
+    assert budget.WILL_BODY_MAX_TOKENS * budget.INHERITANCE_WILLS <= budget.B_INHERITANCE
+
+
+def test_primer_entries_fit_primer_budget():
+    """B_PRIMER covers PRIMER_MAX_ENTRIES records the size of the document's own example."""
+    claim = json.loads(example_body("PrimerEntry"))["claim"]
+    assert (
+        budget.PRIMER_MAX_ENTRIES * budget.estimate_tokens(claim) <= budget.B_PRIMER
+    ), "a full primer block would not fit B_PRIMER"
+
+
+# --- dedup (section 4) ----------------------------------------------------------------
+
+
+def test_claim_dedup_rules():
+    # 5-char truncation merges case endings: the same observation, reworded
+    assert schema.claims_duplicate("стонущие бьют на сближении", "стонущий бьёт на сближении")
+    # the document's own pair (record k-0042 vs the NETWORK.md section 5 note) is NOT a
+    # duplicate: added words outweigh the shared stem, J = 4/7 < 0.6 — competing records
+    claim_k42 = json.loads(example_body("Record"))["claim"]
+    assert not schema.claims_duplicate(claim_k42, "стонущий бьёт на сближении")
+    assert schema.jaccard(claim_k42, "стонущий бьёт на сближении") == pytest.approx(4 / 7)
+    # negation stays a token: «не» is not dropped as a stop word
+    assert "не" in schema.claim_tokens("не ходи к воде")
 
 
 def test_estimate_tokens_is_conservative():

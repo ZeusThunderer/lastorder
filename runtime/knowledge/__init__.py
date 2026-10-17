@@ -2,6 +2,7 @@
 
 from runtime.knowledge.schema import (
     CAUSES,
+    CLAIM_DUP_JACCARD,
     KINDS,
     REFLECT_IMPORTANCE_THRESHOLD,
     SOURCES,
@@ -18,11 +19,15 @@ from runtime.knowledge.schema import (
     TriggerEvent,
     Will,
     WillMeta,
+    claim_tokens,
+    claims_duplicate,
     emergency_will,
+    jaccard,
 )
 
 __all__ = [
     "CAUSES",
+    "CLAIM_DUP_JACCARD",
     "KINDS",
     "REFLECT_IMPORTANCE_THRESHOLD",
     "SOURCES",
@@ -39,5 +44,8 @@ __all__ = [
     "TriggerEvent",
     "Will",
     "WillMeta",
+    "claim_tokens",
+    "claims_duplicate",
     "emergency_will",
+    "jaccard",
 ]

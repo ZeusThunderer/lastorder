@@ -14,11 +14,18 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
 import yaml
 
+from runtime.knowledge.budget import (
+    EMERGENCY_ACTION_CHARS,
+    EMERGENCY_EVENT_CHARS,
+    EMERGENCY_MAX_EVENTS,
+    WILL_BODY_MAX_TOKENS,
+    estimate_tokens,
+)
 from runtime.lastorder.traits import TRAIT_NAMES, Traits
 from runtime.ports import KnowledgeCandidate, KnowledgeEntry
 
@@ -57,6 +64,9 @@ CAUSE_LESSON = {
     "ttl": "главное делай раньше, срок короток",
     "stuck": "если путь не идёт, сворачивай сразу",
 }
+
+CLAIM_DUP_JACCARD = 0.6  # duplicate threshold of section 4; T-012 calibrates on live data
+CLAIM_TOKEN_PREFIX = 5  # token truncation that merges Russian case endings
 
 
 class SchemaError(ValueError):
@@ -164,7 +174,45 @@ def _will_body(value: Any) -> str:
         raise SchemaError(
             f"will body: expected {WILL_MIN_LINES}-{WILL_MAX_LINES} lines, got {len(lines)}"
         )
-    return "\n".join(line.rstrip() for line in lines)
+    body = "\n".join(line.rstrip() for line in lines)
+    if estimate_tokens(body) > WILL_BODY_MAX_TOKENS:
+        raise SchemaError(
+            f"will body: over {WILL_BODY_MAX_TOKENS} tokens "
+            f"(got {estimate_tokens(body)}); the inheritance budget caps every will"
+        )
+    return body
+
+
+def claim_tokens(claim: str) -> frozenset[str]:
+    """Normalized claim tokens for dedup (section 4): lowercase, `ё`→`е`, non-alphanumerics
+    as spaces, each token truncated to CLAIM_TOKEN_PREFIX chars so case endings merge.
+    Stop words stay: negation («не») is meaningful."""
+
+    if not isinstance(claim, str):
+        raise SchemaError("claim: expected a string")
+    text = claim.lower().replace("ё", "е")
+    raw = re.split(r"[^0-9a-zа-я]+", text)
+    return frozenset(t[:CLAIM_TOKEN_PREFIX] for t in raw if t)
+
+
+def jaccard(a: str, b: str) -> float:
+    """Jaccard similarity of two claims' token sets: |A∩B| / |A∪B| (section 4)."""
+
+    first, second = claim_tokens(a), claim_tokens(b)
+    union = first | second
+    if not union:
+        return 0.0
+    return len(first & second) / len(union)
+
+
+def claims_duplicate(a: str, b: str) -> bool:
+    """True when two claims are the same observation reworded (J ≥ CLAIM_DUP_JACCARD).
+
+    The shared-`about` half of the duplicate rule stays in hive (T-012): it needs the
+    records' keys, not just the text.
+    """
+
+    return jaccard(a, b) >= CLAIM_DUP_JACCARD
 
 
 def _candidate(value: Any) -> KnowledgeCandidate:
@@ -209,6 +257,9 @@ class Evidence:
             event=event,
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        return _plain(asdict(self))
+
 
 @dataclass(frozen=True)
 class RecordVote:
@@ -234,6 +285,9 @@ class RecordVote:
             ts=_iso(_req(data, "ts"), "votes.ts"),
             why=why.strip(),
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain(asdict(self))
 
 
 RECORD_FIELDS = (
@@ -504,7 +558,11 @@ class Will:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "Will":
         _want(data, WILL_FIELDS)
-        meta = WillMeta.from_dict({key: data[key] for key in WILL_FIELDS if key != "body"})
+        # data.get, not data[key]: a missing field must reach WillMeta's _req and raise
+        # SchemaError, not KeyError — the death path (T-013) catches SchemaError only.
+        meta = WillMeta.from_dict(
+            {key: data.get(key) for key in WILL_FIELDS if key != "body"}
+        )
         return cls(meta=meta, body=_will_body(_req(data, "body")))
 
     @classmethod
@@ -514,17 +572,38 @@ class Will:
         match = FRONTMATTER.match(text.strip())
         if not match:
             raise SchemaError("will: expected --- frontmatter --- then the body")
-        loaded = yaml.safe_load(match.group(1))
+        try:
+            loaded = yaml.safe_load(match.group(1))
+        except yaml.YAMLError as exc:  # a broken will.md must not crash the loader (T-012)
+            raise SchemaError(f"will: broken YAML frontmatter: {exc}") from None
         meta = WillMeta.from_dict(loaded if isinstance(loaded, Mapping) else {})
         return cls(meta=meta, body=_will_body(match.group(2)))
 
     def to_dict(self) -> dict[str, Any]:
         return {**self.meta.to_dict(), "body": self.body}
+
     def to_markdown(self) -> str:
         head = yaml.safe_dump(
             self.meta.to_dict(), allow_unicode=True, sort_keys=True, default_flow_style=False
         )
         return f"---\n{head}---\n\n{self.body}\n"
+
+
+def _one_line(value: Any, limit: int, key: str) -> str:
+    """Collapse any field to a single capped line: newlines in caller data must not
+    break the 2-4 line body contract of a will."""
+    if not isinstance(value, str):
+        raise SchemaError(f"{key}: expected a string")
+    return " ".join(value.split())[:limit].strip()
+
+
+def _as_utc(value: str, key: str) -> datetime:
+    """Parse an already validated ISO-8601 timestamp; a naive one is hive/mind clock
+    skew territory, so assume UTC instead of crashing on aware − naive subtraction."""
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def emergency_will(
@@ -538,44 +617,65 @@ def emergency_will(
     last_action: str,
     last_events: Sequence[str],
     node_name: str,
-    heir_name: str,
+    heir_address: str,
 ) -> Will:
     """The fallback will, assembled from fields the mind always has — no LLM involved.
 
     CLAUDE.md: there is no death without a will. When the smart call fails, this template
     speaks instead: cause, last action, last events, a fixed lesson per cause. Trait numbers
     stay in frontmatter; the body never names them. lifetime_s is computed from the dates.
+
+    Hardened on purpose (review R1-3) — this is the last line before "a death without a
+    will", so it does not throw on realistic corruption:
+    - naive timestamps are read as UTC, aware ones as-is;
+    - a negative lifetime (clock skew between containers) clamps to 0;
+    - an unknown cause degrades to `game`;
+    - `last_action` and `last_events` are post-perception text (what the node saw in its
+      prompt), NOT raw log.jsonl or uc service lines — the caller (T-013) passes them
+      through perception first; each is collapsed to one capped line, at most three
+      events survive, and the assembled body is checked by `_will_body`.
+
+    `heir_address` carries no serial: the heir's number is assigned at birth, after
+    retire, so the dying mind cannot know it — the caller composes a numberless address
+    from the naming preset («следующий узел» / «следующая Мисака», ADR-018). Residual
+    SchemaError (timestamps not ISO at all, non-int serial) means broken caller fields;
+    the death path (T-013) catches it and still writes a minimal file.
     """
-    if cause not in CAUSES:
-        raise SchemaError(f"cause: {cause!r} not in {CAUSES}")
-    start, end = _iso(born_at, "born_at"), _iso(died_at, "died_at")
-    lifetime_s = int(
-        (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()
-    )
-    if lifetime_s < 0:
-        raise SchemaError("died_at earlier than born_at")
-    events = ", ".join(e.strip() for e in last_events if e and e.strip())
-    action = last_action.strip() if isinstance(last_action, str) else ""
-    body = "\n".join(
-        [
-            f"{heir_name}, это {node_name}; пишу без своей головы, голова уже молчит.",
-            f"Смерть: {CAUSE_TEXT[cause]}; последнее действие: {action or 'неизвестно'}.",
-            f"Перед концом видел: {events or 'ничего приметного'}.",
-            f"Урок: {CAUSE_LESSON[cause]} Проверь сам.",
-        ]
+    if not isinstance(last_events, Sequence) or isinstance(last_events, (str, bytes)):
+        raise SchemaError("last_events: expected a list of strings")
+    cause = cause if cause in CAUSES else "game"
+    start = _as_utc(_iso(born_at, "born_at"), "born_at")
+    end = _as_utc(_iso(died_at, "died_at"), "died_at")
+    lifetime_s = max(0, int((end - start).total_seconds()))
+    events = [
+        _one_line(e, EMERGENCY_EVENT_CHARS, "last_events")
+        for e in last_events
+        if isinstance(e, str) and e.strip()
+    ][:EMERGENCY_MAX_EVENTS]
+    action = _one_line(last_action, EMERGENCY_ACTION_CHARS, "last_action")
+    body = _will_body(
+        "\n".join(
+            [
+                f"{_one_line(heir_address, 40, 'heir_address')}, это {node_name}; "
+                "пишу без своей головы, голова уже молчит.",
+                f"Смерть: {CAUSE_TEXT[cause]}; последнее действие: {action or 'неизвестно'}.",
+                f"Перед концом видел: {', '.join(events) or 'ничего приметного'}.",
+                f"Урок: {CAUSE_LESSON[cause]} Проверь сам.",
+            ]
+        )
     )
     meta = WillMeta(
         serial=serial,
         slot=slot,
         cause=cause,
-        born_at=start,
-        died_at=end,
+        born_at=start.isoformat(),
+        died_at=end.isoformat(),
         lifetime_s=lifetime_s,
         emergency=True,
         traits=traits,
         model="template",
     )
-    return Will(meta=meta, body=body)
+    return Will.from_dict({**meta.to_dict(), "body": body})
 
 
 # --- birth file and reflection IO (sections 6, 10) -----------------------------------
