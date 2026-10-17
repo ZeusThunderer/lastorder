@@ -54,6 +54,9 @@ E1_ENTITIES = [
     # item entities carry no display name: the kind stands in
     {"type": "item", "distance": "1.2", "position": "108, 71, -13", "is_item": "true",
      "item": "birch_log", "count": "2"},
+    # outside any sane radius: exercises the Python-side distance filter
+    {"type": "cow", "distance": "40.0", "position": "60, 71, 3", "is_item": "false",
+     "is_hostile": "false", "is_mob": "true", "health": "10", "name": "Cow"},
 ]
 
 E1_BLOCKS = [
@@ -93,6 +96,7 @@ class FakeEntryPoint:
         self.log: list[tuple] = []
         self.states = list(states or [E1_GAME_STATE])
         self.busy = False
+        self.punk_active = False
         self.chat = [
             "LastOrder01 joined the game",
             "§2§l§o[Alto Clef] Task started",
@@ -162,6 +166,46 @@ class FakeEntryPoint:
     def ChatMessage(self, msg):
         self._rec("ChatMessage", msg)
         return None
+
+    def selectHotbar(self, slot):
+        self._rec("selectHotbar", slot)
+        return {"ok": True}
+
+    def lookAt(self, x, y, z):
+        self._rec("lookAt", x, y, z)
+        return {"ok": True}
+
+    def mineBlocks(self, positions):
+        self._rec("mineBlocks", [list(p) for p in positions])
+        return {"ok": True, "queued": len(positions)}
+
+    def mineStatus(self):
+        self._rec("mineStatus")
+        return {"ok": True, "mining": False, "remaining": 0}
+
+    def punkAny(self, allow, avoid):
+        self._rec("punkAny", list(allow), list(avoid))
+        return {"ok": True, "allow": list(allow), "avoid": list(avoid)}
+
+    def punkStop(self):
+        self._rec("punkStop")
+        return {"ok": True}
+
+    def punkStatus(self):
+        self._rec("punkStatus")
+        return {"ok": True, "active": self.punk_active, "target": None}
+
+    def useHeldItem(self):
+        self._rec("useHeldItem")
+        return {"ok": True, "result": "ACCEPT", "held": {}}
+
+    def mouseClick(self, button):
+        self._rec("mouseClick", button)
+        return {"ok": True}
+
+    def holdKey(self, key, ms):
+        self._rec("holdKey", key, ms)
+        return {"ok": True, "key": key, "ms": ms}
 
 
 class FakeGateway:
@@ -385,17 +429,59 @@ def test_is_service_line(text, service):
 
 def test_entities_parse_raw_uc_rows():
     body, _, _, _ = make_body()
-    ents = body.entities(8)
+    ents = body.entities(10)  # the zombie sits at 8.5 m, inside this radius
     assert ents[0].kind == "zombie"
     assert ents[0].name == "Zombie"
     assert ents[0].dist_m == pytest.approx(8.5)
     assert ents[1].name == "item"  # no display name on item entities: kind stands in
 
 
+def test_entities_filter_is_a_radius_not_a_count():
+    # getEntitiesInfo(int) caps the COUNT (uc's own javadoc); the radius filter is
+    # ours. The far cow must drop even though uc happily returned it.
+    body, ep, _, _ = make_body()
+    ents = body.entities(radius=16)
+    assert [e.kind for e in ents] == ["zombie", "item"]  # the 40 m cow is gone
+
+
+def test_entities_passes_the_limit_to_uc_not_the_radius():
+    body, ep, _, _ = make_body()
+    body.entities(radius=16, limit=2)
+    assert ("getEntitiesInfo", 2) in ep.log
+
+
+def test_entities_fill_pos_from_position():
+    body, _, _, _ = make_body()
+    ents = body.entities(10)
+    assert ents[0].pos == (100, 70, -10)
+
+
+def test_entities_broken_position_becomes_none_not_an_exception():
+    ep = FakeEntryPoint()
+    ep.getEntitiesInfo = lambda limit: [
+        {"type": "zombie", "distance": "3.1", "position": "somewhere over there", "name": "Zombie"},
+        {"type": "item", "distance": "2.0"},  # no position at all
+    ]
+    body, _, _, _ = make_body(ep)
+    ents = body.entities(16)
+    assert [e.pos for e in ents] == [None, None]
+    assert [e.kind for e in ents] == ["zombie", "item"]
+
+
 def test_blocks_parse_raw_uc_rows():
     body, _, _, _ = make_body()
     blocks = body.blocks_around(2)
     assert [b.name for b in blocks] == ["grass block", "birch leaves"]
+    assert [b.pos for b in blocks] == [(106, 70, -13), (107, 71, -14)]
+
+
+def test_blocks_broken_position_becomes_none_not_an_exception():
+    ep = FakeEntryPoint()
+    ep.getBlocksAround = lambda radius: [{"position": "not a coord", "block": "dirt"}]
+    body, _, _, _ = make_body(ep)
+    blocks = body.blocks_around(2)
+    assert blocks[0].name == "dirt"
+    assert blocks[0].pos is None
 
 
 def test_inventory_skips_empty_slots():
@@ -432,6 +518,86 @@ def test_act_unknown_lever_is_loud():
     body, _, _, _ = make_body()
     with pytest.raises(ValueError, match="unknown lever"):
         body.act("dance", {})
+
+
+# --- the T-020 levers: mine, combat, food, catalogue commands ------------------------
+
+
+def test_act_mine_single_pos_wraps_it_in_a_list():
+    body, ep, _, _ = make_body()
+    body.act("mine", {"pos": [106, 70, -13]})
+    assert ("mineBlocks", [[106, 70, -13]]) in ep.log
+
+
+def test_act_mine_positions_pass_the_whole_patch():
+    body, ep, _, _ = make_body()
+    body.act("mine", {"positions": [[106, 70, -13], [107, 70, -13]]})
+    assert ("mineBlocks", [[106, 70, -13], [107, 70, -13]]) in ep.log
+
+
+def test_act_attack_passes_allow_and_avoid_to_punk_any():
+    body, ep, _, _ = make_body()
+    body.act("attack", {"allow": ["griefer"], "avoid": ["friend"]})
+    assert ("punkAny", ["griefer"], ["friend"]) in ep.log
+
+
+def test_act_attack_without_lists_starts_any_target_hunt():
+    body, ep, _, _ = make_body()
+    body.act("attack", {})
+    assert ("punkAny", [], []) in ep.log
+
+
+def test_act_attack_stop_calls_punk_stop():
+    body, ep, _, _ = make_body()
+    body.act("attack_stop", {})
+    assert ("punkStop",) in ep.log
+
+
+def test_act_strike_aims_then_left_clicks():
+    body, ep, _, _ = make_body()
+    body.act("strike", {"pos": [100, 70, -10]})
+    assert ("lookAt", 100.0, 70.0, -10.0) in ep.log
+    assert ("mouseClick", "left") in ep.log
+    # aim first, click second: the click rides on the crosshair
+    assert ep.log.index(("lookAt", 100.0, 70.0, -10.0)) < ep.log.index(("mouseClick", "left"))
+
+
+def test_act_use_held_calls_use_held_item():
+    body, ep, _, _ = make_body()
+    body.act("use_held", {})
+    assert ("useHeldItem",) in ep.log
+
+
+def test_act_eat_selects_the_slot_then_holds_the_use_key():
+    # One useHeldItem() does not eat (stand, review R2-4): eating is selectHotbar
+    # plus holding "use" long enough for the 32-tick chew.
+    body, ep, _, _ = make_body()
+    body.act("eat", {"slot": 3})
+    assert ep.log[-2:] == [("selectHotbar", 3), ("holdKey", "use", 1700)]
+
+
+def test_act_eat_takes_the_hold_ms_from_the_args():
+    body, ep, _, _ = make_body()
+    body.act("eat", {"slot": 3, "ms": 900})
+    assert ep.log[-1] == ("holdKey", "use", 900)
+
+
+def test_act_get_runs_the_catalogue_command_with_count():
+    body, ep, _, _ = make_body()
+    body.act("get", {"item": "log", "count": 2})
+    assert ("ExecuteCommand", "@get log 2") in ep.log
+
+
+def test_act_get_defaults_to_one():
+    body, ep, _, _ = make_body()
+    body.act("get", {"item": "log"})
+    assert ("ExecuteCommand", "@get log 1") in ep.log
+
+
+def test_act_equip_runs_the_equip_command():
+    body, ep, _, _ = make_body()
+    body.act("equip", {"item": "iron_helmet"})
+    assert ("ExecuteCommand", "@equip iron_helmet") in ep.log
 
 
 # --- wait_in_game ---------------------------------------------------------------------
@@ -482,8 +648,29 @@ def test_busy_reflects_active_task():
     assert body.busy() is True
 
 
+def test_busy_reflects_a_tungsten_fight_without_a_task():
+    # punkAny runs outside altoclef's task runner: hasActiveTask stays False
+    # while the fight is on, so busy() must also read punkStatus.
+    ep = FakeEntryPoint()
+    ep.punk_active = True
+    body, ep, _, _ = make_body(ep)
+    assert body.busy() is True
+    assert ("punkStatus",) in ep.log
+
+
+def test_busy_is_false_with_neither_task_nor_fight():
+    body, ep, _, _ = make_body()
+    assert body.busy() is False
+
+
 def test_stop_stops_pathing_and_sends_the_stop_command():
     body, ep, _, _ = make_body()
     body.stop()
     assert ("stopPathing",) in ep.log
     assert ("ExecuteCommand", "@stop") in ep.log
+
+
+def test_stop_also_stops_the_fight():
+    body, ep, _, _ = make_body()
+    body.stop()
+    assert ("punkStop",) in ep.log

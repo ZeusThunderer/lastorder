@@ -34,10 +34,49 @@ Fabric-мод: altoclef (`src/main/java/adris/altoclef`) + tungsten (pathfinder,
   - мир и подключение: `respawnPlayer`, `ConnectToServer`, `disconnectFromServer`.
 - Наблюдения:
   - `getGameState()` — self: hp, food, pos, held, lookingAt; players; beds;
-  - `getInventoryFull()`, `getEntitiesInfo(limit)`;
+  - `getInventoryFull()`, `getEntitiesInfo(limit)` — `limit` это ЛИМИТ ЧИСЛА, не радиус
+    (дефект T-006): фильтр по расстоянию делает Python-сторона по полю `distance`
+    (строка `"%.1f"`); `position` — строка `"x, y, z"`, у сущностей координаты округлены
+    до целых (`%.0f`);
   - `getBlocksAround(r≤5)`, `getSurfaceMap(r≤6)`, `getBlockAt`;
   - `getRecentChat(n)` — кольцевой буфер;
   - `hasActiveTask`, `inGame`, `getScreenshot()`.
+
+### Рычаги выживания (проверены на стенде, T-020)
+
+Формы ответов — как вернул живой uc 1.21.11 (образ mind-1 от 2026-10-17).
+
+- `mineBlocks(positions)` — очередь tungsten break queue (не altoclef-задача:
+  `hasActiveTask` её не видит). `positions` — список `[x,y,z]`, py4j передаёт
+  Python-int как Java-Long, uc читает через `Number.intValue()`. Ответ
+  `{'ok': True, 'queued': 1}`; блок под ногами добыт за 2,3 с. Блоки вне reach
+  остаются в очереди — подойти `gotoXYZ` и поллить `mineStatus()` → `{mining,
+  remaining}` или сам мир (`getBlocksAround`). Очередь изредка молча теряет
+  клетку (стенд: ok/queued, блок цел 90 с) — проверять мир и на таймауте
+  перекидывать очередь, лучше со свежего места.
+- `punkAny(allow, avoid)` → `{ok, allow, avoid}` — бой **только по игрокам**:
+  `PunkPlayerTask.isAcceptable` принимает `PlayerEntity` и ничего больше.
+  Проверено коровой: `allow=["cow"]`, 10 с — hp 10.0 → 10.0, урона нет.
+  `interactEntity`/`attackPlayer`/`@punk` — тоже игроки (`getEntity` →
+  `getPlayerEntity`, `PlayerArg`). Бой с мобом — `lookAt` + `mouseClick("left")`.
+- `punkStatus()` → `{ok, active, target}` (target null вне цели), `punkStop()` →
+  `{ok: True}`. `active` поднимается асинхронно (клиентский поток): сразу после
+  `punkAny` читать рано.
+- `mouseClick("left")` → `{ok, button, hit: BLOCK|ENTITY|MISS}` — физический клик
+  по прицелу. Атака моба: подойти в reach 3 блока (животное уходит — догонять
+  `gotoXYZ`), прицел в центр хитбокса (клетка +0.5, y+0.7 — точка ног попадает
+  под хитбокс, `hit: BLOCK`), клик. Корова 10 hp — 3 удара железным мечом.
+- `useHeldItem()` → `{ok, result, held}` — одна интеракция с предметом в руке.
+  Для еды этого НЕДОСТАТОЧНО: один вызов не съедает хлеб (food и count не
+  меняются). Рычаг `eat` = `selectHotbar(n)` + `holdKey("use", ms)`, `ms` из
+  аргументов, по умолчанию 1700 — food 17→20, saturation → 6, count −1 (MC
+  держит use 32 тика). `use_held` остаётся одной интеракцией.
+- `@get <item> <n>` — «обеспечить ≥ n»: с уже имеющимся предметом завершается
+  сразу (3 с), с нуля у дерева ~13 с. `@equip <item>` — только броня/щит
+  (`EquipCommand.EquipmentItemArg`), обычные предметы — `selectHotbar`.
+
+### События и Python-образцы
+
 - События: Python реализует `PythonCallback.java` и поднимает callback-сервер, затем `InitPythonCallback()`.
   Колбэки: `onChatMessage`, `onDeath`, `onKill`, `onDamage`, `onAutoclefEvent`, `onUpdateServerInfo`,
   `onVoiceFeed`, `agentCommandRequest`. Без callback-сервера события молча теряются.
