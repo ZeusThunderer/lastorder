@@ -2,7 +2,7 @@
 id: T-020
 title: Тело — позиции в наблюдении и рычаги добычи, боя, еды
 stage: E2
-status: accepted
+status: done
 criticality: normal
 branch: z/T-020-body-actions
 created: 2026-10-17

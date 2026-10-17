@@ -23,7 +23,7 @@
 | T-017 | Общение узлов — Мисака-нет, игровой чат, болтовня с режиссёром | E3 | queued | critical | z/T-017-node-comms |
 | T-018 | Сеть из 3 слотов в compose | E3 | queued | critical | z/T-018-three-slots |
 | T-019 | Отчёт MVP и 2-часовой прогон сети | E3 | queued | normal | z/T-019-mvp-run |
-| T-020 | Тело — позиции в наблюдении и рычаги добычи, боя, еды | E2 | in_progress | normal | z/T-020-body-actions |
+| T-020 | Тело — позиции в наблюдении и рычаги добычи, боя, еды | E2 | done | normal | z/T-020-body-actions |
 | T-021 | Наблюдение, варианты шага и тактика C1 на правилах | E2 | queued | critical | z/T-021-observe-options |
 | T-022 | Сервис hive и HiveClient — HTTP API портов, срок жизни, RCON | E2 | ready | critical | z/T-022-hive-service |
 | T-023 | Рефлексия C4 — личная цель, core memory, кандидаты знаний | E2 | queued | critical | z/T-023-reflection |
