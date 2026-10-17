@@ -2,7 +2,7 @@
 id: T-007
 title: Проект знаний, праймера и завещаний (KNOWLEDGE.md v2)
 stage: E2
-status: accepted
+status: done
 criticality: critical
 branch: z/T-007-knowledge-will-design
 created: 2026-10-16
