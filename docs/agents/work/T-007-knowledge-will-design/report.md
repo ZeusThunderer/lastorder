@@ -198,3 +198,48 @@ Every workplace is intact: files present, links resolve, boxes parse.
 - 2026-10-17 · result · 354321a · VERDICT: changes · cost_usd: unknown (stdout-парсинг
   call_supervisor.sh упал на python-стабе Windows, вердикт взят из review.md)
 
+## Раунд 4 · 2026-10-17 (сдача после самопроверки)
+Коммиты: 11533f1 + этот (статус `review`).
+
+### Сделано
+- C-1 самопроверки: `node_name` в теле аварийного завещания схлопывается `_one_line`
+  (лимит 40), как и остальные поля тела, — перенос строки или длинное имя больше не роняет
+  сборку (`runtime/knowledge/schema.py`, тест расширен многострочным именем).
+- Прочее — без изменений; критерии приёмки закрыты раундами 1 и 3.
+
+### Проверки
+```
+$ uv run pytest
+121 passed in 4.79s
+$ uv run python tools/check.py
+CHARACTERS: last_order, vesper
+Every workplace is intact: files present, links resolve, boxes parse.
+```
+Diff `main...HEAD` — только «Можно трогать»: KNOWLEDGE.md, NETWORK.md (§5, §8, раунд 1),
+`runtime/knowledge/{__init__,schema,budget}.py`, `tests/test_knowledge_schema.py`, файлы
+задачи.
+
+### Ответ на ревью 1 (сводно)
+- R1-1, R1-2, R1-3, R1-4, R1-5, R1-6, R1-7, R1-8, R1-9 · fixed 886b277 — подробный разбор
+  каждой находки в раунде 3.
+
+### Самопроверка
+- Раундов `lo-checker`: 2. Итог последнего: CHECK: clean (одна minor-находка, закрыта
+  до сдачи).
+- C-1 (node_name без `_one_line`) · fixed 11533f1.
+- Из первого раунда самопроверки: C-1 (нет `to_dict` у `Evidence`/`RecordVote`) ·
+  fixed 886b277 (стала находкой ревью R1-4 и закрыта вместе с ней); C-2 · итог был
+  `clean`, предмета для правки не было.
+
+### Отклонения от задачи
+- нет (см. раунды 1, 3)
+
+### Вне задачи
+- нет (см. раунды 1, 3)
+
+### Вопросы
+- нет
+
+### Вызовы надзора
+- новых нет; строка result-вызова с вердиктом changes — в раунде 3.
+
