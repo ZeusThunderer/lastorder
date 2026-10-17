@@ -158,3 +158,45 @@ Every workplace is intact: files present, links resolve, boxes parse.
 ### Вызовы надзора
 - 2026-10-17 · result · 3eda8c3 · VERDICT: changes · cost_usd: unknown (stdout-парсинг
   call_supervisor.sh упал на python-стабе Windows, вердикт взят из review.md)
+
+## Раунд 4 · 2026-10-17 · сдача
+Коммиты: bbff7e5 (take), 3b7a014 (находки R3-1, R3-2) + этот.
+
+### Сделано
+- Раунд доработки по ревью 3; документ остался в лимите 300 строк.
+
+### Ответ на ревью
+- R3-1 · fixed 3b7a014 · `runtime/comms/schema.py`: `CHATTER_QUOTE_MAX_CHARS = 280` — цитата
+  нити knowledge есть точный `claim` записи, а claim ограничен 280 символами (KNOWLEDGE.md §2),
+  комментарий в коде ссылается на KNOWLEDGE §2; `quote` проверяется по константе вместо 200,
+  законная запись всегда проходит `ChatterThread.from_dict`. Константа названа в §7 документа;
+  тест: цитата 280 символов принимается, 281 — отклоняется.
+- R3-2 · fixed 3b7a014 · GOALS_COMMS.md:74 — «ночный стон» приведён к «ночной стон», как в JSON
+  примеров и сигналах.
+
+### Самопроверка
+- `lo-checker`: CHECK: clean, раундов — 1; находок нет.
+
+### Проверки
+```
+$ uv run pytest
+181 passed
+$ uv run python tools/check.py
+CHARACTERS: last_order, vesper
+Every workplace is intact: files present, links resolve, boxes parse.
+```
+
+### Отклонения от задачи
+- нет.
+
+### Вне задачи
+- Дубль `SAY_MIN_INTERVAL_S` — свести к env в T-017 (как в раундах 1–3).
+- Заметка надзора: `runtime/hive/__init__.py` появится и в T-012 — сведёт docstring тот, кто
+  мержится вторым; ветка T-008 его не трогает и правок T-012 не перетрёт.
+
+### Вопросы
+- нет.
+
+### Вызовы надзора
+- 2026-10-17 · result · d63bc23 · VERDICT: changes · cost_usd: unknown (stdout-парсинг
+  call_supervisor.sh упал на python-стабе Windows)
