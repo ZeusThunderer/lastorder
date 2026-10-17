@@ -181,3 +181,57 @@ $ … --preset misaka --out docs/agents/snapshots/2026-10-17-misaka.md
 ### Вызовы надзора
 - 2026-10-17 · answer · f5affed · VERDICT: blocked (эскалация к оператору) · cost_usd: unknown
 - 2026-10-17 · answer · d02b3d2 · VERDICT: answered · cost_usd: unknown
+
+## Раунд 4 · 2026-10-17
+Коммиты: a3098a8 (take), ba81cd8 (R3-1..R3-6), f93cc43 (C-1).
+
+### Ответ на ревью
+- R3-1 · fixed ba81cd8 — в `masked` моются все свободные тексты: поля `Inheritance`
+  (`dataclasses.replace` до рендера), core memory, claim записей блоков 7–8; наблюдение и
+  варианты не трогаются; строка про сдвиг кеша префикса — в докстринге `build_step_prompt`.
+  Тест `test_masked_prompt_has_no_leaks` теперь подаёт сырые имена в каждом поле наследия,
+  core memory, claim, целях, чате и сообщениях — `leaks()` пуст.
+- R3-2 · fixed ba81cd8 — в `plain` те же свободные тексты идут через `perception.scrub`,
+  без perception — `translate.NAMESPACED` + `normalize`; тест
+  `test_plain_namespaced_forms_are_normalized` (с perception и без) держит `minecraft:` вне
+  промпта в обоих случаях.
+- R3-3 · fixed ba81cd8 — потолочная резка в точности по §9: fresh → about до самой
+  релевантной → кандидаты до первого → старый чат → старые сообщения, и только сверх §9 —
+  последняя about и последний кандидат, затем ValueError. Тест на 33 целях пинует стадию:
+  fresh и второй кандидат срезаны, первая about и первый кандидат живы, старый чат уходит
+  после кандидатов, сообщение живёт дольше чата.
+- R3-4 · fixed ba81cd8 — `why: null` голоса парсится как пустая строка (тест расширен).
+- R3-5 · fixed ba81cd8 — пустой `primer_block` возвращает `"\n"`: пустая строка между
+  правилом знаний и Node variables сохраняется; бюджет перепроверен тестами (пин T-007 зелёный).
+- R3-6 · fixed ba81cd8 — докстринг persona.py называет плейсхолдер `{primer}`.
+
+### Сделано
+- Раунд доработки по ревью 3 + фикс checker C-1: блок-бюджетный guard `B_ABOUT` получил
+  этаж §9 «до самой релевантной» (одна сверхбюджетная about-запись остаётся — её размер
+  дело квот claim, не сборки), тест `test_single_overweight_about_entry_stays`.
+
+### Проверки
+```
+$ uv run pytest
+324 passed in 12.65s
+$ uv run python tools/check.py
+CHARACTERS: last_order, vesper
+Every workplace is intact: files present, links resolve, boxes parse.
+```
+
+### Отклонения от задачи
+- нет
+
+### Вне задачи
+- нет нового
+
+### Вопросы
+- нет
+
+### Самопроверка
+- lo-checker: раундов 1, CHECK: clean
+- C-1 · fixed f93cc43 (floor=1 у B_ABOUT guard, тест на сверхбюджетную одиночную about)
+
+### Вызовы надзора
+- 2026-10-17 · result · fa9e061 · VERDICT: changes · cost_usd: unknown (stdout-парсинг
+  call_supervisor.sh упал на python-стабе Windows)
