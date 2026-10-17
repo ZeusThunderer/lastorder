@@ -120,3 +120,39 @@ R2-1, R2-3, R2-5 закрыты. R2-2 закрыта по существу: св
 Без замечаний. LLM не вызывается, `@gamer` нет в `LEVERS`, `unionclef/` и `runtime/perception/` не тронуты.
 Строка «Проверок» в `task.md` поправлена надзором на рабочий вызов через stdin (отклонение из отчёта
 раунда 2 принято).
+
+## Раунд 4 · 2026-10-17 · вердикт: accept · headless
+Проверено: `git diff main...z/T-020-body-actions` @ e0f91a2 (с раунда 3 менялся только `dev/body_smoke.py`)
+
+### Проверки (прогнаны надзором)
+- `uv run pytest` — 96 passed
+- `uv run python tools/check.py` — Every workplace is intact
+- `docker compose ... ps` — mc-server (healthy), body-1 Up
+- `docker compose -f docker/compose.yml build mind-1` — образ собран из ветки
+- `docker compose -f docker/compose.yml run -T --rm mind-1 python - --actions < dev/body_smoke.py` —
+  **`actions smoke passed`**, расхождений с отчётом нет.
+  mine grass_block под ногами (try 1, 2,7 с); `@get log 2` (3 с, уже было 3); `select_hotbar` →
+  birch_log; summon с тегом → корова в 2 м, hp 10.0; punkAny 10.0 → 10.0 (только игроки);
+  `attack_stop`; strike по tagged-корове — «cow down, 2 confirmed hit(s)» за 12 с, по RCON удалена;
+  `eat` beef — count 1 → 0, food 12 → 15.
+
+### Критерии приёмки
+- [x] `entities(radius, limit=32)` — лимит в uc, фильтр по `dist_m` в Python; тест.
+- [x] `EntityInfo.pos`/`BlockInfo.pos`, битая строка → None; тесты.
+- [x] Рычаги `mine`, `attack`, `attack_stop`, `use_held`, `eat` (hold use), `get`, `equip` + тесты.
+- [x] `busy()` учитывает `punkStatus`, `stop()` зовёт `punkStop`; тесты.
+- [x] `body_smoke.py --actions` на стенде — зелёный, до/после по каждому шагу.
+- [x] `punkAny` по мобу: только игроки; `attack` по мобам — рычаг `strike`, выбор описан.
+- [x] `unionclef-bridge.md` «Управление» дополнен.
+
+R3-1, R3-2 закрыты: прицел по RCON-позиции tagged-коровы, попадание — только по падению hp,
+исчерпание цикла — FAIL.
+
+### Находки
+- R4-1 · minor · `dev/body_smoke.py` «busy sees the fight» · шаг печатает `false` и проходит: при
+  punkAny по мобу tungsten не находит цель, и живого свидетеля `busy()` во время боя нет. Покрыто
+  юнит-тестом; на стенде проверить, когда появится бой с реальной целью (T-021). Не блокирует.
+
+### Чек-лист проекта
+Без замечаний. LLM не вызывается, `@gamer` нет в `LEVERS`, изменения в пределах «Можно трогать»,
+`unionclef/` и `runtime/perception/` не тронуты.
