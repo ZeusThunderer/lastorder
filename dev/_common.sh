@@ -59,7 +59,7 @@ promote_queued() {
 
 # Set the status cell of a BOARD row in a file on disk.
 board_set() {
-  python - "$1" "$2" "$3" <<'PY'
+  uv run --project "$ROOT" python - "$1" "$2" "$3" <<'PY'
 import io, sys
 path, tid, status = sys.argv[1:]
 lines = io.open(path, encoding="utf-8", newline="").read().split("\n")
