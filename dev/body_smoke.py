@@ -401,6 +401,10 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
 
         def meal_happened() -> str:
             assert st1 is not None and inv1 is not None, "state/inventory unreadable after eat"
+            # A death mid-meal drops the whole inventory: the count drop would then
+            # be the death drop, not a meal (checker C-1). Witness only the living.
+            assert not st1.dead and st1.hp > 0, (
+                f"body died during the meal (hp={st1.hp}): count drop is not meal evidence")
             gained = st1.food - food0
             assert left < count0 or gained > 0, (
                 f"no meal: {held} count {count0} -> {left}, food {food0:.0f} -> {st1.food:.0f}")
