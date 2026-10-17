@@ -2,7 +2,7 @@
 id: T-007
 title: Проект знаний, праймера и завещаний (KNOWLEDGE.md v2)
 stage: E2
-status: review
+status: accepted
 criticality: critical
 branch: z/T-007-knowledge-will-design
 created: 2026-10-16
@@ -100,3 +100,5 @@ uv run python tools/check.py
 - Документ по-русски, сухо, ≤ 350 строк.
 
 ## Заметки надзора
+- D-001 · ae6fe32 · лимиты полей аварийного завещания (имя и обращение ≤ 24, события ≤ 32): тело при
+  всех полях на пределе укладывается в 220 токенов; `_want` не падает на int-ключах YAML.
