@@ -70,3 +70,77 @@
 6. Критерий 3 в task.md: «≤ 2500» заменено на «≤ `budget.STEP_INPUT_BUDGET` (4500, ADR-029)».
 
 Статус: `in_progress`.
+
+## Раунд 3 · 2026-10-17 · вердикт: changes · headless
+Проверено: `git diff main...z/T-011-prompt-step-schema` @ fa9e061, построчно (critical).
+
+### Проверки (прогнаны надзором)
+- `uv run pytest` — 321 passed
+- `python tools/check.py` — Every workplace is intact
+- `tools/snapshot_replies.py --preset lab` (в temp-файл, уровень node, $0.0011) — шаги `plain`
+  и `masked` OK, валидный `StepReply`; task1 `will` FAIL (5 строк при норме 2–4), выход 1.
+  Сборка ни при чём: это разброс модели, как и FAIL `misaka` из отчёта. Расхождением с отчётом
+  не считаю, но команда из «Проверок» зелёной гарантированно не бывает.
+
+### Критерии приёмки
+- [x] Шаблон: `{knowledge_rule}` по режиму, `{primer}`, правила шага, порядок §9 —
+  `test_blocks_follow_section_9_order`, `test_knowledge_rule_variants_by_mode`.
+- [x] Формат ответа в шаблоне — `test_template_describes_the_reply_format`.
+- [ ] `build_step_prompt`: бюджеты блоков и потолок есть, но порядок резки под потолок
+  расходится с KNOWLEDGE v2 §9 (R3-3).
+- [x] Потолок 4500: ADR-029, NETWORK §6 (0.217 $/ч пересчитано верно), KNOWLEDGE §9,
+  `B_PERSONA` 1300, тест суммы 4160; пин `test_persona_template_fits_persona_budget` не тронут.
+- [x] System не меняется между шагами — `test_system_is_stable_across_steps`.
+- [x] `parse_step_reply` — тесты на валидный, частичный, битый, чужой `option_id`, мусор.
+- [ ] `masked`: `leaks()` пуст только при чистых наследии и core memory (R3-1); `plain`:
+  `minecraft:` из чата и сообщений проходит в промпт (R3-2). Служебные строки uc вырезаются
+  в обоих режимах — тест есть.
+- [x] Черты числами не выводятся (правило шаблона, `TRAIT_NUMBER` в снапшоте), пресет не зашит
+  (`NODE_NAMING_PRESET`, дефолт `lab`), 4-й черты нет.
+- [x] Снапшот на уровне `node`, оба пресета, стоимость в отчёте ≤ $0.05.
+
+### Находки
+- R3-1 · blocker · `runtime/lastorder/step.py:129-140` · В `masked` через `washed()` идут только
+  цели, чат и сообщения. Наследие (`predecessors_summary`, `active_nodes_summary`,
+  `inherited_notes`, `collective_terms`, `knowledge_catalog`) уходит в `persona.system_prompt`
+  как есть, `core_memory` — через `_core_block` без scrub. Это такие же свободные тексты:
+  завещания и core пишет `smart`, сводки собирает hive. Выше по цепочке их никто не чистит:
+  `scrub(` в `runtime/` вызывается только в `step.py`. Пример: core memory `- zombie у болота`
+  при perception, видевшей zombie, даёт непустой `leaks()`. Прямо нарушен ADR-020 и KNOWLEDGE
+  §9 («свободные тексты — через perception, сырые id в промпт не попадают»).
+  `test_masked_prompt_has_no_leaks` зелёный только потому, что наследие и core в нём чистые.
+  · Ожидается: в `masked` через `washed()` идут все свободные тексты — поля `Inheritance`
+  (`dataclasses.replace` до рендера), core memory и, для единообразия, `claim` записей блоков
+  7–8. Наблюдение и варианты не трогать: они уже прошли perception. Тест на утечки дополнить:
+  сырые имена в каждом поле наследия, в core memory и в claim записи → `leaks() == []`.
+  Кеш префикса: вывод scrub зависит от того, что perception уже видела, и system сдвинется,
+  когда впервые увидят id, упомянутый в наследии. С целями так уже есть, это допустимо.
+  Одна строка об этом — в докстринг `build_step_prompt`.
+- R3-2 · major · `runtime/lastorder/step.py:124-125` · В `plain` `washed()` возвращает текст
+  без изменений. Но форма `minecraft:` — утечка в обоих режимах (ADR-020, докстринг
+  `Perception.leaks`), и `Perception.scrub` в `plain` её как раз нормализует. Реплика игрока
+  `дай minecraft:bread` попадает в `plain`-промпт сырой. Переданная в `plain` perception
+  не используется вовсе. · Ожидается: в `plain` те же свободные тексты, что в R3-1, проходят
+  `perception.scrub`, если perception передана. Без неё — `translate.NAMESPACED` + `normalize`
+  (пакет perception только используется, не правится). Тест: в `plain` `minecraft:` в чате,
+  сообщении, цели и наследии → `Perception(..., mode="plain").leaks(system + user) == []`.
+- R3-3 · major · `runtime/lastorder/step.py:182-197` · Резка под потолок расходится с §9.
+  По §9: хвост свежих → about «до самой релевантной» (одна остаётся) → «второй кандидат»
+  (первый остаётся) → старый чат. Код обнуляет about и votes целиком и только потом трогает чат.
+  Критерий 3 требует порядок по KNOWLEDGE v2. · Ожидается: fresh → about до 1 → votes до 1 →
+  старый чат → старые сообщения. Только после этого — последняя about и последний кандидат
+  (продолжение сверх §9 — одной строкой в докстринге), затем ValueError. Тест: переполнение
+  потолка (например, большие цели) при непустом чате — первая about и первый кандидат на месте,
+  старый чат срезан.
+- R3-4 · minor · `runtime/lastorder/step.py:242-243` · `why` голоса `null` превращается
+  в строку `"None"` (`str(why)`). · Брать только `str`, иначе `""`, как у `why` ответа.
+- R3-5 · minor · `agent/last_order/prompt_template.md:24-25` · При пустом праймере (в `masked`
+  всегда) `# Node variables` идёт сразу за правилом знаний без пустой строки. · Пустой
+  `primer_block` возвращает `"\n"` (бюджет рендера перепроверить тестом).
+- R3-6 · minor · `runtime/lastorder/persona.py:7` · Докстринг: «the primer block
+  ({knowledge_rule}'s neighbor…)» — должно быть `{primer}`.
+
+### Чек-лист проекта
+- Восприятие (ADR-020): см. R3-1, R3-2. Остальное без замечаний: новых вызовов LLM нет,
+  снапшот на `node`, базу узел не пишет (только разбор `votes`/`new_term`), изменения
+  в пределах «Можно трогать», `ports.py` — только `StepReply.msg` и удалённый `MessageDraft`.
