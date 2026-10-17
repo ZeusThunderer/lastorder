@@ -123,7 +123,11 @@ def test_init_creates_layout_and_git(base: Path):
     assert (base / "base" / "goals.md").exists()
     assert (base / ".git").exists()
     assert git_log(opened) == ["init: layout"]
-    assert (base / ".gitignore").read_text(encoding="utf-8").splitlines() == [".lock", ".serial"]
+    assert (base / ".gitignore").read_text(encoding="utf-8").splitlines() == [
+        ".lock",
+        ".serial",
+        "*.tmp",
+    ]
 
 
 PRIMER_FIXTURE = [
@@ -313,6 +317,18 @@ def test_retire_rejects_unknown_mismatched_and_broken(store: KnowledgeStore):
     assert not (store.root / "nodes" / "00001" / "will.md").exists()
 
 
+def test_retire_refuses_namespaced_ids_in_the_body(store: KnowledgeStore):
+    # Review R1-3: the body goes to the heir's prompt, raw ids must not ride along
+    serial = birth(store)
+    with pytest.raises(InvalidWillError):
+        store.retire(
+            serial,
+            "game",
+            will_text(serial, body="Урок: minecraft:creeper не прощает.\nШутка: жадность."),
+        )
+    assert not (store.root / "nodes" / "00001" / "will.md").exists()
+
+
 def test_retire_clamps_clock_skew(store: KnowledgeStore):
     serial = birth(store)
     # clock skew between the mind's and hive's containers: died_at before born_at, clamped to 0
@@ -431,6 +447,28 @@ def test_candidate_near_primer_is_a_new_hypothesis(base: Path, tmp_path: Path, m
     near = opened.submit_candidate(serial, candidate(claim=PRIMER_FIXTURE[0]["claim"]))
     # disagreement with the primer is the node's own hypothesis (P1-2)
     assert near.id == "k-0002" and near.status == "hypothesis" and near.source == "node"
+
+
+def test_broken_candidate_rejected_even_as_duplicate(base: Path):
+    # Review R1-1: a candidate that would duplicate a record still dies at the door
+    store = KnowledgeStore(base, git=True)
+    serial_a = birth(store)
+    serial_b = birth(store, slot="LastOrder02")
+    store.submit_candidate(serial_a, candidate())
+    record_path = base / "base" / "records" / "k-0001.json"
+    before = record_path.read_bytes()
+    log_before = git_log(store)
+    long_claim = candidate().claim + " " + "х" * 250  # > 280 chars, still J >= 0.6
+    for broken in (
+        candidate(kind="warning"),  # kind outside KINDS
+        candidate(about=("ent:zombie", "zombie")),  # a prefix-less key beside the shared one
+        candidate(kind="term", about=("ent:zombie", "ent:creeper")),  # a term needs one key
+        candidate(claim=long_claim),  # over CLAIM_MAX_CHARS
+    ):
+        with pytest.raises(InvalidCandidateError):
+            store.submit_candidate(serial_b, broken)
+    assert record_path.read_bytes() == before
+    assert git_log(store) == log_before  # no evidence commit for any of them
 
 
 def test_duplicate_resubmission_is_idempotent(store: KnowledgeStore):

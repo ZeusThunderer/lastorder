@@ -31,6 +31,7 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -179,6 +180,19 @@ def _json_text(data: dict[str, Any]) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
+def _write_atomic(path: Path, data: bytes) -> None:
+    """Write through a temp file in the same directory, then `os.replace` into place.
+
+    Readers take no lock (review R1-2), so they must never see a half-written file:
+    `os.replace` is atomic within one filesystem, and the temp file lives beside the
+    target to stay on it. A crash between write and replace leaves a `*.tmp` only.
+    """
+
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
 class KnowledgeStore:
     """The shared base under `root`: the only code that writes it (ADR-017)."""
 
@@ -214,7 +228,7 @@ class KnowledgeStore:
 
         with self._locked():
             files = {
-                self.root / ".gitignore": ".lock\n.serial\n",
+                self.root / ".gitignore": ".lock\n.serial\n*.tmp\n",
                 self._catalog_path: "",
                 self._goals_path: "",
             }
@@ -253,7 +267,7 @@ class KnowledgeStore:
         try:
             for path, text in files.items():
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(text, encoding="utf-8", newline="\n")
+                _write_atomic(path, text.encode("utf-8"))
             if self.git:
                 self._git(
                     "add", "--", *(str(p.relative_to(self.root)) for p in files)
@@ -263,8 +277,9 @@ class KnowledgeStore:
             for path, was in snapshot.items():
                 if was is None:
                     path.unlink(missing_ok=True)
+                    path.with_name(path.name + ".tmp").unlink(missing_ok=True)
                 else:
-                    path.write_bytes(was)
+                    _write_atomic(path, was)
             if self.git:
                 # A successful `git add` leaves the content staged: unstage it, or the
                 # next whole-index commit silently swallows the aborted operation (C-4).
@@ -313,7 +328,7 @@ class KnowledgeStore:
             if child.is_dir() and child.name.isdigit():
                 current = max(current, int(child.name))
         serial = current + 1
-        self._serial_path.write_text(str(serial), encoding="utf-8")
+        _write_atomic(self._serial_path, str(serial).encode("utf-8"))
         return serial
 
     def _next_record_number_locked(self) -> int:
@@ -400,6 +415,14 @@ class KnowledgeStore:
             if will.meta.serial != serial:
                 raise InvalidWillError(
                     f"will frontmatter serial {will.meta.serial} does not match {format_serial(serial)}"
+                )
+            # The body rides into the heir's prompt (inherited_notes): namespaced ids are
+            # refused here too (review R1-3); leak_check is NOT applied — an emergency
+            # will assembled from post-perception fields must not die on unseen ids.
+            namespaced = NAMESPACED.findall(will.body)
+            if namespaced:
+                raise InvalidWillError(
+                    f"will body: raw game ids {sorted(set(namespaced))} never enter the base"
                 )
             died = parse_utc(will.meta.died_at)
             born = parse_utc(birth.born_at)
@@ -507,28 +530,12 @@ class KnowledgeStore:
             if not isinstance(candidate, KnowledgeCandidate):
                 raise InvalidCandidateError("candidate: expected a KnowledgeCandidate")
             self._refuse_raw_ids(candidate.claim, InvalidCandidateError, "candidates.claim")
-            records = self.records()
             ts = self._now()
-            duplicate = find_duplicate(records, candidate.claim, candidate.about)
-            if duplicate is not None:
-                if any(e.node == serial for e in duplicate.evidence):
-                    return duplicate  # this node's evidence is already on record
-                evidence = duplicate.evidence + self._author_evidence(
-                    serial, candidate.evidence_event_ids, ts
-                )
-                data = duplicate.to_dict()
-                data["evidence"] = [e.to_dict() for e in evidence]
-                data["status"] = status_of(duplicate.source, duplicate.author, evidence, duplicate.votes)
-                try:
-                    updated = Record.from_dict(data)
-                except SchemaError as exc:
-                    raise InvalidCandidateError(f"candidate rejected: {exc}") from exc
-                self._write_record(updated, f"evidence: {updated.id} by {serial}")
-                return updated
-            record_id = f"k-{self._next_record_number_locked():04d}"
             evidence = self._author_evidence(serial, candidate.evidence_event_ids, ts)
-            data = {
-                "id": record_id,
+            # One full validation for both branches, before any dedup (review R1-1): a
+            # broken candidate must die at the door even when it would duplicate a record.
+            draft = {
+                "id": "k-0000",  # placeholder; the real id is issued after the dedup decision
                 "kind": candidate.kind,
                 "claim": candidate.claim,
                 "about": list(candidate.about),
@@ -540,9 +547,26 @@ class KnowledgeStore:
                 "votes": [],
             }
             try:
-                record = Record.from_dict(data)
+                validated = Record.from_dict(draft)
             except SchemaError as exc:
                 raise InvalidCandidateError(f"candidate rejected: {exc}") from exc
+            records = self.records()
+            duplicate = find_duplicate(records, validated.claim, validated.about)
+            if duplicate is not None:
+                if any(e.node == serial for e in duplicate.evidence):
+                    return duplicate  # this node's evidence is already on record
+                joined = duplicate.evidence + evidence
+                data = duplicate.to_dict()
+                data["evidence"] = [e.to_dict() for e in joined]
+                data["status"] = status_of(duplicate.source, duplicate.author, joined, duplicate.votes)
+                try:
+                    updated = Record.from_dict(data)
+                except SchemaError as exc:
+                    raise InvalidCandidateError(f"candidate rejected: {exc}") from exc
+                self._write_record(updated, f"evidence: {updated.id} by {serial}")
+                return updated
+            record_id = f"k-{self._next_record_number_locked():04d}"
+            record = replace(validated, id=record_id)
             self._write_record(record, f"record: {record.id} hypothesis by {serial}")
             return record
 
