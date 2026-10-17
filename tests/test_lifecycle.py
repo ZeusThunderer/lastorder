@@ -63,10 +63,19 @@ class JournalLLM(StubLLM):
 
 
 class FakeRegistry:
-    """NodeRegistry on scripts: retire/birth raise or pass by preloaded queues."""
+    """NodeRegistry on scripts: retire/birth raise or pass by preloaded queues.
 
-    def __init__(self, journal: list[str]):
+    With `hive_semantics` the review-R1-1 behavior of the real hive is modeled too:
+    `birth` closes every living node of the slot with hive's OWN emergency will, and a
+    `retire` of a closed (or never-born) serial then answers 409 already_retired —
+    the trap the old after-birth delivery fell into.
+    """
+
+    def __init__(self, journal: list[str], *, hive_semantics: bool = False, born=()):
         self.journal = journal
+        self.hive_semantics = hive_semantics
+        self.living: set[int] = set(born)
+        self.closed_by_hive: dict[int, str] = {}  # serial -> hive's emergency will text
         self.retire_failures: list[Exception | None] = []
         self.birth_failures: list[Exception | None] = []
         self.retire_always: Exception | None = None  # a permanent 4xx, retrying is futile
@@ -83,6 +92,10 @@ class FakeRegistry:
             failure = self.retire_failures.pop(0)
             if failure is not None:
                 raise failure
+        if self.hive_semantics:
+            if serial not in self.living:
+                raise HiveRejected(409, "already_retired", f"node {serial:05d} is retired")
+            self.living.discard(serial)
 
     def birth(self, slot: str, traits: Traits) -> BirthRecord:
         self.birth_calls.append(slot)
@@ -91,11 +104,19 @@ class FakeRegistry:
             failure = self.birth_failures.pop(0)
             if failure is not None:
                 raise failure
+        if self.hive_semantics:
+            # the real hive (runtime/hive/lifecycle.py): a birth into an occupied slot
+            # closes the old node as lost — with hive's emergency will, not the node's
+            for serial in sorted(self.living):
+                self.closed_by_hive[serial] = f"---\nserial: {serial}\nemergency: true\n---\n(шаблон hive)"
+                self.living.discard(serial)
         record = BirthRecord(
             serial=self.next_serial,
             born_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             ttl_min=45,
         )
+        if self.hive_semantics:
+            self.living.add(record.serial)
         self.next_serial += 1
         return record
 
@@ -212,16 +233,19 @@ def test_hive_down_parks_the_will_respawns_and_delivers_exactly_once(tmp_path):
     rebirth = life.on_death(node(), birth(), DeathCause("game"), reflection())
 
     assert not pending_path(tmp_path).exists()  # delivered, then removed
-    # retire: 1 (park) + 1 (failed round) + 1 (success) = 3 attempts, 1 success
+    # retire: 1 (park) + 1 (failed round, no birth that round) + 1 (success) = 3
     assert len(registry.retire_calls) == 3
     serial, cause, text = registry.retire_calls[-1]
     assert (serial, cause) == (14, "game")
     assert text.startswith("---") and "cause: game" in text  # the full will.md
+    # the birth never runs ahead of the delivery (review R1-1)
+    first_birth = journal.index("birth")
+    assert all(i < first_birth for i, e in enumerate(journal) if e == "retire")
     # the body was respawned exactly once, hive or no hive
     assert body.respawn_calls == 1
-    # the pauses grew between the rounds
+    # the pauses grew between the rounds: retire-down, then two birth failures
     sleeps = [e for e in journal if e.startswith("sleep:")]
-    assert sleeps == ["sleep:2", "sleep:4"]  # default backoff 2s, doubling
+    assert sleeps == ["sleep:2", "sleep:4", "sleep:8"]  # default backoff 2s, doubling
     assert rebirth.will_delivered is True
     assert rebirth.record.serial == 15
 
@@ -230,7 +254,6 @@ def test_parked_will_is_written_once_and_retries_never_rewrite_it(tmp_path):
     journal: list[str] = []
     registry = FakeRegistry(journal)
     registry.retire_failures = [HiveUnavailable("down")] * 5
-    registry.birth_failures = [HiveUnavailable("down")] * 5
     parked_events: list[str] = []
 
     def spy(type_, payload=None):
@@ -254,10 +277,11 @@ def test_parked_will_is_written_once_and_retries_never_rewrite_it(tmp_path):
         log=spy,
     )
     rebirth = life.on_death(node(), birth(), DeathCause("game"), reflection())
-    # five failed delivery rounds, and the will was parked exactly once — the file
-    # was never rewritten, and its content is the will that finally landed
+    # the park attempt plus four rounds of retire-down (each: pause, NO birth), the
+    # fifth round delivers and the birth runs once; the will was parked exactly once
+    # and its content is the will that finally landed
     assert len(registry.retire_calls) == 6
-    assert len(parked_events) == 1
+    assert parked_events and all(c == parked_events[0] for c in parked_events)
     assert parked_events[0] == rebirth.will.to_markdown()
     assert "cause: game" in parked_events[0]
     assert not pending_path(tmp_path).exists()
@@ -288,8 +312,8 @@ def test_permanent_rejection_parks_the_will_and_still_births_the_heir(tmp_path):
     assert parked.exists() and "cause: ttl" in parked.read_text(encoding="utf-8")
     assert len(registry.birth_calls) == 1  # the generation is not blocked
     assert rebirth.record.serial == 15
-    # the delivery was tried exactly twice: the park attempt and the first round
-    assert len(registry.retire_calls) == 2
+    # settled on the first call: a permanent 4xx is not retried in the rounds
+    assert len(registry.retire_calls) == 1
 
 
 def test_birth_never_lands_and_the_path_gives_up_after_the_budget(tmp_path):
@@ -312,7 +336,7 @@ def test_birth_never_lands_and_the_path_gives_up_after_the_budget(tmp_path):
         seed_factory=lambda: next(seeds),
         hive_retries=3,
     )
-    with pytest.raises(HiveUnavailable, match="birth did not land"):
+    with pytest.raises(HiveUnavailable, match="did not land"):
         life.on_death(node(), birth(), DeathCause("game"), reflection())
     assert pending_path(tmp_path).exists()  # the will survives the give-up
 
@@ -362,34 +386,66 @@ def test_an_emergency_will_still_reaches_retire(tmp_path):
     assert rebirth.will_delivered is True
 
 
-# --- the race the checker closed (C-3) ---------------------------------------------------
+# --- review R1-1: the birth never runs ahead of the will --------------------------------
 
 
-def test_retire_down_birth_up_delivers_the_parked_will_after_birth(tmp_path):
-    # The C-3 race: retire raised HiveUnavailable twice (the park and the round),
-    # but hive came back and the very first birth succeeds — the after-birth attempt
-    # delivers the parked will instead of leaving it with nobody to deliver it.
+def test_birth_waits_for_the_delivery_with_real_hive_semantics(tmp_path):
+    # The trap of R1-1: hive closes a LIVING node of the slot at birth with its own
+    # emergency will, so a birth before the delivery would answer the next retire 409
+    # and drop the node's only copy. With retire down once and birth up, the path must
+    # deliver first and only then birth — hive never writes its template here.
     journal: list[str] = []
-    registry = FakeRegistry(journal)
-    registry.retire_failures = [HiveUnavailable("read timeout")] * 2
+    registry = FakeRegistry(journal, hive_semantics=True, born=(14,))
+    registry.retire_failures = [HiveUnavailable("read timeout")]  # the park attempt
     life, _, _ = make_life(tmp_path, journal=journal, registry=registry)
     rebirth = life.on_death(node(), birth(), DeathCause("game"), reflection())
-    assert len(registry.birth_calls) == 1
-    # the park attempt, the round attempt, the after-birth delivery
-    assert len(registry.retire_calls) == 3
+
+    first_birth = journal.index("birth")
+    assert all(i < first_birth for i, e in enumerate(journal) if e == "retire")
+    assert len(registry.retire_calls) == 2  # the failed park attempt, then the delivery
+    serial, cause, text = registry.retire_calls[-1]
+    assert (serial, cause) == (14, "game")
+    assert rebirth.will.body.split("\n")[0] in text  # the node's will, not a template
+    assert registry.closed_by_hive == {}  # hive closed nobody: the delivery came first
     assert rebirth.will_delivered is True
     assert not pending_path(tmp_path).exists()
-    assert "log:will.retired" in journal
+    assert rebirth.record.serial == 15
 
 
-def test_retire_down_birth_up_leaves_the_will_parked_when_hive_is_still_flaky(tmp_path):
-    # The after-birth delivery fails too: the will stays parked, the path completes.
+def test_delivery_and_birth_both_flaky_birth_still_waits(tmp_path):
+    # Rounds where retire stays down hold the birth back too, however available
+    # birth itself is: no birth call happens while the will is parked.
     journal: list[str] = []
-    registry = FakeRegistry(journal)
-    registry.retire_failures = [HiveUnavailable("read timeout")] * 3
+    registry = FakeRegistry(journal, hive_semantics=True, born=(14,))
+    registry.retire_failures = [HiveUnavailable("down")] * 2
+    registry.birth_failures = [HiveUnavailable("down")]  # birth would fail once anyway
     life, _, _ = make_life(tmp_path, journal=journal, registry=registry)
     rebirth = life.on_death(node(), birth(), DeathCause("game"), reflection())
-    assert rebirth.will_delivered is False
-    assert pending_path(tmp_path).exists()
+
+    core = [e for e in journal if e in ("retire", "birth", "sleep:2", "sleep:4")]
+    # park -> (retire down, pause, no birth) -> delivery -> (birth down, pause) -> birth
+    assert core == ["retire", "retire", "sleep:2", "retire", "birth", "sleep:4", "birth"]
+    assert rebirth.will_delivered is True
+    assert rebirth.record.serial == 15
+
+
+# --- review R1-2: 409 on the very first retire -------------------------------------------
+
+
+def test_first_retire_409_supersession_parks_the_real_will(tmp_path):
+    # Hive closed the node itself (lost-close, reconcile) before our first retire:
+    # the 409 is not a delivery, the node's will never landed — it is parked as
+    # superseded, never dropped silently, and the generation goes on.
+    journal: list[str] = []
+    registry = FakeRegistry(journal, hive_semantics=True)  # serial 14 was never born
+    life, _, _ = make_life(tmp_path, journal=journal, registry=registry)
+    rebirth = life.on_death(node(), birth(), DeathCause("game"), reflection())
+
+    assert "log:will.superseded" in journal
+    assert len(registry.retire_calls) == 1  # settled on the first call, no retries
     assert len(registry.birth_calls) == 1  # the heir is born regardless
-    assert "log:will.still_parked" in journal
+    assert rebirth.will_delivered is False
+    parked = pending_path(tmp_path)
+    assert parked.exists()
+    assert parked.read_text(encoding="utf-8") == rebirth.will.to_markdown()  # preserved
+    assert rebirth.record.serial == 15

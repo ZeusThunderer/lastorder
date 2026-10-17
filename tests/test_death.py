@@ -75,6 +75,19 @@ def test_fall_death_line_is_taken_verbatim():
     assert event is not None and event.text == "LastOrder01 fell from a high place"
 
 
+def test_the_newest_death_line_of_the_window_wins():
+    # getRecentChat is a window: a stale line of an earlier death can still sit in it
+    # when the next death fires — the newest line speaks for the death (review R1-3).
+    detector = DeathDetector(USER)
+    window = (
+        "LastOrder01 was slain by Zombie",  # the earlier death, stale in the window
+        "<LastOrder02> держись",
+        "LastOrder01 hit the ground too hard",  # this death
+    )
+    event = detector.feed(state(0.0), window)
+    assert event is not None and event.text == "LastOrder01 hit the ground too hard"
+
+
 def test_hp_zero_without_a_line_still_dies():
     detector = DeathDetector(USER)
     event = detector.feed(state(0.0), ())

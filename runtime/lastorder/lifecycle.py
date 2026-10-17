@@ -11,9 +11,17 @@ in the same slot → the heir's `inheritance` → resume (callback).
 Hive-down contract (section 9): the will is written to `run/<slot>/pending/will-NNNNN.md`
 exactly once, the respawn still runs, and the parked will plus the birth are retried with
 a growing pause until hive answers. The will reaches hive exactly once: the retry sends
-the same captured text, a 409 `already_retired` (the call landed but the reply was lost)
-counts as delivered, and after a real success the pending file is removed. A permanent
-4xx parks the will for the operator and never blocks the next generation.
+the same captured text, a 409 `already_retired` in the retry loop (the call landed but the
+reply was lost) counts as delivered, and after a real success the pending file is removed.
+A 409 on the FIRST retire means hive closed the node itself (lost-close, reconcile): the
+node's will never landed, so it is parked as superseded and the generation goes on — a
+parked file beats a silently lost will (review R1-2).
+
+The birth never runs ahead of the will (review R1-1): a real hive closes a living node of
+the slot at `birth` with its own emergency will, so a birth before the delivery would
+supersede the node's will and delete its only copy. Until the will is delivered (or
+finally settled — superseded, or rejected by a non-409 4xx), a round only retries the
+delivery; NETWORK.md section 9 keeps the birth for after the recovery anyway.
 
 A respawn that does not stand the body up is retried once more, then `BodyUnavailable`
 goes up — by then the will is already saved (in hive or parked). `pause` is called before
@@ -50,6 +58,12 @@ DEFAULT_HIVE_RETRIES = 30
 DEFAULT_HIVE_BACKOFF_S = 2.0
 DEFAULT_HIVE_MAX_PAUSE_S = 60.0
 RESPAWN_ATTEMPTS = 2  # one retry: Py4jBody.respawn already waits a minute inside
+
+# Where the will stands after retire attempts (review R1-1/R1-2).
+DELIVERED = "hive"  # in the base
+PARKED = "parked"  # undelivered, the retry loop owns it
+SUPERSEDED = "superseded"  # 409 on the first retire: hive closed the node itself
+REJECTED = "rejected"  # a permanent non-409 4xx: parked for the operator, no more retries
 
 
 @dataclass(frozen=True)
@@ -140,11 +154,11 @@ class Lifecycle:
                 "will.written",
                 {"serial": node.serial, "model": written.model},
             )
-        delivered = self._retire_or_park(node.serial, cause.cause, written.will)
+        delivery = self._retire_or_park(node.serial, cause.cause, written.will)
         self._respawn()
         traits = self._roll()
-        record, delivered = self._birth_and_deliver(
-            node.serial, cause.cause, written.will, traits, delivered
+        record, delivery = self._birth_and_deliver(
+            node.serial, cause.cause, written.will, traits, delivery
         )
         inheritance = self._memory.inheritance(record.serial)
         if resume is not None:
@@ -156,28 +170,32 @@ class Lifecycle:
             will=written.will,
             emergency=written.emergency,
             model=written.model,
-            will_delivered=delivered,
+            will_delivered=delivery == DELIVERED,
             will_error=written.error,
             stats=written.stats,
         )
 
     # --- steps -------------------------------------------------------------------------
 
-    def _retire_or_park(self, serial: int, cause: str, will: Will) -> bool:
-        """True when the will is in hive (or was already), False when parked locally."""
+    def _retire_or_park(self, serial: int, cause: str, will: Will) -> str:
+        """The first retire attempt; see the delivery states above the class."""
         try:
             self._registry.retire(serial, cause, will.to_markdown())
             self._log("will.retired", {"serial": serial, "cause": cause})
-            return True
+            return DELIVERED
         except HiveRejected as exc:
-            if exc.kind == "already_retired":  # the call landed, the reply was lost
-                self._log("will.retired", {"serial": serial, "cause": cause, "via": "already_retired"})
-                return True
+            if exc.kind == "already_retired":
+                # Nobody retired this node through us — hive closed it itself
+                # (lost-close or startup reconcile). The will never landed: park it
+                # superseded, a file beats a silent loss (review R1-2).
+                self._park(serial, will, f"superseded: {exc.status} {exc.kind}: {exc.message}")
+                self._log("will.superseded", {"serial": serial, "cause": cause})
+                return SUPERSEDED
             self._park(serial, will, f"rejected {exc.status} {exc.kind}: {exc.message}")
-            return False
+            return REJECTED
         except HiveUnavailable as exc:
             self._park(serial, will, f"unavailable: {exc}")
-            return False
+            return PARKED
 
     def _park(self, serial: int, will: Will, why: str) -> Path:
         """Write-once: retries never rewrite the will, the file says what was said."""
@@ -218,72 +236,59 @@ class Lifecycle:
         seed = self._seed_factory()
         return roll(seed, load_quirks(self._quirks_path))
 
-    def _deliver_after_birth(self, serial: int, cause: str, will: Will) -> bool:
-        """The race closer (checker C-3): a retire that raised HiveUnavailable can be
-        followed by a birth that already succeeds — hive came back mid-path — and the
-        parked will would outlive the path with nobody left to deliver it. One more
-        attempt right after the successful birth; whatever it answers stands. A
-        permanent 4xx is not retried here (the caller checks given_up_delivery)."""
-        try:
-            self._registry.retire(serial, cause, will.to_markdown())
-            self._unpark(serial)
-            self._log("will.retired", {"serial": serial, "cause": cause, "via": "after_birth"})
-            return True
-        except HiveRejected as exc:
-            if exc.kind == "already_retired":
-                self._unpark(serial)
-                self._log(
-                    "will.retired", {"serial": serial, "cause": cause, "via": "already_retired"}
-                )
-                return True
-            self._log(
-                "will.delivery_rejected",
-                {"serial": serial, "status": exc.status, "kind": exc.kind},
-            )
-        except HiveUnavailable as exc:
-            self._log("will.still_parked", {"serial": serial, "error": str(exc)})
-        return False
-
     def _birth_and_deliver(
-        self, serial: int, cause: str, will: Will, traits: Traits, delivered: bool
-    ) -> tuple[BirthRecord, bool]:
-        """Birth of the next node, with the parked will riding along until it lands.
+        self, serial: int, cause: str, will: Will, traits: Traits, delivery: str
+    ) -> tuple[BirthRecord, str]:
+        """Rounds of (delivery, then birth), one growing pause apart.
 
-        Each round first tries the delivery (unless the will is in hive or permanently
-        rejected), then the birth; a connect-level failure sleeps a growing pause and the
-        whole round repeats. A permanent 4xx of the birth has nowhere to degrade to and
-        goes up.
+        A round retries the parked will first and calls `birth` only once the delivery
+        is settled — DELIVERED, SUPERSEDED or REJECTED (review R1-1: a real hive closes
+        a living node of the slot at birth with its own emergency will, so a birth ahead
+        of the delivery would supersede the node's will and drop its only copy). A
+        HiveUnavailable from the delivery ends the round right there: no birth this
+        round, pause, again — NETWORK.md section 9 keeps the birth for after the
+        recovery. A 409 inside the loop is the lost reply of our own landed call, not a
+        supersession: it counts as delivered.
         """
-        given_up_delivery = False
         attempt = 0
         while True:
-            if not delivered and not given_up_delivery:
+            if delivery == PARKED:
                 try:
                     self._registry.retire(serial, cause, will.to_markdown())
-                    delivered = True
+                    delivery = DELIVERED
                     self._unpark(serial)
                     self._log("will.retired", {"serial": serial, "cause": cause, "via": "retry"})
                 except HiveRejected as exc:
-                    if exc.kind == "already_retired":
-                        delivered = True
+                    if exc.kind == "already_retired":  # our own call landed, reply lost
+                        delivery = DELIVERED
                         self._unpark(serial)
                         self._log(
-                            "will.retired", {"serial": serial, "cause": cause, "via": "already_retired"}
+                            "will.retired",
+                            {"serial": serial, "cause": cause, "via": "already_retired"},
                         )
                     else:  # permanent: the will stays parked for the operator
-                        given_up_delivery = True
+                        delivery = REJECTED
                         self._log(
                             "will.delivery_rejected",
                             {"serial": serial, "status": exc.status, "kind": exc.kind},
                         )
-                except HiveUnavailable:
-                    pass  # the birth attempt below fails the same way and paces the loop
+                except HiveUnavailable as exc:
+                    if attempt >= self._hive_retries:
+                        self._log(
+                            "delivery.gave_up",
+                            {"serial": serial, "attempts": attempt + 1, "error": str(exc)},
+                        )
+                        raise HiveUnavailable(
+                            f"the death path did not land after {attempt + 1} rounds "
+                            f"(will delivery): {exc}"
+                        ) from exc
+                    self._sleep(min(self._hive_backoff_s * (2**attempt), self._hive_max_pause_s))
+                    attempt += 1
+                    continue  # no birth until the will is settled (R1-1)
             try:
                 record = self._registry.birth(self._slot, traits)
                 self._log("life.birth", {"serial": record.serial, "slot": self._slot})
-                if not delivered and not given_up_delivery:
-                    delivered = self._deliver_after_birth(serial, cause, will)
-                return record, delivered
+                return record, delivery
             except HiveRejected:
                 raise  # permanent: retrying the same payload cannot help
             except HiveUnavailable as exc:
@@ -293,7 +298,7 @@ class Lifecycle:
                         {"slot": self._slot, "attempts": attempt + 1, "error": str(exc)},
                     )
                     raise HiveUnavailable(
-                        f"birth did not land after {attempt + 1} tries: {exc}"
+                        f"the death path did not land after {attempt + 1} rounds (birth): {exc}"
                     ) from exc
                 self._sleep(min(self._hive_backoff_s * (2**attempt), self._hive_max_pause_s))
                 attempt += 1

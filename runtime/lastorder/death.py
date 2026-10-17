@@ -91,7 +91,7 @@ class DeathCause:
     text: str = ""  # the vanilla line, `game` context only
 
 
-def is_death_line(line: str, username: str) -> bool:
+def is_death_line(line: str, username: str, phrases: Sequence[str] = DEATH_PHRASES) -> bool:
     """True for a vanilla death line of `username`: uc service lines and player chat
     (`<LastOrder01> …`) never qualify."""
 
@@ -101,7 +101,7 @@ def is_death_line(line: str, username: str) -> bool:
     if not cleaned.lower().startswith(f"{username.lower()} "):
         return False
     rest = cleaned[len(username) + 1 :].lower()
-    return any(rest.startswith(phrase) for phrase in DEATH_PHRASES)
+    return any(rest.startswith(phrase) for phrase in phrases)
 
 
 class DeathDetector:
@@ -123,15 +123,11 @@ class DeathDetector:
         return self._latched
 
     def _death_text(self, chat: Sequence[str]) -> str:
-        for line in chat:
-            cleaned = strip_formatting(str(line)).strip()
-            if not cleaned or is_service_line(cleaned) or cleaned.startswith("<"):
-                continue
-            if not cleaned.lower().startswith(f"{self._username.lower()} "):
-                continue
-            rest = cleaned[len(self._username) + 1 :].lower()
-            if any(rest.startswith(phrase) for phrase in self._phrases):
-                return cleaned
+        """The NEWEST matching line of the window: a stale line of an earlier death
+        must not speak for this one (review R1-3)."""
+        for line in reversed(list(chat)):
+            if is_death_line(line, self._username, self._phrases):
+                return strip_formatting(str(line)).strip()
         return ""
 
     def feed(self, state: GameState, chat: Sequence[str] = ()) -> DeathEvent | None:
