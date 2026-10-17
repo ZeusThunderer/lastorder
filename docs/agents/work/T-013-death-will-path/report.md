@@ -117,3 +117,53 @@ $ KEY="$(grep '^OPENROUTER_API_KEY=' ../../.env | cut -d= -f2- | tr -d '\r"')" &
   повторяется); C-4 · выполнено этим раундом отчёта (тексты и стоимость выше).
 - Раунд 2: C-1 · fixed 1727cda (импорт `LLMError`; ветка отказа на стенде печатает команду,
   exit=2); C-2 · fixed 1727cda (дубль заголовка секции убран).
+
+## Раунд 2 · 2026-10-17
+Коммиты: 61df021 (take changes → in_progress), ccaebe9 (фиксы R1-1..R1-3).
+
+### Ответ на ревью
+- R1-1 · fixed ccaebe9 — birth не вызывается, пока завещание не доставлено или окончательно
+  решено (delivered / superseded / non-409 4xx): раунд сначала повторяет доставку, при
+  HiveUnavailable от retire — пауза и новый раунд без birth (NETWORK.md §9 «birth — после
+  восстановления»); `_deliver_after_birth` удалён. `FakeRegistry` в тестах получил семантику
+  настоящего hive: birth закрывает живой узел слота своим аварийным шаблоном, retire закрытого
+  серийника — 409. Тесты пинят порядок (первый birth после последнего retire) и что в раунде
+  retire↓/birth↑ шаблон hive не пишется никогда, в retire_calls попадает текст узла.
+- R1-2 · fixed ccaebe9 — 409 на самом первом retire означает lost-close/reconcile на стороне
+  hive: завещание паркуется с причиной, лог `will.superseded`, `will_delivered=False`, файл
+  с настоящим текстом сохранён; в цикле повторов 409 остаётся доставкой (потерянный ответ
+  своего же вызова). Тест: `test_first_retire_409_supersession_parks_the_real_will`.
+- R1-3 · fixed ccaebe9 — `_death_text` берёт последнюю подходящую строку окна через
+  `is_death_line(line, username, self._phrases)` (дублирование убрано); тест на окно со
+  строками двух смертей — говорит новейшая.
+
+### Проверки
+```
+$ uv run pytest
+429 passed, 1 warning in 20.82s          # +3 теста раунда (R1-1 ×2, R1-2 ×1, R1-3 ×1, −2 старых гонки)
+$ uv run python tools/check.py
+Every workplace is intact: files present, links resolve, boxes parse.
+```
+Стенд, команда из docstring сценария: `scenario passed`, serial 00020 → 00022,
+в knowledge-томе wills 00020 (game) и 00021 (stuck), слот держит 00022, pending пуст,
+стоимость $0.0003 (236 токенов выхода).
+
+### Отклонения от задачи
+- нет
+
+### Вне задачи
+- В volume `knowledge` накопилась история прогонов чекера/надзора (серийники 00013–00019) —
+  это работа сценария приёмки, не дефект.
+
+### Вопросы
+- нет
+
+### Вызовы надзора
+- 2026-10-17 · result · 7e74783 · VERDICT: changes · cost_usd: unknown (stdout-парсинг
+  call_supervisor.sh упал на python-стабе Windows)
+
+### Самопроверка
+- lo-checker: раундов 3, CHECK: clean (раунды 1–2 — findings, закрыты в своих раундах)
+- Раунд 3: находок нет; чекер сценарий живьём не перегонял — путь R1-1 покрыт юнит-тестами
+  с hive-семантикой FakeRegistry, пост-фикс прогон подтверждён по knowledge-тому
+  (wills 00020 game / 00021 stuck, pending пуст), см. «Проверки».
