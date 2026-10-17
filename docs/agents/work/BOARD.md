@@ -11,7 +11,7 @@
 | T-005 | Спайк FastJev на RTX 2070 в Docker | E2 | done | critical | z/T-005-jev-spike-2070 |
 | T-006 | Py4jBody — порт GameBody поверх моста uc | E2 | done | normal | z/T-006-py4j-body |
 | T-007 | Проект знаний, праймера и завещаний (KNOWLEDGE.md v2) | E2 | done | critical | z/T-007-knowledge-will-design |
-| T-008 | Проект целей сети и общения узлов | E2 | changes | critical | z/T-008-goals-comms-design |
+| T-008 | Проект целей сети и общения узлов | E2 | done | critical | z/T-008-goals-comms-design |
 | T-009 | Режимы восприятия plain/masked и фильтр служебных строк uc | E2 | changes | critical | z/T-009-perception-modes |
 | T-010 | Праймер — основы Minecraft как стартовая база сети | E2 | queued | normal | z/T-010-primer |
 | T-011 | Промпт узла под режимы восприятия и схема ответа шага | E2 | queued | critical | z/T-011-prompt-step-schema |
