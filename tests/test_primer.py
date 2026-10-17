@@ -12,6 +12,7 @@ from pathlib import Path
 
 from runtime.knowledge.budget import B_PRIMER, PRIMER_MAX_ENTRIES
 from runtime.knowledge.schema import Record
+from runtime.knowledge.store import KnowledgeStore
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _SPEC = importlib.util.spec_from_file_location(
@@ -127,3 +128,16 @@ def test_checker_rejects_foreign_files_and_topic_overflow(tmp_path):
     _, problems = primer_check.check_primer(tmp_path)
     assert any("not a known primer topic" in problem for problem in problems)
     assert any("expected 1-4 per topic" in problem for problem in problems)
+
+
+def test_fresh_plain_base_loads_the_whole_repo_primer(tmp_path, monkeypatch):
+    """The repo primer is the network's starting base (T-012 loader): a fresh plain-mode
+    store loads every entry as a confirmed primer record in one commit."""
+    monkeypatch.delenv("PERCEPTION_MODE", raising=False)
+    monkeypatch.delenv("PRIMER_DIR", raising=False)
+    store = KnowledgeStore(tmp_path / "knowledge", git=True)
+    records = store.records()
+    assert len(records) == 28
+    assert all(r.source == "primer" and r.status == "confirmed" for r in records)
+    log = store._git("log", "--reverse", "--format=%s").stdout.splitlines()
+    assert log == ["init: layout", "primer: load 28 records"]
