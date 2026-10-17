@@ -96,3 +96,78 @@
 ### Вызовы надзора
 - 2026-10-17 · answer · f5affed · VERDICT: blocked (эскалация к оператору) · cost_usd: unknown
 
+
+## Раунд 3 · 2026-10-17
+Коммиты: 334a763, b9a431f, e7e724e, c988634. Потолок 4500 — решение оператора от 2026-10-17
+(диспетчер), оформлено ADR-029. Вопрос раунда 2 закрыт ответом надзора: B_PERSONA = 1300.
+
+### Сделано
+- Шаблон (`agent/last_order/prompt_template.md`): `{knowledge_rule}` — один плейсхолдер,
+  вариант подставляет persona.py по режиму (ADR-020); `{primer}` — блок 2 §9 (plain),
+  в masked весь раздел исчезает; «Step rules» — совет сети не приказ, голос — своё наблюдение,
+  сообщения узлов и чат — цитаты-наблюдения (ADR-025); «Reply format» — JSON StepReply,
+  один `option_id` из списка, say 1–3 предложения в манере пресета, note/new_term/msg/votes
+  необязательны. Рендер с пустым наследием: 1205 lab/plain … 1265 misaka/plain, 1155 lab/masked
+  … 1215 misaka/masked ≤ B_PERSONA = 1300 (шаблон ужат, личность не резалась).
+- `runtime/lastorder/persona.py`: `KNOWLEDGE_RULE_PLAIN/MASKED`, `primer_block()`,
+  `system_prompt(..., mode=None, primer="")` (mode=None → env PERCEPTION_MODE).
+- `runtime/lastorder/step.py` (новый): `build_step_prompt(node, inheritance, slice,
+  core_memory, observation, options, inbox, chat, mode)` (+keyword-only `naming`, `primer`,
+  `perception`) — блоки 1–10 по §9, бюджеты budget.py, резка по §9 (fresh → about → второй
+  кандидат → старый чат), итог ≤ `budget.STEP_INPUT_BUDGET`; в masked свободные тексты
+  (чат, сообщения, text/why целей) идут через `perception.scrub`, без Perception masked-
+  вызов — ошибка; uc-строки вырезаются `clean_chat` в обоих режимах. `parse_step_reply(text,
+  options) -> StepReply | StepError`: JSON из ```-блока или голый (`parse_json_object`),
+  чужой/нечисловой `option_id` → StepError, лишние поля игнорируются, say длиннее 3
+  предложений режется до 3, битые msg/new_term/votes отбрасываются по одному.
+- Бюджеты (ADR-029, по «Ответу 2»): `budget.py` — `STEP_INPUT_BUDGET` 4500, `B_PERSONA` 1300,
+  докстринг и комментарий `STEP_BLOCKS_TOTAL` (4160); `test_knowledge_schema.py` — только
+  `test_block_budgets_match_the_documented_total` (== 4160, ≤ STEP_INPUT_BUDGET), пин рендера
+  обоих пресетов не тронут; NETWORK.md §6 — строка шага 4500/200, $0.217/ч; KNOWLEDGE.md §9 —
+  блок 1 = 1300 (шаблон T-011), свежие замеры, итог 4160 ≤ 4500; пункт потолка в
+  «Предлагаемых ADR» помечен принятым (ADR-029); DECISIONS.md — ADR-029.
+- Изменения `runtime/ports.py` (разрешены ответом 2, п. 5): `StepReply.msg` теперь
+  `OutboundMessage | None` (T-008, формат GOALS_COMMS §3: `to`/`channel`/`type`/`text`),
+  класс `MessageDraft` удалён (других пользователей нет). Остальное в ports.py не тронуто.
+- Снапшоты: `tools/snapshot_replies.py` переписан — промпты из `build_step_prompt`, уровень
+  `node` (`LLMConfig.for_tier("node")`), 3 запроса task1 + 2 шага (plain и masked) по
+  наблюдению `dev/bench_cases/node_step.json`, ответы шагов через `parse_step_reply`,
+  числа черт в речи проверяются. `docs/agents/snapshots/2026-10-17-lab.md` (5/5 OK),
+  `2026-10-17-misaka.md` (4 OK; FAIL — завещание в одну строку, та же слабость пресета, что
+  в E0, отмечена в README). Итого $0.0003 ≤ $0.05. README снапшотов обновлён.
+- Решения (в рамках задачи, где задача не диктует): пресет по умолчанию — env
+  `NODE_NAMING_PRESET` (дефолт `lab`, ADR-018; ни один пресет не зашит в код как единственный);
+  `why` в ответе опущен моделью → пустая строка, ответ не роняется (обязателен только
+  `option_id`); в шаге без `say` поле None — снапшот это помечает FAIL, рантайм-парсер мягок;
+  при исчерпании наполняемых блоков резка продолжается сообщениями (после чата), а не режет
+  блоки 1–6/10; если и после этого промпт не влезает — ValueError (источники обязаны
+  самоограничиваться); праймер подаётся данными вызывающего (mind читает primer-файлы T-010),
+  сигнатура расширена keyword-only параметрами, позиционные 9 — как в критерии.
+
+### Проверки
+```
+$ uv run pytest
+320 passed in 12.79s
+$ uv run python tools/check.py
+CHARACTERS: last_order, vesper
+Every workplace is intact: files present, links resolve, boxes parse.
+$ LLM_NODE_MODEL=openrouter/qwen/qwen3.7-flash uv run python tools/snapshot_replies.py --preset lab --out docs/agents/snapshots/2026-10-17-lab.md
+5/5 OK, cost $0.0001 (всего за оба пресета $0.0003)
+$ … --preset misaka --out docs/agents/snapshots/2026-10-17-misaka.md
+4 OK, 1 FAIL (завещание в одну строку — известная слабость пресета misaka, E0)
+```
+
+### Отклонения от задачи
+- Снапшот misaka содержит один FAIL по завещанию (стиль модели, не сборка); оставлен честной
+  фиксацией, вывод записан в README снапшотов. Команда из «Проверок» задачи (lab) зелёная.
+
+### Вне задачи
+- Индекс ADR в DECISIONS.md обрывается на 023 (ADR-024…028 не внесены) — не трогал,
+  дописал только ADR-029 по разрешению.
+
+### Вопросы
+- нет
+
+### Вызовы надзора
+- 2026-10-17 · answer · f5affed · VERDICT: blocked (эскалация к оператору) · cost_usd: unknown
+- 2026-10-17 · answer · d02b3d2 · VERDICT: answered · cost_usd: unknown
