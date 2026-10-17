@@ -162,6 +162,20 @@ def test_slice_votes_block_fits_budget():
     assert tokens <= budget.B_VOTES
 
 
+def test_slice_orders_entries_by_instant_not_string():
+    # Review C-5: fresh tail and vote queue order with mixed offset/naive timestamps
+    naive_early = record("k-0001", about=["ent:creeper"], ts="2026-10-18T09:00:00")  # naive = UTC
+    wall_ahead = record("k-0002", about=["ent:creeper"], ts="2026-10-18T12:00:00+03:00")  # 09:00 UTC
+    utc_mid = record("k-0003", about=["ent:creeper"], ts="2026-10-18T10:00:00+00:00")
+    slice_ = build_slice(
+        serial=9, keys=[], records=[naive_early, wall_ahead, utc_mid], catalog="", goals=()
+    )
+    # by instant: 10:00 UTC, then the 09:00 pair with the newer id first — string order
+    # would have put the +03:00 wall clock on top
+    assert [e.id for e in slice_.fresh] == ["k-0003", "k-0002", "k-0001"]
+    assert [e.id for e in slice_.pending_votes] == ["k-0003", "k-0002"]  # same order, <= 2
+
+
 def test_slice_passes_catalog_and_goals_through():
     goals = (NetworkGoal(text="проверить болото", why="нужна глина"),)
     slice_ = build_slice(

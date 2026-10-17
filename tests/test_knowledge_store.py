@@ -580,24 +580,23 @@ def test_git_log_shows_every_op_as_hive(base: Path, monkeypatch):
     assert git_log(opened)[-1] == "evidence: k-0001 by 2"
 
 
-def test_commit_failure_rolls_files_back(base: Path, monkeypatch):
+def test_commit_failure_rolls_files_and_index_back(base: Path, monkeypatch):
+    # Review C-4: real git — `git add` succeeds, `git commit` dies; the next commit must
+    # not swallow the aborted operation, and the base must be left clean.
     store = KnowledgeStore(base, git=True)
     serial = birth(store)
     records_dir = store.root / "base" / "records"
-
-    def broken_git(*args: str, check: bool = True):
-        if args and args[0] == "commit":
-            raise subprocess.CalledProcessError(1, "git", stderr="boom")
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    monkeypatch.setattr(store, "_git", broken_git)
-    with pytest.raises(StoreError):
-        store.submit_candidate(serial, candidate())
+    with monkeypatch.context() as mp:
+        mp.setenv("GIT_COMMITTER_DATE", "definitely not a date")  # add ignores it, commit dies
+        with pytest.raises(StoreError):
+            store.submit_candidate(serial, candidate())
     assert list(records_dir.glob("k-*.json")) == []  # the half-op left no files behind
     assert (store.root / "base" / "catalog.md").read_text(encoding="utf-8") == ""
-    monkeypatch.undo()
+    assert store._git("status", "--porcelain").stdout.strip() == ""  # nothing staged either
     store.submit_candidate(serial, candidate())  # the store still works after the failure
     assert [r.id for r in store.records()] == ["k-0001"]
+    committed = store._git("show", "--pretty=format:", "--name-only", "HEAD").stdout.split()
+    assert committed == ["base/catalog.md", "base/records/k-0001.json"]
 
 
 def test_record_files_parse_back(store: KnowledgeStore):

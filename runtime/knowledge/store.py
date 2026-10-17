@@ -265,6 +265,15 @@ class KnowledgeStore:
                     path.unlink(missing_ok=True)
                 else:
                     path.write_bytes(was)
+            if self.git:
+                # A successful `git add` leaves the content staged: unstage it, or the
+                # next whole-index commit silently swallows the aborted operation (C-4).
+                self._git(
+                    "reset",
+                    "--",
+                    *(str(p.relative_to(self.root)) for p in files),
+                    check=False,
+                )
             if isinstance(exc, subprocess.CalledProcessError):
                 raise StoreError(f"git failed: {exc.stderr.strip()}") from exc
             raise
