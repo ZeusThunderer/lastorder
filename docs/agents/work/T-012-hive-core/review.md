@@ -79,3 +79,66 @@ cause, will_text)`), T-013 и T-022 (`task.md`). Пересечений по ф�
 ### Чек-лист проекта
 - Фильтр сырых id: P1-4. Путь смерти и аварийное завещание: P1-1. Единственный писатель: в
   плане соблюдён. Уровни LLM: вызовов нет.
+
+## Раунд 1 · 2026-10-17 · вердикт: changes · headless
+Проверено: `git diff main...z/T-012-hive-core` @ ea589bf, построчно (`store.py`, `dedup.py`,
+`slice.py`, тесты), сверено с KNOWLEDGE v2 §1, §2, §4, §5, §7, §9 и `schema.py`.
+
+### Проверки (прогнаны надзором)
+- `uv run pytest` — 187 passed
+- `uv run python tools/check.py` — Every workplace is intact
+
+### Критерии приёмки
+- [x] `KnowledgeStore(root, git)`: раскладка, `git init`, `init: layout`, праймер в `plain` одним
+  коммитом, в `masked` не грузится — `test_init_*`, `test_primer_not_reloaded_on_existing_base`.
+- [x] `next_serial()`: файловая блокировка, 3×20 и 2×5 с git дают номера подряд, перезапуск и
+  восстановление — `test_next_serial_*`, `test_serial_survives_restart_and_recovers`.
+- [x] `birth`/`retire`: P1-1 закрыт (завещание целиком, служебные поля из `birth.json`,
+  `lifetime_s` пересчитан, три различимых ошибки, повтор без перезаписи) — `test_retire_*`.
+- [ ] Кандидат: новая запись и дубль по порогу проверены (`test_candidate_below_threshold…`,
+  `test_statuses_through_real_records`), но ветка дубля пропускает битый кандидат, R1-1.
+- [x] Статусы: `status_of` совпадает с таблицей §4, замок на `retired` (P1-3), замена голоса —
+  `test_status_table`, `test_retired_is_terminal`, `test_vote_replacement_changes_status`.
+- [x] Core memory: резка до 1.5 KB по строке — `test_core_memory_roundtrip_and_cut`.
+- [x] Git: одна операция — один коммит от `hive`, откат файлов и индекса при сбое, публичной
+  записи «как есть» нет — `test_git_log_shows_every_op_as_hive`, `test_commit_failure_…`.
+- [x] `inheritance`/`knowledge_slice`: квоты §7, бюджеты `budget.py`, кандидаты на голос
+  (hypothesis → disputed, не свои, не голосованные), праймер вне среза и каталога (P1-2).
+- [ ] Ошибки ввода: неизвестный узел покрыт, битый кандидат — не во всех ветках, R1-1.
+
+### Находки
+- R1-1 · major · `runtime/knowledge/store.py:512-527` · Кандидат валидируется только в ветке
+  новой записи (`Record.from_dict` на `kind`, `claim`, `about`). В ветку дубля он проходит без
+  проверки: `find_duplicate` ищет по сырому `about`, и в базу пишется evidence. Пример:
+  `KnowledgeCandidate(kind="warning", claim=<claim k-0001>, about=("ent:zombie", "zombie"))` от
+  другого узла даёт `evidence: k-0001 by N` и `confirmed` вместо `InvalidCandidateError`. Так же
+  проходят claim длиннее 280 символов с J ≥ 0.6 и `term` с несколькими ключами. Это нарушает
+  критерий «битый кандидат — исключение своего типа, база не меняется». · Ожидается: полная
+  проверка кандидата до дедупа, одна для обеих веток. Например, собрать кандидат через
+  `schema._candidate` или прогнать черновик записи через `Record.from_dict`, а затем звать
+  `find_duplicate`. Тест: битый кандидат (`kind` вне `KINDS`, ключ без префикса рядом с общим,
+  claim > 280), который совпал бы с существующей записью, даёт `InvalidCandidateError`, а файл
+  записи и `git log` не меняются.
+- R1-2 · minor · `runtime/knowledge/store.py:254-256`, `459-475`, `637-694` · Файлы пишутся
+  `write_text` на месте, а чтения (`records`, `knowledge_slice`, `inheritance`, `alive`, `record`)
+  идут без блокировки. Если T-022 обслуживает запросы в нескольких потоках, срез во время записи
+  может прочитать обрезанный JSON и получить `StoreError`. · Ожидается: запись через временный
+  файл в том же каталоге и `os.replace`. Блокировку на чтение не ставить. Тест не обязателен.
+- R1-3 · minor · `runtime/knowledge/store.py:397` · Тело завещания уходит наследнику в промпт
+  (`inherited_notes`), а базовой проверки namespaced id в `retire` нет. По §5 тело чистит mind,
+  поэтому находка про страховку, а не дефект. · Ожидается (по желанию): та же `NAMESPACED`-проверка
+  тела в `retire` с `InvalidWillError`. T-013 по этой ошибке перейдёт на аварийное завещание,
+  а оно собирается из текста perception. `leak_check` к завещанию не применять, иначе аварийное
+  тоже может не пройти.
+
+### Disputed
+- Нет.
+
+### Чек-лист проекта
+- Фильтр сырых id: claim и `why` проверяются до записи, `leak_check` подключаемый (P1-4 закрыт).
+  Тело завещания — R1-3.
+- Путь смерти: `retire` принимает аварийное завещание (`test_retire_accepts_emergency_will`), ошибки
+  различимы для T-013.
+- Единственный писатель: публичных методов записи «как есть» нет, база пишется только из
+  `store.py`.
+- Уровни LLM: вызовов нет.
