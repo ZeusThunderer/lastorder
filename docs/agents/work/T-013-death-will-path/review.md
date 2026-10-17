@@ -60,3 +60,51 @@
 ### Вне задачи
 - `runtime/hive/lifecycle.py:193` читает `NAME_PRESET`, мозг — `NODE_NAMING_PRESET`. Имя пресета
   в аварийном завещании hive может разойтись с мозгом. Сфера T-022/T-014.
+
+## Раунд 2 · 2026-10-17 · вердикт: accept · headless
+Проверено: `git diff main...z/T-013-death-will-path` @ 29e5d1f (фиксы — ccaebe9)
+
+### Проверки (прогнаны надзором)
+- `uv run pytest` — 429 passed
+- `uv run python tools/check.py` — Every workplace is intact
+- Стенд: `docker compose … build mind-1` (образ уже с текущим `runtime/`, все слои из кэша), затем
+  `docker compose … run -T --rm -e LLM_SMART_MODEL=openrouter/no-such/emergency-branch-test mind-1
+  python - < dev/death_scenario.py` → `scenario passed`. Serial 00023 → 00025, причины `game` и
+  `stuck`, наследник видит оба завещания, слот держит 00025, pending пуст, $0.0000. Лог пути:
+  `will.emergency → will.retired → body.respawned → life.birth` для обеих смертей.
+- Умную ветку с ключом сам не прогонял: права не дают извлечь `OPENROUTER_API_KEY` из `.env`.
+  Код вызова `smart` (`will.py`, `will_prompt.md`) в раунде 2 не менялся. Умный прогон после фиксов
+  есть в отчёте раунда 2 (00020 → 00022, $0.0003), тексты — в раунде 1. Принимаю.
+
+### Критерии приёмки
+- [x] `DeathDetector` — без изменений с раунда 1 плюс R1-3
+- [x] Причина `ttl` → `stuck` → `game`
+- [x] `write_will` и четыре отказа
+- [x] Порядок `on_death`
+- [x] Hive недоступен, завещание доходит ровно один раз: `birth` не идёт, пока доставка не решена
+  (`lifecycle.py:255-287`). Тесты `test_birth_waits_for_the_delivery_with_real_hive_semantics` и
+  `test_delivery_and_birth_both_flaky_birth_still_waits` идут на `FakeRegistry` с семантикой hive
+  (birth закрывает живой узел, затем retire даёт 409)
+- [x] Ошибка `respawn()` → `BodyUnavailable`, завещание сохранено
+- [x] Стенд — см. «Проверки»
+
+### Ответы на находки раунда 1
+- R1-1 · закрыта. 409 внутри цикла повторов считается доставкой, и это верно: hive закрывает узел
+  сам только на `birth` и в startup reconcile (`runtime/hive/lifecycle.py:176-189`, `:215-227`).
+  `birth` теперь ждёт доставку. Reconcile трогает только узлы с пометкой lost и дубли слота,
+  а единственный живой узел слота туда не попадает. Значит, во время простоя hive 409 — это
+  потерянный ответ на собственный вызов.
+- R1-2 · закрыта: на первом `retire` 409 даёт `SUPERSEDED` и парк с настоящим текстом, тест есть.
+- R1-3 · закрыта: берётся последняя строка окна через `is_death_line`, тест есть.
+
+### Находки
+- нет
+
+### Чек-лист проекта
+- Фильтр сырых id, аварийное завещание, единственный писатель базы, уровни LLM — без изменений
+  с раунда 1, без замечаний. Заметка для T-014 про `DeathCause.text` через perception остаётся.
+
+### Вне задачи
+- Шаблон `emergency_will` (`runtime/knowledge`, T-007) на стенде режет строку посреди слова
+  («раньше первого шаг.») и склеивает урок с «Проверь сам» без точки. Это косметика шаблона
+  схемы, а не T-013.
