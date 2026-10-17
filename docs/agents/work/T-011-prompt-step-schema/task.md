@@ -2,8 +2,7 @@
 id: T-011
 title: Промпт узла под режимы восприятия и схема ответа шага
 stage: E2
-status: blocked
-Blocked: нужен оператор — потолок входа шага 2500 против 3860 (KNOWLEDGE v2 §9, «Предлагаемые ADR»): рост расходов и новый ADR, эскалация п. 1–2 (review.md, Ответ 1)
+status: in_progress
 criticality: critical
 branch: z/T-011-prompt-step-schema
 created: 2026-10-16
