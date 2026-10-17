@@ -17,13 +17,13 @@
 | T-011 | Промпт узла под режимы восприятия и схема ответа шага | E2 | done | critical | z/T-011-prompt-step-schema |
 | T-012 | Хранилище базы сети — записи, статусы, файлы узлов, git | E2 | done | critical | z/T-012-hive-core |
 | T-013 | Путь смерти — детектор, завещание, retire, respawn, birth | E2 | done | critical | z/T-013-death-will-path |
-| T-014 | Цикл мозга — шаг узла C2 поверх C1, логи, один узел живёт | E2 | queued | critical | z/T-014-mind-loop |
-| T-015 | JevDecider в тактике C1 (облачный Jev, ADR-027) | E3 | queued | critical | z/T-015-jev-decider |
-| T-016 | Контур целей сети в hive (C5) и консолидация | E3 | queued | critical | z/T-016-network-goals |
-| T-017 | Общение узлов — Мисака-нет, игровой чат, болтовня с режиссёром | E3 | queued | critical | z/T-017-node-comms |
-| T-018 | Сеть из 3 слотов в compose | E3 | queued | critical | z/T-018-three-slots |
-| T-019 | Отчёт MVP и 2-часовой прогон сети | E3 | queued | normal | z/T-019-mvp-run |
+| T-014 | Цикл мозга — шаг узла C2 поверх C1, логи, один узел живёт | E2 | draft | critical | z/T-014-mind-loop |
+| T-015 | JevDecider в тактике C1 (облачный Jev, ADR-027) | E3 | draft | critical | z/T-015-jev-decider |
+| T-016 | Контур целей сети в hive (C5) и консолидация | E3 | draft | critical | z/T-016-network-goals |
+| T-017 | Общение узлов — Мисака-нет, игровой чат, болтовня с режиссёром | E3 | draft | critical | z/T-017-node-comms |
+| T-018 | Сеть из 3 слотов в compose | E3 | draft | critical | z/T-018-three-slots |
+| T-019 | Отчёт MVP и 2-часовой прогон сети | E3 | draft | normal | z/T-019-mvp-run |
 | T-020 | Тело — позиции в наблюдении и рычаги добычи, боя, еды | E2 | done | normal | z/T-020-body-actions |
-| T-021 | Наблюдение, варианты шага и тактика C1 на правилах | E2 | ready | critical | z/T-021-observe-options |
+| T-021 | Наблюдение, варианты шага и тактика C1 на правилах | E2 | rejected | critical | z/T-021-observe-options |
 | T-022 | Сервис hive и HiveClient — HTTP API портов, срок жизни, RCON | E2 | done | critical | z/T-022-hive-service |
-| T-023 | Рефлексия C4 — личная цель, core memory, кандидаты знаний | E2 | queued | critical | z/T-023-reflection |
+| T-023 | Рефлексия C4 — личная цель, core memory, кандидаты знаний | E2 | draft | critical | z/T-023-reflection |

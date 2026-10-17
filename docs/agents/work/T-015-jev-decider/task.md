@@ -2,7 +2,7 @@
 id: T-015
 title: JevDecider в тактике C1 (облачный Jev, ADR-027)
 stage: E3
-status: queued
+status: draft
 criticality: critical
 branch: z/T-015-jev-decider
 created: 2026-10-16
@@ -72,3 +72,4 @@ uv run python dev/jev_cloud_probe.py --n 100 --max-usd 0.05
 - Вызов Jev — уровень `jev` из реестра NETWORK.md §6; других новых вызовов нет.
 
 ## Заметки надзора
+- 2026-10-17 · возвращена в draft: архитектура меняется на агента в харнессе (решение пользователя); задача будет переописана или снята.
