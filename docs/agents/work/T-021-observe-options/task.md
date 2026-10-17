@@ -2,7 +2,7 @@
 id: T-021
 title: Наблюдение, варианты шага и тактика C1 на правилах
 stage: E2
-status: queued
+status: ready
 criticality: critical
 branch: z/T-021-observe-options
 created: 2026-10-17

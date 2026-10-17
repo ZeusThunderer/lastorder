@@ -12,9 +12,9 @@
 | T-006 | Py4jBody — порт GameBody поверх моста uc | E2 | done | normal | z/T-006-py4j-body |
 | T-007 | Проект знаний, праймера и завещаний (KNOWLEDGE.md v2) | E2 | done | critical | z/T-007-knowledge-will-design |
 | T-008 | Проект целей сети и общения узлов | E2 | done | critical | z/T-008-goals-comms-design |
-| T-009 | Режимы восприятия plain/masked и фильтр служебных строк uc | E2 | changes | critical | z/T-009-perception-modes |
-| T-010 | Праймер — основы Minecraft как стартовая база сети | E2 | queued | normal | z/T-010-primer |
-| T-011 | Промпт узла под режимы восприятия и схема ответа шага | E2 | queued | critical | z/T-011-prompt-step-schema |
+| T-009 | Режимы восприятия plain/masked и фильтр служебных строк uc | E2 | done | critical | z/T-009-perception-modes |
+| T-010 | Праймер — основы Minecraft как стартовая база сети | E2 | ready | normal | z/T-010-primer |
+| T-011 | Промпт узла под режимы восприятия и схема ответа шага | E2 | ready | critical | z/T-011-prompt-step-schema |
 | T-012 | Хранилище базы сети — записи, статусы, файлы узлов, git | E2 | done | critical | z/T-012-hive-core |
 | T-013 | Путь смерти — детектор, завещание, retire, respawn, birth | E2 | queued | critical | z/T-013-death-will-path |
 | T-014 | Цикл мозга — шаг узла C2 поверх C1, логи, один узел живёт | E2 | queued | critical | z/T-014-mind-loop |
@@ -24,6 +24,6 @@
 | T-018 | Сеть из 3 слотов в compose | E3 | queued | critical | z/T-018-three-slots |
 | T-019 | Отчёт MVP и 2-часовой прогон сети | E3 | queued | normal | z/T-019-mvp-run |
 | T-020 | Тело — позиции в наблюдении и рычаги добычи, боя, еды | E2 | done | normal | z/T-020-body-actions |
-| T-021 | Наблюдение, варианты шага и тактика C1 на правилах | E2 | queued | critical | z/T-021-observe-options |
+| T-021 | Наблюдение, варианты шага и тактика C1 на правилах | E2 | ready | critical | z/T-021-observe-options |
 | T-022 | Сервис hive и HiveClient — HTTP API портов, срок жизни, RCON | E2 | ready | critical | z/T-022-hive-service |
 | T-023 | Рефлексия C4 — личная цель, core memory, кандидаты знаний | E2 | queued | critical | z/T-023-reflection |
