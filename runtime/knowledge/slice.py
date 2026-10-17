@@ -12,6 +12,7 @@ is settled by votes (section 4), without them it would hang forever (review P1-6
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Sequence
 
 from runtime.knowledge.budget import (
@@ -40,6 +41,20 @@ def format_serial(serial: int) -> str:
     """The serial as the network writes it: 00007, not 7 (ADR-018)."""
 
     return f"{serial:0{SERIAL_DIGITS}d}"
+
+
+def parse_utc(value: str) -> datetime:
+    """An already validated ISO-8601 timestamp as a comparable datetime.
+
+    A naive one means hive/mind clock skew territory, so it is read as UTC instead of
+    crashing on aware-naive comparison. Sorting by the parsed value, not by the string:
+    mixed offsets (+03:00, Z, naive) make lexicographic order lie about "the latest".
+    """
+
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def entry_line(entry: KnowledgeEntry) -> str:
@@ -84,13 +99,16 @@ def build_slice(
     seen: set[str] = set()
     for key in keys:
         matches = [r for r in visible if key in r.about and r.id not in seen]
-        matches.sort(key=lambda r: (STATUS_RANK.get(r.status, 0), r.ts, r.id), reverse=True)
+        matches.sort(
+            key=lambda r: (STATUS_RANK.get(r.status, 0), parse_utc(r.ts), r.id),
+            reverse=True,
+        )
         for record in matches[:ABOUT_ENTRIES]:
             picked.append(record)
             seen.add(record.id)
 
     fresh_pool = [r for r in visible if r.id not in seen]
-    fresh_pool.sort(key=lambda r: (r.ts, r.id), reverse=True)
+    fresh_pool.sort(key=lambda r: (parse_utc(r.ts), r.id), reverse=True)
     fresh = fresh_pool[:FRESH_ENTRIES]
 
     about_lines = [entry_line(r.to_entry()) for r in picked]
@@ -112,7 +130,7 @@ def build_slice(
         and r.author != serial
         and serial not in {v.node for v in r.votes}
     ]
-    queue.sort(key=lambda r: (r.ts, r.id), reverse=True)
+    queue.sort(key=lambda r: (parse_utc(r.ts), r.id), reverse=True)
     queue.sort(key=lambda r: r.status == "disputed")  # stable: hypotheses first
     votes = queue[:VOTE_CANDIDATES]
     vote_lines = [entry_line(r.to_entry()) for r in votes]
@@ -148,7 +166,9 @@ def build_inheritance(
     """
 
     dead_sorted = sorted(
-        dead, key=lambda item: (item[1].meta.died_at, item[0]), reverse=True
+        dead,
+        key=lambda item: (parse_utc(item[1].meta.died_at), item[0]),
+        reverse=True,
     )
     lines = [
         f"{format_serial(serial)} {will.meta.cause} {_minutes(will.meta.lifetime_s)}"
@@ -194,4 +214,10 @@ def build_inheritance(
     )
 
 
-__all__ = ["build_inheritance", "build_slice", "entry_line", "format_serial"]
+__all__ = [
+    "build_inheritance",
+    "build_slice",
+    "entry_line",
+    "format_serial",
+    "parse_utc",
+]

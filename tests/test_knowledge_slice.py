@@ -211,6 +211,20 @@ def test_inheritance_budgets_hold():
         assert budget.estimate_tokens(will) <= budget.WILL_BODY_MAX_TOKENS
 
 
+def test_inheritance_orders_wills_by_instant_not_string():
+    # Review C-3: mixed ISO formats (offsets, naive) make string order lie about "the latest"
+    wall_clock_ahead = a_will(  # 12:00 at +03:00 is 09:00 UTC — the earliest of the three
+        1, died_at="2026-10-18T12:00:00+03:00", body="Раннее по UTC.\nШутка."
+    )
+    utc = a_will(2, died_at="2026-10-18T10:00:00+00:00", body="Позднее по UTC.\nШутка.")
+    naive = a_will(3, died_at="2026-10-18T08:30:00", body="Наивное утро.\nШутка.")  # read as UTC
+    inheritance = build_inheritance(
+        dead=[(1, wall_clock_ahead), (2, utc), (3, naive)], alive=[], terms=[], catalog=""
+    )
+    assert inheritance.predecessors_summary.splitlines()[0].startswith(format_serial(2))
+    assert inheritance.inherited_notes.startswith("Позднее по UTC.")
+
+
 def test_inheritance_empty_base():
     inheritance = build_inheritance(dead=[], alive=[], terms=[], catalog="")
     assert inheritance.predecessors_summary == ""

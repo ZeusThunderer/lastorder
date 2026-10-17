@@ -56,7 +56,12 @@ from runtime.knowledge.schema import (
     Will,
     WillMeta,
 )
-from runtime.knowledge.slice import build_inheritance, build_slice, format_serial
+from runtime.knowledge.slice import (
+    build_inheritance,
+    build_slice,
+    format_serial,
+    parse_utc,
+)
 from runtime.lastorder.persona import Inheritance
 from runtime.lastorder.traits import Traits
 from runtime.perception.translate import NAMESPACED
@@ -122,14 +127,6 @@ class InvalidCandidateError(StoreError):
 
 class InvalidVoteError(StoreError):
     """The vote does not pass the rules (unknown/primer/retired record, raw ids)."""
-
-
-def _parse_utc(value: str) -> datetime:
-    """An already validated ISO-8601 timestamp; naive means a hive/mind clock skew, read as UTC."""
-    parsed = datetime.fromisoformat(value)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed
 
 
 def status_of(
@@ -395,8 +392,8 @@ class KnowledgeStore:
                 raise InvalidWillError(
                     f"will frontmatter serial {will.meta.serial} does not match {format_serial(serial)}"
                 )
-            died = _parse_utc(will.meta.died_at)
-            born = _parse_utc(birth.born_at)
+            died = parse_utc(will.meta.died_at)
+            born = parse_utc(birth.born_at)
             lifetime_s = max(0, int((died - born).total_seconds()))
             meta = WillMeta(
                 serial=serial,
@@ -630,7 +627,7 @@ class KnowledgeStore:
 
     def knowledge_slice(self, serial: int, keys: Sequence[str]) -> KnowledgeSlice:
         """The slice around one step: catalog, goals, records about `keys`, fresh tail, votes."""
-        self._load_birth(serial)
+        self._require_alive(serial)  # a retired node gets no step slice (C-2)
         for key in keys:
             if not isinstance(key, str) or not ABOUT_KEY.match(key):
                 raise StoreError(f"bad visible key {key!r}: want (blk|ent|itm):<id>")
@@ -650,7 +647,7 @@ class KnowledgeStore:
 
     def inheritance(self, serial: int) -> Inheritance:
         """What a newborn node receives (section 7); hive calls this at birth."""
-        self._load_birth(serial)
+        self._require_alive(serial)  # the recipient is the newborn, not a retired node (C-2)
         dead: list[tuple[int, Will]] = []
         alive: list[NodeBrief] = []
         for child in sorted(self._nodes_dir.iterdir()):

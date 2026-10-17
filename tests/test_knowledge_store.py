@@ -323,6 +323,16 @@ def test_retire_clamps_clock_skew(store: KnowledgeStore):
     assert will.meta.lifetime_s == 0
 
 
+def test_retired_node_gets_no_slice_or_inheritance(store: KnowledgeStore):
+    # Review C-2: a retired node gets neither a step slice nor an inheritance
+    serial = birth(store)
+    store.retire(serial, "game", will_text(serial))
+    with pytest.raises(AlreadyRetiredError):
+        store.knowledge_slice(serial, ["ent:zombie"])
+    with pytest.raises(AlreadyRetiredError):
+        store.inheritance(serial)
+
+
 # --- core memory -----------------------------------------------------------------------------
 
 
