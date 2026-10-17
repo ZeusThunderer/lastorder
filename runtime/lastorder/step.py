@@ -165,18 +165,12 @@ def build_step_prompt(
     # then the section-9 trim order against the whole-prompt ceiling: fresh tail, about
     # entries, the second vote candidate, the oldest chat, then the oldest messages.
     while about or fresh:
-        if estimate_tokens("\n".join(about) + "\n".join(fresh)) <= B_ABOUT:
+        if estimate_tokens("\n".join(about + fresh)) <= B_ABOUT:
             break
         if fresh:
-            fresh.pop()
+            fresh.pop()  # one entry per pass, then the budget is re-measured
         else:
             about.pop()
-        if fresh:
-            fresh.pop()
-        elif about:
-            about.pop()
-        else:
-            break
     _fit_lines(votes, B_VOTES)
     while estimate_tokens("\n".join(messages + chat_lines)) > B_COMMS:
         if chat_lines:
@@ -185,7 +179,7 @@ def build_step_prompt(
             messages.pop(0)
         else:
             break
-    while estimate_tokens(system + user()) > STEP_INPUT_BUDGET:
+    while estimate_tokens(system + "\n" + user()) > STEP_INPUT_BUDGET:
         if fresh:
             fresh.pop()
         elif about:

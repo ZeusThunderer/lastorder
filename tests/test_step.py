@@ -230,6 +230,25 @@ def test_unfittable_observation_raises():
         build(slice=slice_(about=(), fresh=(), pending_votes=(), network_goals=()), core_memory="", inbox=(), chat=(), observation='{"self": ' + '"x"' * 20000 + "}")
 
 
+def test_big_goals_are_kept_whole_until_the_ceiling_forces_an_error():
+    """Block 6 is never trimmed (section 9): big goals stay whole in the system part while
+    the refillable blocks give way; a goal set too big to fit at all is an explicit error,
+    not a silently truncated council."""
+    big = tuple(
+        NetworkGoal(
+            text=f"цель {i}: обезопасить сеть от ночных стонущих у периметра и записать итог в общую базу",
+            why="много смертей за окно, совет требует реакции",
+        )
+        for i in range(10)
+    )
+    system, user = build(slice=slice_(network_goals=big))
+    assert "цель 9:" in system  # every goal arrived whole
+    assert "стонущий бьёт" in user  # and the refillable blocks are still there
+    assert estimate_tokens(system + "\n" + user) <= STEP_INPUT_BUDGET
+    with pytest.raises(ValueError, match="STEP_INPUT_BUDGET"):
+        build(slice=slice_(network_goals=(NetworkGoal(text="жить и наблюдать " * 3000, why=""),)))
+
+
 # --- perception hygiene (ADR-020, ADR-025) -----------------------------------------------
 
 
