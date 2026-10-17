@@ -86,7 +86,7 @@ class OutboundMessage:
     def from_dict(cls, data: Mapping[str, Any]) -> "OutboundMessage":
         channel = data.get("channel")
         _require(channel in CHANNELS, f"channel must be one of {CHANNELS}")
-        msg_type = data.get("type", data.get("msg_type"))
+        msg_type = data.get("type")
         _require(msg_type in MSG_TYPES, f"type must be one of {MSG_TYPES}")
         to = data.get("to")
         _require(

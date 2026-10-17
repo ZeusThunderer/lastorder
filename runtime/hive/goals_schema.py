@@ -135,7 +135,7 @@ class NetworkGoalRecord:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "NetworkGoalRecord":
         source = _enum(data, "source", GOAL_SOURCES)
-        refs = data.get("refs", data.get("signal_refs", ()))
+        refs = data.get("signal_refs", ())
         _require(
             isinstance(refs, (list, tuple)) and all(isinstance(r, str) for r in refs),
             "signal_refs must be a list of strings",
@@ -149,6 +149,24 @@ class NetworkGoalRecord:
             expires_at=_text(data, "expires_at", 32),
             signal_refs=tuple(refs),
         )
+
+
+def goal_set_from_list(raw: Any) -> tuple[NetworkGoalRecord, ...]:
+    """Parse the goals.json list itself: at most MAX_NETWORK_GOALS active records.
+
+    The merge of a pass with this set is GOALS_COMMS.md 1.2 (rules 1-4); the parser only keeps
+    the stored file honest, so a corrupted goals.json fails loudly instead of drifting.
+    """
+
+    _require(
+        isinstance(raw, list) and len(raw) <= MAX_NETWORK_GOALS,
+        f"the active goal set must be a list of at most {MAX_NETWORK_GOALS} records",
+    )
+    records = []
+    for item in raw:
+        _require(isinstance(item, Mapping), "each goal record must be an object")
+        records.append(NetworkGoalRecord.from_dict(item))
+    return tuple(records)
 
 
 @dataclass(frozen=True)
@@ -173,10 +191,12 @@ class KbGap:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "KbGap":
+        status = data.get("status", "")
+        _require(status in KB_GAP_STATUSES, f"status must be one of {KB_GAP_STATUSES}")
         return cls(
             kind=_enum(data, "kind", KB_GAP_KINDS),
             about=_text(data, "about", 96),
-            status=data.get("status", ""),
+            status=status,
         )
 
 
