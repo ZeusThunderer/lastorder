@@ -2,7 +2,7 @@
 id: T-014
 title: Цикл мозга — шаг узла C2 поверх C1, логи, один узел живёт
 stage: E2
-status: draft
+status: rejected
 criticality: critical
 branch: z/T-014-mind-loop
 created: 2026-10-16
@@ -89,3 +89,4 @@ docker compose -f docker/compose.yml logs -f mind-1
 
 ## Заметки надзора
 - 2026-10-17 · возвращена в draft: архитектура меняется на агента в харнессе (решение пользователя); задача будет переописана или снята.
+- 2026-10-17 · rejected: старая схема снята ADR-032 (агент в харнессе); заменена T-025, T-027, T-029.

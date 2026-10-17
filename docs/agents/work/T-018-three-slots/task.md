@@ -2,7 +2,7 @@
 id: T-018
 title: Сеть из 3 слотов в compose
 stage: E3
-status: draft
+status: rejected
 criticality: critical
 branch: z/T-018-three-slots
 created: 2026-10-16
@@ -75,3 +75,4 @@ uv run python dev/measure_resources.py --minutes 10
 
 ## Заметки надзора
 - 2026-10-17 · возвращена в draft: архитектура меняется на агента в харнессе (решение пользователя); задача будет переописана или снята.
+- 2026-10-17 · rejected: старая схема снята ADR-032 (агент в харнессе); заменена T-027, T-032.
