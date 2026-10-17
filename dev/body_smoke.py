@@ -10,7 +10,7 @@ the script is piped through stdin:
     docker compose -f docker/compose.yml build mind-1
     docker compose -f docker/compose.yml up -d mc-server body-1
     docker compose -f docker/compose.yml run -T --rm mind-1 python - < dev/body_smoke.py
-    docker compose -f docker/compose.yml run -T --rm mind-1 python - dev/body_smoke.py --actions
+    docker compose -f docker/compose.yml run -T --rm mind-1 python - --actions < dev/body_smoke.py
 """
 
 from __future__ import annotations
@@ -110,6 +110,11 @@ def assert_log_gained(inv_after, logs_before) -> str:
 FOOD_HINTS = ("bread", "beef", "porkchop", "chicken", "mutton", "apple", "carrot",
               "potato", "cod", "salmon", "cooked")
 
+# The combat cow is tagged: the world keeps cows from older sessions, and an
+# untagged selector would measure and kill those too (review R2-3).
+COW_TAG = "t020"
+COW_SEL = f"@e[type=cow,tag={COW_TAG},limit=1]"
+
 
 def snapshot(body: Py4jBody) -> str:
     """The before/after line every --actions step prints: inventory, hp, busy."""
@@ -125,6 +130,28 @@ def mob_health(rcon_fn, selector: str) -> float | None:
     raw = rcon_fn(f"data get entity {selector} Health")
     m = re.search(r"[-\d.]+", raw.split(":", 1)[-1]) if "entity data" in raw else None
     return float(m.group()) if m else None
+
+
+def mob_pos(rcon_fn, selector: str) -> tuple[int, int, int] | None:
+    """Entity pos straight from the server: where to walk when entities() lost it."""
+    raw = rcon_fn(f"data get entity {selector} Pos")
+    if "entity data" not in raw:
+        return None
+    nums = re.findall(r"(-?[\d.]+)d", raw.split(":", 1)[-1])
+    if len(nums) < 3:
+        return None
+    return int(float(nums[0])), int(float(nums[1])), int(float(nums[2]))
+
+
+def wait_food_below(body: Py4jBody, level: float, timeout: float) -> float:
+    """MC refuses to eat at food = 20, so the eat check drains it first."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        food = body.state().food
+        if food < level:
+            return food
+        time.sleep(3)
+    raise TimeoutError(f"food still >= {level} after {timeout:.0f}s")
 
 
 def wait_block_gone(body: Py4jBody, cell: tuple[int, int, int], timeout: float) -> str:
@@ -190,55 +217,84 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
         step("after hold", lambda: snapshot(body))
 
     # -- combat: does punkAny hit a MOB? (task: verify on the stand; players-only
-    #    would mean attack needs a different lever)
-    step("summon cow (rcon)", lambda: rcon(f"summon minecraft:cow {feet[0] + 3} {feet[1]} {feet[2]}"))
+    #    would mean attack needs a different lever). The cow is summoned at a FRESH
+    #    position: @get log 2 walked the body ~90 m from where `feet` was first
+    #    taken (review R2-1), and it carries a tag so selectors touch only this cow.
+    st = step("state fresh for summon (post-@get)", lambda: body.state())
+    feet = (math.floor(st.pos[0]), math.floor(st.pos[1]), math.floor(st.pos[2]))
+    step("summon cow (rcon, tag t020)", lambda: rcon(
+        f'summon minecraft:cow {feet[0] + 3} {feet[1]} {feet[2]} {{Tags:["{COW_TAG}"]}}'))
     cow = step("cow visible in entities", lambda: wait_for_kind(body, "cow", 30))
-    hp0 = step("cow health before attack", lambda: mob_health(rcon, "@e[type=cow,limit=1]"))
-    punk = step("act attack allow=cow (punkAny)", lambda: body.act("attack", {"allow": ["cow"]}))
-    print(f"       punkAny reply: {punk}")
-    step("busy sees the fight", lambda: body.busy())
-    time.sleep(10)  # give tungsten every chance to swing at the cow
-    hp1 = step("cow health after 10s of punkAny", lambda: mob_health(rcon, "@e[type=cow,limit=1]"))
-    print(f"       punkAny on a mob: hp {hp0} -> {hp1}"
-          f" ({'NO DAMAGE: players-only confirmed' if hp1 == hp0 else 'mob took damage'})")
-    step("act attack_stop", lambda: body.act("attack_stop", {}))
-    step("fight over (busy False)", lambda: not body.busy())
+    hp0 = step("cow health before attack (rcon)", lambda: mob_health(rcon, COW_SEL))
+    if cow is None or hp0 is None:
+        # No cow to fight: the FAIL above already fails the run, and a strike that
+        # swings at nothing must not count as a pass (review R2-2).
+        print("[skip] attack/strike: no tagged cow to fight")
+    else:
+        punk = step("act attack allow=cow (punkAny)", lambda: body.act("attack", {"allow": ["cow"]}))
+        print(f"       punkAny reply: {punk}")
+        step("busy sees the fight", lambda: body.busy())
+        time.sleep(10)  # give tungsten every chance to swing at the cow
+        hp1 = step("cow health after 10s of punkAny", lambda: mob_health(rcon, COW_SEL))
+        print(f"       punkAny on a mob: hp {hp0} -> {hp1}"
+              f" ({'NO DAMAGE: players-only confirmed' if hp1 == hp0 else 'mob took damage'})")
+        step("act attack_stop", lambda: body.act("attack_stop", {}))
+        step("fight over (busy False)", lambda: not body.busy())
 
-    # -- the mob path: lookAt + left click (strike), the lever that does hit mobs.
-    #    Two stand facts from the first run: melee reach is 3 blocks (chase first,
-    #    the cow wanders off), and the feet cell aims UNDER the hitbox (aim mid-torso).
-    if hp1 is not None and hp1 == hp0:
-        step("grant iron sword (rcon)", lambda: rcon(f"give {name} iron_sword 1"))
-        time.sleep(2)
-        sword = next((s for s in body.inventory() if "sword" in s.name and s.slot <= 8), None)
-        if sword is not None:
-            step("hold the sword", lambda: body.act("select_hotbar", {"slot": sword.slot}))
+        # -- the mob path: lookAt + left click (strike), the lever that does hit mobs.
+        #    Two stand facts from the first run: melee reach is 3 blocks (chase first,
+        #    the cow wanders off), and the feet cell aims UNDER the hitbox (aim mid-torso).
+        #    A pass needs >= 1 ENTITY hit AND the tagged cow dead (review R2-2).
+        if hp1 is None:
+            print("[skip] strike: tagged cow unreadable after punkAny (see the FAIL above)")
+        elif hp1 == hp0:
+            step("grant iron sword (rcon)", lambda: rcon(f"give {name} iron_sword 1"))
+            time.sleep(2)
+            sword = next((s for s in body.inventory() if "sword" in s.name and s.slot <= 8), None)
+            if sword is not None:
+                step("hold the sword", lambda: body.act("select_hotbar", {"slot": sword.slot}))
 
-        def strike_the_cow() -> str:
-            hits = 0
-            for _ in range(30):
-                ents = [e for e in body.entities(24) if e.kind == "cow"]
-                if not ents:
-                    return f"cow down, {hits} entity hit(s) landed"
-                near = min(ents, key=lambda e: e.dist_m)
-                if near.dist_m > 4:
-                    body.act("goto", {"x": near.pos[0], "y": near.pos[1], "z": near.pos[2]})
-                    wait_busy_clears(body, 45)
-                    continue
-                reply = body.act("strike", {"pos": [near.pos[0] + 0.5, near.pos[1] + 0.7, near.pos[2] + 0.5]})
-                hits += bool(reply.get("hit") == "ENTITY")
-                time.sleep(0.7)
-            return f"{hits} entity hit(s) landed"
+            def strike_the_cow() -> str:
+                hits = 0
+                for _ in range(40):
+                    if mob_health(rcon, COW_SEL) is None:
+                        break  # the tagged cow left the world: dead
+                    ents = [e for e in body.entities(24) if e.kind == "cow"]
+                    if not ents:
+                        # Alive per the server but out of the entities window: walk to it.
+                        target = mob_pos(rcon, COW_SEL)
+                        if target is None:
+                            break
+                        body.act("goto", {"x": target[0], "y": target[1], "z": target[2]})
+                        wait_busy_clears(body, 45)
+                        continue
+                    near = min(ents, key=lambda e: e.dist_m)
+                    if near.dist_m > 4:
+                        body.act("goto", {"x": near.pos[0], "y": near.pos[1], "z": near.pos[2]})
+                        wait_busy_clears(body, 45)
+                        continue
+                    reply = body.act("strike",
+                                     {"pos": [near.pos[0] + 0.5, near.pos[1] + 0.7, near.pos[2] + 0.5]})
+                    hits += bool(reply.get("hit") == "ENTITY")
+                    time.sleep(0.7)
+                assert hits >= 1, "0 entity hits landed: the cow was never in reach"
+                return f"cow down, {hits} entity hit(s) landed"
 
-        verdict = step("strike the cow (lookAt + left click)", strike_the_cow)
-        gone = step("cow left entities (dead)", lambda: not [e for e in body.entities(24) if e.kind == "cow"])
-        if not gone:
-            FAILURES.append("strike the cow: still alive")
-            print(f"[FAIL] strike the cow: still alive ({verdict})")
-        step("after combat", lambda: snapshot(body))
-    step("cleanup cow (rcon)", lambda: rcon("kill @e[type=cow]"))
+            step("strike the cow (lookAt + left click)", strike_the_cow)
 
-    # -- eat, if there is food (bread granted if the hotbar has none)
+            def tagged_cow_dead() -> str:
+                hp = mob_health(rcon, COW_SEL)
+                assert hp is None, f"tagged cow still alive after the strike (hp={hp})"
+                return "tagged cow removed from the world"
+
+            step("tagged cow dead (rcon witness)", tagged_cow_dead)
+            step("after combat", lambda: snapshot(body))
+        else:
+            print("       strike skipped: punkAny already damaged the mob")
+    step("cleanup cow (rcon, tag t020)", lambda: rcon(f"kill @e[type=cow,tag={COW_TAG}]"))
+
+    # -- eat, if there is food (bread granted if the hotbar has none). The lever
+    #    holds "use" now (review R2-4), so a pass means the meal actually happened.
     inv = body.inventory()
     slot = next((s.slot for s in inv if any(h in s.name for h in FOOD_HINTS) and s.slot <= 8), None)
     if slot is None:
@@ -250,25 +306,32 @@ def actions_smoke(body: Py4jBody, name: str) -> None:
         print("[skip] eat: no food in the hotbar to eat")
     else:
         held = next(s.name for s in inv if s.slot == slot)
+        count0 = next((s.count for s in inv if s.slot == slot), 0)
         food0 = body.state().food
         print(f"       eating {held} from slot {slot}, food={food0:.0f}")
-        step("act eat", lambda: body.act("eat", {"slot": slot}))
+        if food0 >= 20:
+            # MC refuses to eat at full food: drain some so the check can see a meal.
+            step("drain hunger for the eat check (rcon)",
+                 lambda: rcon(f"effect give {name} minecraft:hunger 60 0"))
+            food0 = step("food drained below 18", lambda: wait_food_below(body, 18, 90))
+            if food0 is None:
+                food0 = body.state().food  # drain failed: run the check anyway, it fails honestly
+        step("act eat (selectHotbar + hold use)", lambda: body.act("eat", {"slot": slot}))
         time.sleep(3)
         st1 = step("state after eat", lambda: body.state())
         inv1 = step("inventory after eat", lambda: body.inventory())
-        left = next((s.count for s in inv1 if s.slot == slot), 0)
-        print(f"       eat result: food {food0:.0f} -> {st1.food:.0f}, "
-              f"{held} count 3 -> {left} (one useHeldItem is one interaction, not a whole meal)")
-        if left == 3:
-            # One useHeldItem did not eat the bread: MC wants the use key HELD
-            # (32 game ticks). Try the hold and report the fact for the bridge.
-            step("hold use 1.7s (does holding eat?)", lambda: body.act("hold_key", {"key": "use", "ms": 1700}))
-            time.sleep(2)
-            inv2 = step("inventory after hold use", lambda: body.inventory())
-            st2 = step("state after hold use", lambda: body.state())
-            left2 = next((s.count for s in inv2 if s.slot == slot), 0)
-            print(f"       hold use result: food {st1.food:.0f} -> {st2.food:.0f}, "
-                  f"{held} count 3 -> {left2}")
+        left = next((s.count for s in (inv1 or ()) if s.slot == slot), 0)
+        food1 = st1.food if st1 is not None else -1.0
+        print(f"       eat result: food {food0:.0f} -> {food1:.0f}, {held} count {count0} -> {left}")
+
+        def meal_happened() -> str:
+            assert st1 is not None and inv1 is not None, "state/inventory unreadable after eat"
+            gained = st1.food - food0
+            assert left < count0 or gained > 0, (
+                f"no meal: {held} count {count0} -> {left}, food {food0:.0f} -> {st1.food:.0f}")
+            return f"ate {held}: count -{count0 - left}, food +{gained:.0f}"
+
+        step("eat consumed the food", meal_happened)
         step("after eat", lambda: snapshot(body))
 
 
