@@ -366,6 +366,33 @@ def test_new_write_joins_behind_a_stuck_buffer(offline) -> None:
     assert claims.index("Первая запись ждёт своей очереди.") < claims.index("Вторая не обгоняет первую.")
 
 
+def test_birth_waits_behind_a_stuck_buffer(offline) -> None:
+    # Checker C-1 of round 2: birth has a decode, but it is still a direct write —
+    # overtaking the buffer would mark the old node lost and 409-drop its queue.
+    stack, client = offline.stack, offline.client
+    node = born_via_client(client)
+    offline.switch.down = True
+    client.submit_candidate(
+        node.serial,
+        KnowledgeCandidate(kind="danger", claim="Ночью у воды слышен стон.", about=("ent:drowned",)),
+    )
+    offline.switch.down = False
+
+    restore = _flaky_submit(stack, on=True)
+    try:
+        with pytest.raises(HiveUnavailable):
+            client.birth("LastOrder01", traits(seed=9))  # hive is up, but the queue is stuck
+    finally:
+        restore()
+    assert [line["path"] for line in outbox_lines(client)] == ["/memory/submit_candidate"]
+
+    newborn = client.birth("LastOrder01", traits(seed=9))  # recovery: queue first
+    assert outbox_lines(client) == []
+    claims = [r.claim for r in stack.store.records()]
+    assert any(c.startswith("Ночью у воды") for c in claims)  # the old node's write survived
+    assert newborn.serial > node.serial  # and only then the new node was born
+
+
 def test_critical_calls_are_not_buffered(offline) -> None:
     client = offline.client
     offline.switch.down = True

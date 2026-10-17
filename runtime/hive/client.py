@@ -414,17 +414,19 @@ class HiveClient:
         cache_key: str | None = None,
         buffered: bool = False,
         offline: Any | None = None,
+        direct: bool = False,
     ) -> Any:
         with self._lock:
             flushed = self._flush_locked()
             if not flushed:
                 # Order first (review R1-2): nothing new may overtake the buffer. A
                 # buffered write joins the end of the queue; a direct write (birth,
-                # request_death, retire) refuses to go past undelivered older ones.
+                # request_death, retire — `direct`, which matters for birth: it has
+                # a `decode` but must still refuse) never goes past older ones.
                 if buffered:
                     self._append_outbox(method, path, payload)
                     return None
-                if decode is None:
+                if direct or decode is None:
                     raise HiveUnavailable("hive outbox not flushed; write order preserved")
             try:
                 response = self._request(method, path, payload)
@@ -503,19 +505,25 @@ class HiveClient:
     # --- NodeRegistry --------------------------------------------------------------------
 
     def birth(self, slot: str, traits: Traits) -> BirthRecord:
+        # `direct`: a birth must not overtake the buffer either — the lost-close of
+        # the old node in this slot would 409-drop its queued writes (checker C-1).
         return self._call(
             "post",
             "/registry/birth",
             {"slot": slot, "traits": traits_to_json(traits)},
             decode=lambda r: birth_record_from_json(r.json()),
+            direct=True,
         )
 
     def request_death(self, serial: int, cause: str) -> None:
-        self._call("post", "/registry/request_death", {"serial": serial, "cause": cause})
+        self._call("post", "/registry/request_death", {"serial": serial, "cause": cause}, direct=True)
 
     def retire(self, serial: int, cause: str, will_text: str) -> None:
         self._call(
-            "post", "/registry/retire", {"serial": serial, "cause": cause, "will_text": will_text}
+            "post",
+            "/registry/retire",
+            {"serial": serial, "cause": cause, "will_text": will_text},
+            direct=True,
         )
 
     def alive(self) -> Sequence[NodeBrief]:
