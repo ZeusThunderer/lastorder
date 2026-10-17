@@ -66,6 +66,40 @@ services:
     command: ["python", "tools/body_probe.py", "--kill"]
     restart: "no"
 
+  # The hive (NETWORK.md section 3): node registry, knowledge base under git (T-012 store),
+  # the lifetime scan and RCON deaths (T-022). Port 8000 stays inside the docker network —
+  # minds reach it as `hive:8000`; nothing is published to the host. Exactly one uvicorn
+  # worker: lifecycle.json, the inboxes and the slot sequence are in-process state under
+  # locks, a second worker would race them (T-022 review P1-4).
+  hive:
+    build:
+      context: ..
+      dockerfile: docker/mind/Dockerfile
+    image: lastorder-mind:dev
+    depends_on:
+      mc-server:
+        condition: service_healthy
+    environment:
+      KNOWLEDGE_DIR: /knowledge
+      RUN_DIR: /run
+      RCON_HOST: mc-server
+      RCON_PASSWORD: "${RCON_PASSWORD:-lastorder}"
+      MAX_LIFE_MIN: "${MAX_LIFE_MIN:-45}"
+    command:
+      - uvicorn
+      - runtime.hive.app:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - "1"
+    volumes:
+      - knowledge:/knowledge
+      - hive-run:/run
+    restart: unless-stopped
+
   # FastJev decision server for C1 (T-005, ADR-004/023). Raises only under --profile jev.
   # GPU 0 is the RTX 2070 (5070 Ti stays free); model checkpoints live in the named volume,
   # never a bind mount. The 127.0.0.1 publish exists only for the dev/jev_spike.py measurement;
@@ -113,3 +147,5 @@ volumes:
   world:
   body-1:
   jev-hf:
+  knowledge:
+  hive-run:
