@@ -182,3 +182,60 @@ Every workplace is intact: files present, links resolve, boxes parse.
 ### Вызовы надзора
 - 2026-10-17 · plan · f472bc8 · VERDICT: revise · cost_usd: ? (скрипт не напечатал стоимость)
 
+## Раунд 2 · 2026-10-17
+Коммиты: b696998 (merge main), bb426f2 (R1-1..R1-3), плюс этот коммит отчёта.
+
+### Сделано
+- R1-1: `submit_candidate` собирает черновик записи и прогоняет его через `Record.from_dict`
+  целиком до дедупа — одна проверка для веток новой записи и дубля; битый кандидат
+  (kind вне KINDS, ключ без префикса, term с двумя ключами, claim > 280) не даёт evidence
+  существующей записи, файл и `git log` не меняются.
+- R1-2: все записи — через временный файл в том же каталоге и `os.replace`
+  (`_write_atomic`), включая откат и счётчик `.serial`; чтения остались без блокировки;
+  `*.tmp` добавлен в `.gitignore` базы.
+- R1-3: `retire` отвергает namespaced `minecraft:` id в теле завещания (`InvalidWillError`,
+  файл не пишется); `leak_check` к завещаниям не применяется — аварийное завещание из
+  пост-perception полей не должно умирать на невиденных id.
+- Влит свежий `main` (T-016/T-017), конфликтов нет.
+
+### Проверки
+```
+$ uv run pytest
+249 passed in 11.76s
+$ uv run python tools/check.py
+CHARACTERS: last_order, vesper
+Every workplace is intact: files present, links resolve, boxes parse.
+```
+
+### Отклонения от задачи
+- нет
+
+### Вне задачи
+- Расхождение из влитого main: GOALS_COMMS.md и T-016 (`runtime/hive/goals_schema.py`,
+  парсер `goal_set_from_list`) ведут цели сети в `goals.json`, а раскладка KNOWLEDGE v2 и
+  читатель этого стора — `base/goals.md`. Пока цели в срез не попадают из обоих мест.
+  Решение за надзором (поменять читателя стора на goals.json, или формат в T-016, или
+  правку KNOWLEDGE.md); молча не менял.
+- T-022 (hive-сервис) должен передать в `KnowledgeStore` параметр `leak_check`
+  (например, `Perception.leaks`), когда T-009 будет влита — сейчас базовая проверка ловит
+  только namespaced `minecraft:` id.
+
+### Вопросы
+- нет
+
+### Ответ на ревью
+- R1-1 · fixed bb426f2
+- R1-2 · fixed bb426f2
+- R1-3 · fixed bb426f2
+
+### Самопроверка
+- lo-checker: раундов 3, CHECK: clean
+- C-1 · fixed <этот коммит> — закрыт самим раундом отчёта.
+- C-2 · оставлено: merge-коммит main стандартным сообщением, перечислять изменения main
+  в отчёте не нужно (указание диспетчера).
+
+### Вызовы надзора
+- 2026-10-17 · plan · f472bc8 · VERDICT: revise · cost_usd: ? (скрипт не напечатал стоимость)
+- 2026-10-17 · result · ea589bf · VERDICT: changes · cost_usd: unknown
+
+
