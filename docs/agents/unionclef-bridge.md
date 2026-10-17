@@ -66,8 +66,9 @@ Fabric-мод: altoclef (`src/main/java/adris/altoclef`) + tungsten (pathfinder,
   под хитбокс, `hit: BLOCK`), клик. Корова 10 hp — 3 удара железным мечом.
 - `useHeldItem()` → `{ok, result, held}` — одна интеракция с предметом в руке.
   Для еды этого НЕДОСТАТОЧНО: один вызов не съедает хлеб (food и count не
-  меняются). Полный приём пищи: `selectHotbar(n)` + `holdKey("use", 1700)` —
-  food 17→20, saturation → 6, count −1 (MC держит use 32 тика).
+  меняются). Рычаг `eat` = `selectHotbar(n)` + `holdKey("use", ms)`, `ms` из
+  аргументов, по умолчанию 1700 — food 17→20, saturation → 6, count −1 (MC
+  держит use 32 тика). `use_held` остаётся одной интеракцией.
 - `@get <item> <n>` — «обеспечить ≥ n»: с уже имеющимся предметом завершается
   сразу (3 с), с нуля у дерева ~13 с. `@equip <item>` — только броня/щит
   (`EquipCommand.EquipmentItemArg`), обычные предметы — `selectHotbar`.

@@ -210,8 +210,10 @@ def _lever_use_held(mc, a):
 
 
 def _lever_eat(mc, a):
+    # Eating needs the use key HELD (32 game ticks): one useHeldItem() is a single
+    # interaction and leaves food and count untouched (stand, review R2-4).
     mc.selectHotbar(int(a["slot"]))
-    return mc.useHeldItem()
+    return mc.holdKey("use", int(a.get("ms", 1700)))
 
 
 def _lever_get(mc, a):

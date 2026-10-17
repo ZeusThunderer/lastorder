@@ -203,6 +203,10 @@ class FakeEntryPoint:
         self._rec("mouseClick", button)
         return {"ok": True}
 
+    def holdKey(self, key, ms):
+        self._rec("holdKey", key, ms)
+        return {"ok": True, "key": key, "ms": ms}
+
 
 class FakeGateway:
     def __init__(self, entry_point):
@@ -564,10 +568,18 @@ def test_act_use_held_calls_use_held_item():
     assert ("useHeldItem",) in ep.log
 
 
-def test_act_eat_selects_the_slot_then_uses_the_item():
+def test_act_eat_selects_the_slot_then_holds_the_use_key():
+    # One useHeldItem() does not eat (stand, review R2-4): eating is selectHotbar
+    # plus holding "use" long enough for the 32-tick chew.
     body, ep, _, _ = make_body()
     body.act("eat", {"slot": 3})
-    assert ep.log[-2:] == [("selectHotbar", 3), ("useHeldItem",)]
+    assert ep.log[-2:] == [("selectHotbar", 3), ("holdKey", "use", 1700)]
+
+
+def test_act_eat_takes_the_hold_ms_from_the_args():
+    body, ep, _, _ = make_body()
+    body.act("eat", {"slot": 3, "ms": 900})
+    assert ep.log[-1] == ("holdKey", "use", 900)
 
 
 def test_act_get_runs_the_catalogue_command_with_count():
