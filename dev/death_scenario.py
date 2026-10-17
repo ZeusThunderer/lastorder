@@ -226,9 +226,10 @@ def main() -> int:
     check("serial grew by 2", rebirth2.record.serial == record1.serial + 2,
           f"{record1.serial:05d} -> {rebirth2.record.serial:05d}")
     alive = hive.alive()
+    mine = [(b.serial, b.slot) for b in alive if b.slot == slot]
     check(
         "the slot holds exactly the last node",
-        [(b.serial, b.slot) for b in alive] == [(rebirth2.record.serial, slot)],
+        mine == [(rebirth2.record.serial, slot)],
         str([(b.serial, b.slot) for b in alive]),
     )
     pending = list((run_dir / slot / "pending").glob("*.md")) if (run_dir / slot / "pending").exists() else []
