@@ -27,12 +27,12 @@
 | T-021 | Наблюдение, варианты шага и тактика C1 на правилах | E2 | rejected | critical | z/T-021-observe-options |
 | T-022 | Сервис hive и HiveClient — HTTP API портов, срок жизни, RCON | E2 | done | critical | z/T-022-hive-service |
 | T-023 | Рефлексия C4 — личная цель, core memory, кандидаты знаний | E2 | rejected | critical | z/T-023-reflection |
-| T-024 | Спайк харнесса — узел 15 мин в OpenCode и ZCode через MCP тела | E2 | draft | critical | z/T-024-harness-spike |
-| T-025 | MCP тела в mind-N — исполнитель C1, события, сторож, детектор смерти | E2 | draft | critical | z/T-025-mcp-body |
-| T-026 | Шлюз LLM — LiteLLM proxy, виртуальные ключи узлов, учёт и потолки | E2 | draft | normal | z/T-026-llm-gateway |
-| T-027 | Контейнер узла node-N — песочница, раннер с адаптерами харнесса, архив | E2 | draft | critical | z/T-027-node-container |
-| T-028 | MCP сети в hive — знания, предложения, Мисака-нет, завещание | E2 | draft | critical | z/T-028-mcp-hive |
-| T-029 | Шаблон рабочего места сестры — ядро, правила, стартовые скилы | E2 | draft | critical | z/T-029-sister-instructions |
-| T-030 | Last Order — агент-администратор сети по событиям | E3 | draft | critical | z/T-030-last-order-agent |
-| T-031 | Jev в C1 по текстовой политике сестры | E3 | draft | normal | z/T-031-jev-policy |
-| T-032 | Отчёт MVP и 2-часовой прогон сети агентов | E3 | draft | normal | z/T-032-mvp-run |
+| T-024 | Спайк харнесса — узел 15 мин в OpenCode и ZCode через MCP тела | E2 | ready | critical | z/T-024-harness-spike |
+| T-025 | MCP тела в mind-N — исполнитель C1, события, сторож, детектор смерти | E2 | queued | critical | z/T-025-mcp-body |
+| T-026 | Шлюз LLM — LiteLLM proxy, виртуальные ключи узлов, учёт и потолки | E2 | queued | normal | z/T-026-llm-gateway |
+| T-027 | Контейнер узла node-N — песочница, раннер с адаптерами харнесса, архив | E2 | queued | critical | z/T-027-node-container |
+| T-028 | MCP сети в hive — знания, предложения, Мисака-нет, завещание | E2 | queued | critical | z/T-028-mcp-hive |
+| T-029 | Шаблон рабочего места сестры — ядро, правила, стартовые скилы | E2 | queued | critical | z/T-029-sister-instructions |
+| T-030 | Last Order — агент-администратор сети по событиям | E3 | queued | critical | z/T-030-last-order-agent |
+| T-031 | Jev в C1 по текстовой политике сестры | E3 | queued | normal | z/T-031-jev-policy |
+| T-032 | Отчёт MVP и 2-часовой прогон сети агентов | E3 | queued | normal | z/T-032-mvp-run |
