@@ -2,7 +2,7 @@
 id: T-009
 title: Режимы восприятия plain/masked и фильтр служебных строк uc
 stage: E2
-status: review
+status: changes
 criticality: critical
 branch: z/T-009-perception-modes
 created: 2026-10-16
