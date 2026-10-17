@@ -2,7 +2,7 @@
 id: T-011
 title: Промпт узла под режимы восприятия и схема ответа шага
 stage: E2
-status: queued
+status: ready
 criticality: critical
 branch: z/T-011-prompt-step-schema
 created: 2026-10-16
