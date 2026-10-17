@@ -57,6 +57,8 @@ case "$mode" in
   answer) limit=2; pat='^## Ответ .*headless' ;;
 esac
 done_n=0; [ -f "$review" ] && done_n="$(grep -cE "$pat" "$review" || true)"
+# Operator may grant extra rounds for a task after the limit is exhausted (logged in the conveyor summary).
+limit="${SUPERVISOR_MAX_ROUNDS:-$limit}"
 [ "$done_n" -lt "$limit" ] || die "limit of $limit headless $mode calls for $id reached, hand it to the operator"
 
 case "$effort" in low) budget=2 ;; medium) budget=4 ;; high) budget=6 ;; esac
