@@ -273,7 +273,7 @@ def test_emergency_will_survives_broken_inputs():
         traits=traits,
         last_action="шёл к болоту\nи ждал у воды",  # newlines collapse to one line
         last_events=["первое", "второе\nсобытие", "", None, "третье", "четвёртое"],
-        node_name="узел 00014",
+        node_name="узел\n00014 с лишним уточнением откуда-то",  # every body field is one line
         heir_address="следующий узел",
     )
     assert will.meta.cause == "game" and will.meta.lifetime_s == 0
@@ -282,6 +282,7 @@ def test_emergency_will_survives_broken_inputs():
     assert len(lines) == 4  # exactly the template: fields never add lines
     assert "третье" in will.body and "четвёртое" not in will.body  # at most 3 events
     assert "шёл к болоту и ждал у воды" in will.body  # one line, no embedded newline
+    assert "узел 00014 с лишним уточнением откуда-то" in will.body
     assert budget.estimate_tokens(will.body) <= budget.WILL_BODY_MAX_TOKENS
     # the file stays readable for the heir and T-012
     assert schema.Will.from_markdown(will.to_markdown()) == will

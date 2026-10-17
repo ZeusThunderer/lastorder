@@ -653,10 +653,11 @@ def emergency_will(
         if isinstance(e, str) and e.strip()
     ][:EMERGENCY_MAX_EVENTS]
     action = _one_line(last_action, EMERGENCY_ACTION_CHARS, "last_action")
+    name = _one_line(node_name, 40, "node_name")
     body = _will_body(
         "\n".join(
             [
-                f"{_one_line(heir_address, 40, 'heir_address')}, это {node_name}; "
+                f"{_one_line(heir_address, 40, 'heir_address')}, это {name}; "
                 "пишу без своей головы, голова уже молчит.",
                 f"Смерть: {CAUSE_TEXT[cause]}; последнее действие: {action or 'неизвестно'}.",
                 f"Перед концом видел: {', '.join(events) or 'ничего приметного'}.",
