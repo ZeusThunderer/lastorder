@@ -27,6 +27,16 @@ MC_USER="${MC_USERNAME:-LastOrder01}"
 
 log() { echo "[spike] $*"; }
 
+# Compose looks for .env in the project dir (docker/), not the repo root: lift the secrets the
+# harness needs into the environment without echoing them (review P1-6: single variables only).
+for key in OPENROUTER_API_KEY ZAI_API_KEY RCON_PASSWORD; do
+  if [ -z "${!key:-}" ] && [ -f "$ROOT/.env" ]; then
+    val="$(sed -n "s/^${key}=//p" "$ROOT/.env" | head -1 | tr -d '\r')"
+    val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
+    [ -n "$val" ] && export "$key=$val"
+  fi
+done
+
 mkdir -p "$RUN/logs"
 log "run dir: $RUN (windows path for compose: $(cygpath -w "$RUN" 2>/dev/null || echo "$RUN"))"
 

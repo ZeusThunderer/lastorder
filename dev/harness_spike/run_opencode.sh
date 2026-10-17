@@ -9,8 +9,15 @@ set -uo pipefail
 : "${SPIKE_MINUTES:=15}"
 : "${SPIKE_MODEL:=openrouter/qwen/qwen3.7-flash}"
 : "${SPIKE_LOGDIR:=/workplace/.logs}"
-mkdir -p "$SPIKE_LOGDIR"
+mkdir -p "$SPIKE_LOGDIR" /root/.local/share/opencode
 cp /etc/harness/opencode.json /workplace/opencode.json
+# opencode 1.19.3 does not pick the provider key from OPENROUTER_API_KEY alone: it reads its
+# own auth store. Write it from the environment (the key never lands in the workplace or repo).
+if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+  printf '{"openrouter":{"type":"api","key":"%s"}}' "$OPENROUTER_API_KEY" \
+    > /root/.local/share/opencode/auth.json
+  chmod 600 /root/.local/share/opencode/auth.json
+fi
 cd /workplace
 
 DEADLINE=$(( $(date +%s) + SPIKE_MINUTES * 60 ))

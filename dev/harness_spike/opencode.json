@@ -7,8 +7,7 @@
     "body": {
       "type": "remote",
       "url": "http://body-1:8700/mcp",
-      "enabled": true,
-      "timeout": { "startup": 20000, "catalog": 20000, "execution": 620000 }
+      "enabled": true
     }
   }
 }

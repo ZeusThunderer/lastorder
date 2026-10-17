@@ -618,7 +618,9 @@ def main() -> None:
     call_log = JsonlCallLog(log_path)
     body = Py4jBody()
     server, _impl = build_server(body, username=username, call_log=call_log, respawn_delay=respawn_delay)
-    app = server.streamable_http_app(stateless_http=True, streamable_http_path="/mcp")
+    # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the harness
+    # reaches the port by service name (body-1:8700) inside the docker network, not via localhost.
+    app = server.streamable_http_app(stateless_http=True, streamable_http_path="/mcp", host="0.0.0.0")
     log.info("body MCP for %s on 0.0.0.0:%d/mcp (log: %s)", username, port, log_path or "stderr")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
