@@ -30,9 +30,16 @@ if [ "$mode" = --sync ]; then
   lock_main
   cd "$ROOT" || die "no $ROOT"
   git diff --quiet -- "$WORK/BOARD.md" || die "BOARD.md has uncommitted edits in $ROOT"
+  promoted="$(promote_queued)"
+  files=("$WORK/BOARD.md"); for d in $promoted; do files+=("$WORK/$d/task.md"); done
   for d in $dirs; do board_set "$WORK/BOARD.md" "${d:0:5}" "$(task_status "$d")"; done
-  if git diff --quiet -- "$WORK/BOARD.md"; then echo "tasks: BOARD is in sync"
-  else git commit -q -m "docs: BOARD sync" -m "Agent: claude" -- "$WORK/BOARD.md" && echo "tasks: BOARD synced"; fi
+  for d in $promoted; do board_set "$WORK/BOARD.md" "${d:0:5}" ready; done
+  if git diff --quiet -- "${files[@]}"; then echo "tasks: BOARD is in sync"
+  else
+    msg=(-m "docs: BOARD sync")
+    [ -z "$promoted" ] || msg+=(-m "ready: $(printf '%s\n' $promoted | cut -c1-5 | tr '\n' ' ' | sed 's/ $//')")
+    git commit -q "${msg[@]}" -m "Agent: claude" -- "${files[@]}" && echo "tasks: BOARD synced"
+  fi
   exit 0
 fi
 

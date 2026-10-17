@@ -31,6 +31,12 @@ $ python tools/check.py
 ### Вызовы надзора
 - <нет | YYYY-MM-DD · plan|result · sha · VERDICT: … · cost_usd: …>
 
+<!-- Только в конвейере (lo-run), раундом не считается:
+### Самопроверка
+- lo-checker: раундов 1, CHECK: clean
+- C-1 · fixed <sha> | C-1 · оставлено: <довод>
+-->
+
 <!-- Со 2-го раунда добавляется раздел:
 ### Ответ на ревью
 - R1-1 · fixed <sha>

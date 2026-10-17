@@ -14,3 +14,13 @@
 ```
 
 <!-- записи ниже -->
+
+## D-001 · 2026-10-17 · T-007
+- Основание: 1 критичная зона — аварийное завещание: при всех полях на пределе тело 249 токенов > 220,
+  `emergency_will` бросал `SchemaError` на пути смерти; `_want` падал `TypeError` на YAML с int- и
+  str-ключами
+- Файлы: runtime/knowledge/budget.py, runtime/knowledge/schema.py, tests/test_knowledge_schema.py,
+  docs/architecture/KNOWLEDGE.md (§5, лимиты полей)
+- Коммит: ae6fe32 (ветка z/T-007-knowledge-will-design)
+- Почему не через ZCode: правка в три константы и тест, найдена в headless-ревью раунда 2; лишний раунд
+  дороже правки, а дефект — в последнем рубеже «смерти без завещания не бывает»
