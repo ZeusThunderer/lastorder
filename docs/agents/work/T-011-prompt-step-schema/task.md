@@ -2,7 +2,7 @@
 id: T-011
 title: Промпт узла под режимы восприятия и схема ответа шага
 stage: E2
-status: ready
+status: accepted
 criticality: critical
 branch: z/T-011-prompt-step-schema
 created: 2026-10-16
@@ -22,7 +22,7 @@ after: [T-007, T-008, T-009]
   `{active_nodes_summary}`, `{inherited_notes}`, `{collective_terms}`, `{knowledge_catalog}`).
 - `runtime/lastorder/persona.py`: `render()` строгий (лишний или пропущенный плейсхолдер — ошибка),
   HTML-комментарий шаблона вырезается; `Node`, `Inheritance`, `PersonaProvider`.
-- KNOWLEDGE.md v2 (T-007) раздел 9 — порядок блоков, system/user, бюджет ≤2500 токенов;
+- KNOWLEDGE.md v2 (T-007) раздел 9 — порядок блоков, system/user, бюджет ≤4500 токенов (ответ 2);
   `runtime/knowledge/budget.py`.
 - GOALS_COMMS.md (T-008) — блок «совет сети», личная цель, формат `msg` (канал, тип, адресат).
 - `runtime/ports.py`: `StepReply`, `NewTerm`, `MessageDraft`, `Vote`, `KnowledgeSlice`, `Option`.
@@ -42,11 +42,18 @@ after: [T-007, T-008, T-009]
 - `tools/snapshot_replies.py` — только чтобы снапшот шёл через новую сборку и уровень `node`
   (файл наш, создан в E0, хоть и лежит в `tools/`: коммит `T-011:`, не `aw-ext:`)
 - `docs/agents/snapshots/` — новые снапшоты
+- `runtime/knowledge/budget.py` — только `STEP_INPUT_BUDGET` (4500), `B_PERSONA` (1300),
+  докстринг и комментарий к `STEP_BLOCKS_TOTAL` (ответ 2)
+- `tests/test_knowledge_schema.py` — только `test_block_budgets_match_the_documented_total`
+- `docs/architecture/NETWORK.md` — только строка «шаг» в §6
+- `docs/architecture/KNOWLEDGE.md` — только §9 (бюджеты, итог) и пункт о потолке в «Предлагаемых ADR»
+- `docs/architecture/DECISIONS.md` — только новый ADR-029 (потолок входа шага 4500)
 - файлы задачи
 
 Нельзя трогать:
 - `unionclef/`, `NetTyan/`, `task1.md`
-- `runtime/perception/`, `runtime/knowledge/` — только использовать
+- `runtime/perception/` и остальной `runtime/knowledge/` — только использовать
+- пин `B_PERSONA` к рендеру шаблона (`test_persona_template_fits_persona_budget`) — не ослаблять
 
 ## Критерии приёмки
 - [ ] Шаблон: правило знаний в двух вариантах (`plain`: «знаешь основы мира из праймера сети,
@@ -58,8 +65,10 @@ after: [T-007, T-008, T-009]
   необязательны.
 - [ ] `build_step_prompt(node, inheritance, slice, core_memory, observation, options, inbox, chat,
   mode) -> (system, user)`: собирает блоки, режет по бюджетам блоков `budget.py` (что режется
-  первым — по KNOWLEDGE v2) и гарантирует итог ≤ 2500 токенов по `estimate_tokens`. Тест на
-  переполнение каждого блока.
+  первым — по KNOWLEDGE v2) и гарантирует итог ≤ `budget.STEP_INPUT_BUDGET` (4500, ADR-029) токенов
+  по `estimate_tokens`. Тест на переполнение каждого блока. Отдельной константы потолка в `step.py` нет.
+- [ ] Потолок 4500 оформлен: ADR-029, NETWORK.md §6, KNOWLEDGE §9; `B_PERSONA` ≤ 1300 и держит
+  рендер обоих пресетов; сумма блоков ≤ `STEP_INPUT_BUDGET` — тест.
 - [ ] System-часть не меняется между шагами одной жизни при неизменных core memory и целях —
   тест (условие кеша префикса).
 - [ ] `parse_step_reply(text, options) -> StepReply | StepError`:
@@ -92,3 +101,7 @@ uv run python tools/snapshot_replies.py --preset lab --out docs/agents/snapshots
   (NETWORK.md §6) с ней не сходится. Варианты — в «Предлагаемых ADR» KNOWLEDGE v2, решает оператор
   (рост расходов). До его решения критерий «итог ≤ 2500» не выполнить: задачу не начинать, при
   старте без решения — `lo-blocked`.
+- 2026-10-17 (ответ 2, headless): оператор поднял потолок до 4500 (через диспетчера, `1a4b9c0`).
+  `B_PERSONA` 1000 → 1300 за ростом шаблона; если рендер больше 1300, сжимать шаблон. Формат ответа
+  остаётся в шаблоне. `StepReply.msg` → `OutboundMessage` (T-008) разрешено, `MessageDraft` удалить.
+  Документы (ADR-029, NETWORK §6, KNOWLEDGE §9) правит исполнитель в этой ветке.
