@@ -2,7 +2,7 @@
 id: T-026
 title: Шлюз LLM — LiteLLM proxy, виртуальные ключи узлов, учёт и потолки
 stage: E2
-status: draft
+status: queued
 criticality: normal
 branch: z/T-026-llm-gateway
 created: 2026-10-17
@@ -56,3 +56,4 @@ uv run python dev/gateway_report.py --since 1h
 - Ключи — только из окружения; в логах, отчётах и git их нет.
 
 ## Заметки надзора
+- 2026-10-17 · утверждена пользователем.

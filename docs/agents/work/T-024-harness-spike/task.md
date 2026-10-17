@@ -2,7 +2,7 @@
 id: T-024
 title: Спайк харнесса — узел 15 мин в OpenCode и ZCode через MCP тела
 stage: E2
-status: draft
+status: ready
 criticality: critical
 branch: z/T-024-harness-spike
 created: 2026-10-17
@@ -86,3 +86,4 @@ docker compose -f docker/compose.yml -f dev/compose.harness-spike.yml up -d mc-s
 - Квота Z.ai общая с ZCode-воркером: отметить в сводке, сколько квоты ушло на прогон.
 
 ## Заметки надзора
+- 2026-10-17 · утверждена пользователем.

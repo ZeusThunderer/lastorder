@@ -2,7 +2,7 @@
 id: T-029
 title: Шаблон рабочего места сестры — ядро, правила, стартовые скилы
 stage: E2
-status: draft
+status: queued
 criticality: critical
 branch: z/T-029-sister-instructions
 created: 2026-10-17
@@ -62,3 +62,4 @@ uv run python tools/check.py
 - `@gamer` и «знающие игру» команды не предлагаются.
 
 ## Заметки надзора
+- 2026-10-17 · утверждена пользователем.

@@ -2,7 +2,7 @@
 id: T-027
 title: Контейнер узла node-N — песочница, раннер с адаптерами харнесса, архив
 stage: E2
-status: draft
+status: queued
 criticality: critical
 branch: z/T-027-node-container
 created: 2026-10-17
@@ -62,3 +62,4 @@ docker compose -f docker/compose.yml up -d
 - Ключей провайдеров в `node-N` нет; токен Z.ai — исключение ADR-033.
 
 ## Заметки надзора
+- 2026-10-17 · утверждена пользователем.

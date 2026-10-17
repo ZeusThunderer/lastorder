@@ -2,7 +2,7 @@
 id: T-032
 title: Отчёт MVP и 2-часовой прогон сети агентов
 stage: E3
-status: draft
+status: queued
 criticality: normal
 branch: z/T-032-mvp-run
 created: 2026-10-17
@@ -59,3 +59,4 @@ uv run python dev/mvp_report.py --knowledge <volume> --workplaces <volume> --run
 - В отчётах нет ключей и токенов.
 
 ## Заметки надзора
+- 2026-10-17 · утверждена пользователем.

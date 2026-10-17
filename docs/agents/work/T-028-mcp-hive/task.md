@@ -2,7 +2,7 @@
 id: T-028
 title: MCP сети в hive — знания, предложения, Мисака-нет, завещание
 stage: E2
-status: draft
+status: queued
 criticality: critical
 branch: z/T-028-mcp-hive
 created: 2026-10-17
@@ -56,3 +56,4 @@ docker compose -f docker/compose.yml up -d hive
 - Ядро личности (ADR-034) — только чтение для всех агентов.
 
 ## Заметки надзора
+- 2026-10-17 · утверждена пользователем.

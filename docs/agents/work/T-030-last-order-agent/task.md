@@ -2,7 +2,7 @@
 id: T-030
 title: Last Order — агент-администратор сети по событиям
 stage: E3
-status: draft
+status: queued
 criticality: critical
 branch: z/T-030-last-order-agent
 created: 2026-10-17
@@ -56,3 +56,4 @@ docker compose -f docker/compose.yml up -d
 - Цели сети — совет, не приказ. Пишет базу только hive.
 
 ## Заметки надзора
+- 2026-10-17 · утверждена пользователем.

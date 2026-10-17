@@ -2,7 +2,7 @@
 id: T-031
 title: Jev в C1 по текстовой политике сестры
 stage: E3
-status: draft
+status: queued
 criticality: normal
 branch: z/T-031-jev-policy
 created: 2026-10-17
@@ -53,3 +53,4 @@ uv run python dev/jev_cloud_probe.py --n 100 --max-usd 0.05
 - Jev выбирает только среди под-вариантов кода; `@gamer` нет. Ключ — только через шлюз.
 
 ## Заметки надзора
+- 2026-10-17 · утверждена пользователем.
