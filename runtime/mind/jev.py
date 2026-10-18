@@ -39,11 +39,14 @@ BACKENDS = ("cloud", "local", "rules")
 BACKEND_DEFAULT = "rules"  # ADR-027: MVP C1 runs on rules until a live run shows a win
 MODEL_DEFAULT = "openrouter/typesafe/jev-router"  # the current OpenRouter id of Jev (T-031)
 LOCAL_URL_DEFAULT = "http://jev:8000"  # the FastJev profile service, docker-internal
-TIMEOUT_S_DEFAULT = 1.0  # tightened from the T-031 probe p95, see docs/agents/jev.md
+TIMEOUT_S_DEFAULT = 1.5  # the C1 ceiling (plan review answer 2); the T-031 probe p95 of
+# typesafe/jev-router is 3.5-4.6 s — above it, so cloud calls mostly fall back to the
+# rules today; see docs/agents/jev.md before raising anything here
 MIN_INTERVAL_S_DEFAULT = 3.0  # the per-node call floor (ADR-027; <= 20 calls/min)
 POLICY_PATH_DEFAULT = "/mind-run/policy/threat.md"  # workplace mount lands in T-027 (P1-5)
 POLICY_MAX_CHARS_DEFAULT = 1500  # ~400 tokens: the NETWORK.md section 6 input estimate
-MAX_TOKENS_DEFAULT = 120  # the reply is one tiny JSON object
+MAX_TOKENS_DEFAULT = 600  # measured: the router reasons first and starves at 120
+# (40% empty/truncated replies); the answer JSON is ~60 tokens, output is free
 TEMPERATURE_DEFAULT = 0.0  # a reflex, not a poet
 
 QUESTION = "Which maneuver should the body take right now?"
@@ -105,7 +108,11 @@ def build_messages(
     return SYSTEM_PROMPT, "\n\n".join(parts)
 
 
-def _decision_from_json(text: str, options: Sequence[Option]) -> Decision:
+def parse_decision(text: str, options: Sequence[Option]) -> Decision:
+    """One Jev reply to a Decision: a JSON object naming an offered option. Anything else
+    raises JevError — the caller (gate) turns that into a rules fallback. Also used by the
+    probe to score the in-format share of the live model."""
+
     from runtime.llm.client import parse_json_object  # heavy import stays out of module load
 
     try:
@@ -174,7 +181,7 @@ class CloudJevBackend:
         self, snapshot: Mapping[str, Any], policy: str | None, options: Sequence[Option]
     ) -> Decision:
         system, user = build_messages(snapshot, policy, options)
-        return _decision_from_json(self._complete(system, user), options)
+        return parse_decision(self._complete(system, user), options)
 
 
 class LocalJevBackend:

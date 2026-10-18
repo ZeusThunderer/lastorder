@@ -40,19 +40,22 @@ model_list:
   # _set_deployment_num_retries_on_exception reads litellm_params.num_retries), so a timed-out
   # Jev call is not retried by the proxy after C1 already fell back to the rules (plan review
   # P1-2); `max_retries: 0` disables the SDK's own client retries (default 2) for the same
-  # reason. The timeout value follows the T-031 probe p95, see docs/agents/jev.md.
+  # reason. The deployment timeout sits just above the client's 1.5 s ceiling
+  # (JEV_TIMEOUT_S, runtime/mind/jev.py): the client aborts first, and a provider slower
+  # than this is aborted once — never retried. The T-031 probe numbers live in
+  # docs/agents/jev.md.
   - model_name: openrouter/typesafe/jev-router
     litellm_params:
       model: openrouter/typesafe/jev-router
       api_key: os.environ/OPENROUTER_API_KEY
-      timeout: 10
+      timeout: 2
       num_retries: 0
       max_retries: 0
   - model_name: typesafe/jev-router
     litellm_params:
       model: openrouter/typesafe/jev-router
       api_key: os.environ/OPENROUTER_API_KEY
-      timeout: 10
+      timeout: 2
       num_retries: 0
       max_retries: 0
 
