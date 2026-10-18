@@ -14,6 +14,13 @@ transitions belong to the maneuver, never to the intent — the intent's verdict
 only after it is applied again on calm (review P1-3). Names that reach the agent pass
 through perception (`plain`, ADR-037); the JSONL log may keep raw ids (review P1-4).
 
+T-031 (ADR-027): with a `JevGate` wired in, the contour asks Jev at threat onset and then
+no more often than the gate's floor. The snapshot and the code-built options (flee / fight /
+keep, plus the agent's `policy/threat.md` via the gate) are taken under the body lock, the
+call itself runs with the lock released, and the pick is applied only if the picture it was
+made for is still live — otherwise, on timeout or on any error, the rules decide and a
+`jev.fallback` line lands in the log (plan review P1-1..P1-3).
+
 Everything with a clock is injectable, so the tests drive `_tick()` by hand with a fake
 clock and no threads. All body access — from this thread and from the MCP tool threads —
 goes through one lock (review P1-6).
@@ -27,13 +34,15 @@ import math
 import threading
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from runtime.lastorder.death import DeathDetector, classify_death
+from runtime.mind.jev import JevGate
 from runtime.perception.chat import is_service_line, strip_formatting
 from runtime.perception.translate import Perception
-from runtime.ports import BirthRecord, GameState
+from runtime.ports import BirthRecord, GameState, Option
 from runtime.hive.client import HiveClient, HiveRejected, HiveUnavailable
 
 log = logging.getLogger("mind.executor")
@@ -179,6 +188,16 @@ class Intent:
         return self.state in (Intent.DONE, Intent.FAILED, Intent.CLEARED)
 
 
+@dataclass
+class _JevRequest:
+    """What one Jev call was made for: the locked snapshot, the code-built options and the
+    backend name for log records. The call itself runs outside the body lock (P1-1)."""
+
+    snapshot: dict[str, Any]
+    options: list[Option]
+    backend: str
+
+
 # --- C1 ------------------------------------------------------------------------------------
 
 
@@ -203,6 +222,7 @@ class Executor:
         idle_s: float = IDLE_S_DEFAULT,
         birth: BirthRecord | None = None,
         hive: HiveClient | None = None,
+        jev: JevGate | None = None,
     ):
         if not TICK_MIN_S <= tick_interval <= TICK_MAX_S:
             raise ValueError(
@@ -223,6 +243,7 @@ class Executor:
         self._idle_s = idle_s
         self._birth = birth
         self._hive = hive
+        self._jev = jev  # None: pure rules, byte-for-byte the pre-T-031 behavior
 
         # One lock for the whole body: the C1 thread and the MCP tool threads share it (P1-6).
         self.body_lock = threading.RLock()
@@ -236,6 +257,7 @@ class Executor:
         self._hp = -1.0
         self._last_damage_at = -1e9
         self._threat: str | None = None  # "flee" | "fight" once a maneuver ran
+        self._jev_mode: str | None = None  # a live Jev pick ("flee"|"fight"|"keep") leads the episode (P1-3)
         self._evading = False  # a flee goto of ours is (or was) running
         self._last_evade: dict[str, int] | None = None
         self._last_strike_at = -1e9
@@ -281,8 +303,10 @@ class Executor:
         while not self._stop_event.is_set():
             started = self._clock()
             try:
-                with self.body_lock:
-                    self._tick()
+                # _tick owns the body lock in sections: a Jev call happens with the lock
+                # released, so submits, MCP tools and the runner endpoints never wait on
+                # JEV_TIMEOUT_S (plan review P1-1).
+                self._tick()
             except Exception as exc:  # a flaky bridge must not kill C1
                 self._log.record("error", scope="tick", error=f"{type(exc).__name__}: {exc}")
             interval = ACT_BURST_INTERVAL_S if self._pending_act else self._tick_interval
@@ -310,23 +334,45 @@ class Executor:
     # -- the tick -----------------------------------------------------------------------
 
     def _tick(self) -> None:
-        prev_busy = self._busy_last
-        self._drain_body_events()
-        state = self._body.state()
-        hp = float(getattr(state, "hp", 0.0) or 0.0)
-        self._hp_fallback_damage(state, hp)
+        with self.body_lock:
+            prev_busy = self._busy_last
+            self._drain_body_events()
+            state = self._body.state()
+            hp = float(getattr(state, "hp", 0.0) or 0.0)
+            self._hp_fallback_damage(state, hp)
 
-        death = self._detector.feed(state, list(self._body.recent_chat(10)))
-        if death is not None:
-            self._on_death(death.text)
-        if self._dead:
-            return  # between death and the runner's respawn C1 holds still (review P1-2)
+            death = self._detector.feed(state, list(self._body.recent_chat(10)))
+            if death is not None:
+                self._on_death(death.text)
+            if self._dead:
+                return  # between death and the runner's respawn C1 holds still (review P1-2)
 
-        self._life_clock()
-        busy = bool(self._body.busy())
-        self._threat_logic(state, hp, busy)
+            self._life_clock()
+            busy = bool(self._body.busy())
+            request = self._threat_logic(state, hp, busy)
+            if request is None:
+                self._finish_tick(state, busy, prev_busy)
+                return
+        # The Jev call runs OUTSIDE the body lock (plan review P1-1), bounded by the
+        # backend's JEV_TIMEOUT_S; everything above keeps running on other threads.
+        decision = self._jev.advise(request.snapshot, request.options)
+        with self.body_lock:
+            state = self._body.state()
+            hp = float(getattr(state, "hp", 0.0) or 0.0)
+            busy = bool(self._body.busy())
+            if self._dead or hp <= 0.0:
+                if decision is not None:  # too late: the death tick is next, no maneuver
+                    self._log.record(
+                        "jev.fallback", backend=request.backend, reason="stale: the body died while Jev was thinking"
+                    )
+            else:
+                self._apply_jev(request, decision, state, hp, busy)
+            self._finish_tick(state, busy, prev_busy)
+
+    def _finish_tick(self, state: GameState, busy: bool, prev_busy: bool) -> None:
+        """The lock-held tail of a tick, shared by the plain and the Jev paths."""
         if self._threat is None:
-            self._intent_logic(busy)
+            self._intent_logic(busy)  # a Jev "keep" leaves _threat None: the intent keeps the body
         self._idle_watchdog(busy)
         self._track_act_effect(state, busy, prev_busy)
         self._busy_last = busy
@@ -386,6 +432,7 @@ class Executor:
         self._death_cause = cause
         self._death_text = text
         self._threat = None
+        self._jev_mode = None  # a Jev pick dies with the node: the next life starts on rules
         self._evading = False
         if self._current is not None and not self._current.finished:
             self._log.record(
@@ -470,6 +517,7 @@ class Executor:
         self._idle_flag = False
         self._last_activity_at = self._clock()
         self._threat = None
+        self._jev_mode = None
         self._evading = False
         self._stuck_requested = False  # the cause flag belongs to the life that asked (R1-4)
         # Whatever intent object survived into this moment (a submit racing the death tick,
@@ -524,50 +572,150 @@ class Executor:
             self._life_warned = True
             self._emit("life.expiring", remaining_min=round(remaining_s / 60.0, 1))
 
-    # -- threat: the no-LLM rule fallback (NETWORK section 2; Jev plugs in at T-031) -------
+    # -- threat: rules lead, Jev advises (NETWORK section 2; T-031, ADR-027) ----------------
 
-    def _threat_logic(self, state: GameState, hp: float, busy: bool) -> None:
+    def _threat_logic(self, state: GameState, hp: float, busy: bool) -> "_JevRequest | None":
+        """Under the body lock. None: the rules (or a carried Jev mode) already ran this
+        tick. A `_JevRequest`: C1 should consult Jev now — the snapshot is taken here, the
+        call happens outside the lock (plan review P1-1), application after it."""
         now = self._clock()
         damaged = now - self._last_damage_at <= self._threat_calm_s
         if not damaged:
-            if self._threat is not None:
+            if self._threat is not None or self._jev_mode is not None:
                 self._threat = None
+                self._jev_mode = None
                 self._evading = False
                 self._last_evade = None
                 self._last_activity_at = now
             if self._current is not None and self._current.state == Intent.SUSPENDED:
                 self._apply(self._current)  # calm: back to the agent's intent
-            return
+            return None
         source = self._nearest_hostile()
         if source is None:
-            return  # damage without a visible hostile: nothing to aim a maneuver at
+            return None  # damage without a visible hostile: nothing to aim a maneuver at
+        if self._jev is not None and self._jev.due(now):
+            return self._build_jev_request(state, hp, source)
+        if self._jev_mode is not None:
+            self._carry_jev_mode(state, busy, source)  # between Jev calls the pick leads (P1-3)
+        else:
+            self._threat_rules(state, hp, busy, source)
+        return None
+
+    def _build_jev_request(self, state: GameState, hp: float, source: Any) -> "_JevRequest":
+        """The locked snapshot for one Jev call. Options are code-built sub-variants of the
+        rules' own moves — no raw uc commands, no free text (ADR-037); lever args are
+        computed fresh at apply time, what Jev sees is the menu, not the ammunition."""
+        options = [
+            Option("flee", "break off and run away from the threat", "goto", {}),
+            Option("keep", "hold the current intent; no maneuver", "keep", {}),
+        ]
+        if float(source.dist_m) <= self._fight_radius_m:
+            options.insert(1, Option("fight", "strike the hostile", "strike", {}))
+        intent = None
+        if self._current is not None and not self._current.finished:
+            intent = {"lever": self._current.lever, "args": dict(self._current.args)}
+        snapshot = {
+            "hp": round(hp, 1),
+            "food": round(float(getattr(state, "food", 0.0) or 0.0), 1),
+            "pos": [round(float(c), 1) for c in getattr(state, "pos", ()) or ()],
+            "held": self._seen(str(getattr(state, "held", "") or "air"), "item"),
+            "threat": {
+                "kind": self._seen(str(source.kind), "entity"),
+                "dist_m": round(float(source.dist_m), 1),
+            },
+            "intent": intent,
+        }
+        return _JevRequest(snapshot=snapshot, options=options, backend=self._jev.backend_name)
+
+    def _apply_jev(
+        self,
+        request: "_JevRequest",
+        decision: Any | None,
+        state: GameState,
+        hp: float,
+        busy: bool,
+    ) -> None:
+        """Under the body lock again. A decision survives only if the picture it was made
+        for is still live; anything else is `jev.fallback` + the rules for the fresh
+        picture (plan review P1-1)."""
+        source = self._nearest_hostile()
+        live = self._clock() - self._last_damage_at <= self._threat_calm_s and source is not None
+        if decision is not None:
+            option = next((o for o in request.options if o.id == decision.option_id), None)
+            if option is not None and option.lever == "strike" and (
+                not live or float(source.dist_m) > self._fight_radius_m
+            ):
+                option = None  # fight was offered in reach; the reach is gone
+            if option is None:
+                self._log.record(
+                    "jev.fallback",
+                    backend=request.backend,
+                    reason="stale: the threat moved on while Jev was thinking",
+                )
+                decision = None
+        if decision is None:
+            self._threat_rules(state, hp, busy, source)  # the honest fallback, this tick
+            return
         pos = tuple(round(float(c), 1) for c in getattr(state, "pos", ()) or ())
+        self._jev_mode = decision.option_id  # carried by the mechanics until calm or the next call (P1-3)
+        if decision.option_id == "flee":
+            self._apply_flee(pos, source, busy)
+        elif decision.option_id == "fight":
+            self._apply_fight(source, pos)
+        # "keep": no maneuver and no suspension — the intent keeps the body (P1-3)
+
+    def _threat_rules(self, state: GameState, hp: float, busy: bool, source: Any) -> None:
+        """The no-LLM rule fallback (NETWORK section 2): flee under low hp, strike a
+        hostile in reach, otherwise keep the intent."""
+        if source is None:
+            return
+        pos = tuple(round(float(c), 1) for c in getattr(state, "pos", ()) or ())
+        now = self._clock()
         if hp <= self._flee_hp:
             # The maneuver owns the body from here: the intent is suspended and its verdict
             # is counted only after the calm re-apply (review P1-3).
-            self._suspend_intent()
-            self._threat = "flee"
-            target = self._evade_target(pos, source)
-            if not self._evading:
-                if busy:
-                    self._body.stop()  # the intent's chain yields to the flee (section 2)
-                self._maneuver("goto", target, why="flee")
-                self._evading = True
-                self._last_evade = target
-            elif not busy and target != self._last_evade:
-                # the previous flee leg ended, the picture changed: re-aim further out
-                self._maneuver("goto", target, why="flee")
-                self._last_evade = target
+            self._apply_flee(pos, source, busy)
         elif float(source.dist_m) <= self._fight_radius_m and now - self._last_strike_at >= STRIKE_INTERVAL_S:
-            self._suspend_intent()
-            self._threat = "fight"
-            self._last_strike_at = now
-            self._maneuver(
-                "strike", {"pos": [float(c) for c in (source.pos or pos)]}, why="fight"
-            )
+            self._apply_fight(source, pos)
         # else: damage from beyond the rules' reach (a skeleton at 10 m while hp is high) —
         # an event for the agent, but NO maneuver runs, so the intent is NOT suspended:
         # it keeps the body, settles on its own and the idle watchdog stays armed (R1-1).
+
+    def _carry_jev_mode(self, state: GameState, busy: bool, source: Any) -> None:
+        """The Jev pick of this episode keeps leading between calls (P1-3): the same
+        mechanics the rules use (_evading/_last_evade, STRIKE_INTERVAL_S), nothing new."""
+        pos = tuple(round(float(c), 1) for c in getattr(state, "pos", ()) or ())
+        if self._jev_mode == "flee":
+            self._apply_flee(pos, source, busy)
+        elif self._jev_mode == "fight" and source is not None:
+            now = self._clock()
+            if (
+                float(source.dist_m) <= self._fight_radius_m
+                and now - self._last_strike_at >= STRIKE_INTERVAL_S
+            ):
+                self._apply_fight(source, pos)
+        # "keep": nothing — no maneuver, no suspension
+
+    def _apply_flee(self, pos: tuple[float, ...], source: Any, busy: bool) -> None:
+        self._suspend_intent()
+        self._threat = "flee"
+        target = self._evade_target(pos, source)
+        if not self._evading:
+            if busy:
+                self._body.stop()  # the intent's chain yields to the flee (section 2)
+            self._maneuver("goto", target, why="flee")
+            self._evading = True
+            self._last_evade = target
+        elif not busy and target != self._last_evade:
+            # the previous flee leg ended, the picture changed: re-aim further out
+            self._maneuver("goto", target, why="flee")
+            self._last_evade = target
+
+    def _apply_fight(self, source: Any, pos: tuple[float, ...]) -> None:
+        self._suspend_intent()
+        self._threat = "fight"
+        self._last_strike_at = self._clock()
+        self._maneuver("strike", {"pos": [float(c) for c in (source.pos or pos)]}, why="fight")
 
     def _evade_target(self, pos: tuple[float, ...], source: Any) -> dict[str, int]:
         sp = tuple(float(c) for c in (source.pos or ())) or (0.0, 0.0, 0.0)
