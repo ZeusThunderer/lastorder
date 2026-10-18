@@ -2,7 +2,7 @@
 id: T-026
 title: Шлюз LLM — LiteLLM proxy, виртуальные ключи узлов, учёт и потолки
 stage: E2
-status: ready
+status: in_progress
 criticality: normal
 branch: z/T-026-llm-gateway
 created: 2026-10-17
