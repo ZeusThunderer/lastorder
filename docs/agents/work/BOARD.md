@@ -27,7 +27,7 @@
 | T-021 | Наблюдение, варианты шага и тактика C1 на правилах | E2 | rejected | critical | z/T-021-observe-options |
 | T-022 | Сервис hive и HiveClient — HTTP API портов, срок жизни, RCON | E2 | done | critical | z/T-022-hive-service |
 | T-023 | Рефлексия C4 — личная цель, core memory, кандидаты знаний | E2 | rejected | critical | z/T-023-reflection |
-| T-024 | Спайк харнесса — узел 15 мин в OpenCode и ZCode через MCP тела | E2 | ready | critical | z/T-024-harness-spike |
+| T-024 | Спайк харнесса — узел 15 мин в OpenCode и ZCode через MCP тела | E2 | changes | critical | z/T-024-harness-spike |
 | T-025 | MCP тела в mind-N — исполнитель C1, события, сторож, детектор смерти | E2 | queued | critical | z/T-025-mcp-body |
 | T-026 | Шлюз LLM — LiteLLM proxy, виртуальные ключи узлов, учёт и потолки | E2 | queued | normal | z/T-026-llm-gateway |
 | T-027 | Контейнер узла node-N — песочница, раннер с адаптерами харнесса, архив | E2 | queued | critical | z/T-027-node-container |
