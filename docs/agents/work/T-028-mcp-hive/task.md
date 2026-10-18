@@ -2,7 +2,7 @@
 id: T-028
 title: MCP сети в hive — знания, предложения, Мисака-нет, завещание
 stage: E2
-status: changes
+status: in_progress
 criticality: critical
 branch: z/T-028-mcp-hive
 created: 2026-10-17
