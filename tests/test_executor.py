@@ -736,3 +736,26 @@ def test_nearest_hostile_matches_real_uc_types() -> None:
         assert "hostile" not in HOSTILE_TYPES  # no fictional kinds in the table
     finally:
         rig.close()
+
+
+def test_respawn_clears_the_event_queue() -> None:
+    # Live stand lesson: the death event left in the queue was served to every next
+    # session, and the dying session's own consumption logged "woke_by: game.death"
+    # again — the T-024 orchestrator read that as another death. A respawned body
+    # starts a new life with a fresh queue.
+    rig = Rig()
+    try:
+        rig.body.push_event("chat.line", "<Steve> старая жизнь")
+        rig.tick()
+        rig.body.set_state(hp=0.0)
+        rig.body.chat = ["LastOrder01 died"]
+        rig.tick()  # death; the queued chat line and game.death are still pending
+        assert rig.x.events.pending()
+        rig.x.runner_respawn()
+        assert rig.x.events.pending() == ()
+        rig.body.push_event("chat.line", "<Steve> новая жизнь")
+        rig.tick()
+        served = [e for e in rig.x.events.pending() if e["type"] == "chat.line"]
+        assert served == [{"type": "chat.line", "text": "<Steve> новая жизнь"}]
+    finally:
+        rig.close()

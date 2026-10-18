@@ -126,6 +126,13 @@ class EventQueue:
                 self._items.append({"type": type_, **fields})
             self._cond.notify_all()
 
+    def clear(self) -> None:
+        """Drop everything: a respawned body starts a new life with a fresh queue —
+        the next session must not replay the previous node's death and chat."""
+        with self._cond:
+            self._items.clear()
+            self._cond.notify_all()
+
     def pop(self, timeout_s: float, clock: Callable[[], float]) -> dict[str, Any] | None:
         """The first accumulated event, or None when the timeout runs out."""
         deadline = clock() + timeout_s
@@ -458,6 +465,7 @@ class Executor:
         self._last_activity_at = self._clock()
         self._threat = None
         self._evading = False
+        self.events.clear()  # a new life does not replay the old one's events
         # The life clock belongs to the node that died; the runner arms the next one
         # with POST /runner/birth. Until then life.expiring stays silent.
         self._birth = None
