@@ -54,3 +54,6 @@ uv run python dev/jev_cloud_probe.py --n 100 --max-usd 0.05
 
 ## Заметки надзора
 - 2026-10-17 · утверждена пользователем.
+- 2026-10-18 · план 1 (headless): «Можно трогать» расширено — `docker/gateway/config.yaml` (tier `jev`),
+  `docker/gateway/up.sh` (ключи mind-1/hive/node-1), `runtime/mind/{executor,mcp_body}.py`.
+  Критерий 5 — только живой прогон на стенде. Вызов Jev — вне `body_lock` (review P1-1).
