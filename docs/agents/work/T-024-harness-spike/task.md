@@ -2,7 +2,7 @@
 id: T-024
 title: Спайк харнесса — узел 15 мин в OpenCode и ZCode через MCP тела
 stage: E2
-status: review
+status: accepted
 criticality: critical
 branch: z/T-024-harness-spike
 created: 2026-10-17
