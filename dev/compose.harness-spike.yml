@@ -1,0 +1,95 @@
+# T-024 harness spike overlay. From the repo root:
+#   docker compose -f docker/compose.yml -f dev/compose.harness-spike.yml up -d mc-server body-1 mind-1
+#   docker compose -f docker/compose.yml -f dev/compose.harness-spike.yml --profile opencode up -d harness
+#
+# mind-1 becomes the minimal body MCP server (runtime/mind/mcp_body.py, T-024) instead of the
+# one-shot body probe. The harness container sits in its OWN `harness-spike` network together
+# with body-1 only (review P2-1): the uc py4j bridge (localhost-only inside body-1's netns)
+# and mc-server's RCON stay unreachable; the spike script verifies both and records the result.
+#
+# The workplace is a throwaway dir on the host (SPIKE_RUN_DIR), built by sister_prompt.py;
+# secrets are passed as single variables, never env_file (review P1-6).
+name: lastorder
+
+services:
+  mind-1:
+    command: ["python", "-m", "runtime.mind.mcp_body"]
+    environment:
+      MC_USERNAME: LastOrder01
+      MCP_BODY_PORT: "8700"
+      MCP_LOG_PATH: /spike-run/mind-calls.jsonl
+      MCP_RESPAWN_DELAY_S: "${MCP_RESPAWN_DELAY_S:-45}"
+    volumes:
+      - mind-spike-run:/spike-run
+    restart: "no"
+
+  body-1:
+    networks: [default, harness-spike]
+
+  harness:
+    build:
+      context: ..
+      dockerfile: dev/harness_spike/Dockerfile
+    image: lastorder-harness:spike
+    networks: [harness-spike]
+    mem_limit: 2g
+    working_dir: /workplace
+    environment:
+      # opencode: the node model straight from OpenRouter for the spike (the gateway is T-026).
+      # `:-` defaults keep the file interpolable without any secrets — the task's plain
+      # `up -d mc-server body-1 mind-1` must work in a clean env (review R1-3); spike.sh
+      # passes the real values when it starts a harness profile.
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      SPIKE_MINUTES: "${SPIKE_MINUTES:-15}"
+      SPIKE_MODEL: "${SPIKE_MODEL:-openrouter/qwen/qwen3.7-flash}"
+    command: ["run_opencode.sh"]
+    volumes:
+      - type: bind
+        # default keeps interpolation alive; spike.sh always sets the real throwaway dir
+        source: ${SPIKE_RUN_DIR:-./spike-workplace}
+        target: /workplace
+    restart: "no"
+    profiles: ["opencode"]
+
+  harness-zcode:
+    build:
+      context: ..
+      dockerfile: dev/harness_spike/zcode/Dockerfile
+    image: lastorder-harness-zcode:spike
+    networks: [harness-spike]
+    mem_limit: 2g
+    working_dir: /workspace
+    environment:
+      # The GLM Coding Plan key: the zcode-harness entrypoint renders it into the personal
+      # provider config (~/.zcode/v2, tmpfs — never persists, never enters the image).
+      # `:-` default: interpolation without secrets (review R1-3).
+      ZAI_API_KEY: "${ZCODE_API_KEY:-}"
+      ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"
+      ZCODE_MODE: yolo
+      ZCODE_MODEL_RETRY_MAX_RETRIES: "3"
+      SPIKE_MINUTES: "${SPIKE_MINUTES:-15}"
+    # bash passthrough of the entrypoint (before key rendering): the session script calls
+    # `zcode-harness run/resume` itself, each call renders the provider atomically.
+    command: ["bash", "/usr/local/bin/run_zcode.sh"]
+    volumes:
+      - type: bind
+        source: ${SPIKE_RUN_DIR:-./spike-workplace}
+        target: /workspace
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+      # single-container session, no cross-container resume (setup README, "Грабли" #2);
+      # tmpfs also keeps the rendered provider config (with the key) out of any volume
+      - /home/agent/.zcode:size=512m,mode=1777
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 512
+    restart: "no"
+    profiles: ["zcode"]
+
+networks:
+  harness-spike:
+    name: lastorder-harness-spike
+
+volumes:
+  mind-spike-run:
