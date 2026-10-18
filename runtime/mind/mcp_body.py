@@ -296,18 +296,18 @@ class BodyMcp:
 
     async def _tool(self, name: str, args: Mapping[str, Any], fn: Callable[[], Any]) -> Any:
         """One logged call: sync body work in a thread, one JSONL line either way."""
-        entry: dict[str, Any] = {"tool": name, "args": dict(args)}
+        entry: dict[str, Any] = {"tool": name, "args": dict(args), "ts": time.time()}
         try:
             result = await asyncio.to_thread(fn)
         except ToolError as exc:
-            self._x.journal.record("call", ok=False, error=str(exc), **entry)
+            self._x.journal.record("call", ok=False, error=str(exc), t_end=time.time(), **entry)
             raise
         except Exception as exc:
             self._x.journal.record(
-                "call", ok=False, error=f"{type(exc).__name__}: {exc}", **entry
+                "call", ok=False, error=f"{type(exc).__name__}: {exc}", t_end=time.time(), **entry
             )
             raise
-        fields: dict[str, Any] = {"ok": True}
+        fields: dict[str, Any] = {"ok": True, "t_end": time.time()}
         if isinstance(result, dict):
             if name == "wait_events":
                 fields["woke_by"] = result.get("type")
@@ -427,23 +427,39 @@ def build_server(
     )
 
     async def observe() -> dict[str, Any]:
+        """See the world through plain names: self (hp, food, pos, held...), entities,
+        blocks, inventory and the last filtered chat lines."""
         return await impl._tool("observe", {}, impl.observe)
 
     async def act(intent: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Give C1 the next intent. `intent` is EXACTLY one lever name: goto, goto_far,
+        look_at, select_hotbar, place_block, bridge_to, pillar_to, tap_key, hold_key,
+        mine, attack, attack_stop, strike, use_held, eat, get, equip. All parameters go
+        in the `args` object, e.g. {"intent": "goto", "args": {"x": 5, "y": 64, "z": 5}},
+        {"intent": "get", "args": {"item": "oak log", "count": 8}}. C1 executes it, may
+        interrupt it for a threat and returns to it; you learn the outcome from
+        intent.done / intent.failed events. Returns the intent id."""
         return await impl._tool("act", {"intent": intent, "args": dict(args or {})}, lambda: impl.act(intent, args))
 
     async def stop() -> dict[str, Any]:
+        """Drop the current intent and stop the body."""
         return await impl._tool("stop", {}, impl.stop)
 
     async def say(text: str) -> dict[str, Any]:
+        """One line into the player chat (no / or @, limited length and rate)."""
         return await impl._tool("say", {"text": text}, lambda: impl.say(text))
 
     async def wait_events(timeout_s: float = 30.0) -> dict[str, Any]:
+        """Sleep until the next event or the timeout — you pick your own rhythm. Events:
+        game.damage, game.death, chat.line, intent.done, intent.failed, task.idle (arms
+        retire_stuck), life.expiring. Events of one type collapse; the queue is capped."""
         return await impl._tool(
             "wait_events", {"timeout_s": timeout_s}, lambda: impl.wait_events(timeout_s)
         )
 
     async def retire_stuck() -> dict[str, Any]:
+        """Eliminate yourself (request_death "stuck"). Works only right after a task.idle
+        event; any new intent disarms it. Refused otherwise."""
         return await impl._tool("retire_stuck", {}, impl.retire_stuck)
 
     server.add_tool(observe, name="observe")
