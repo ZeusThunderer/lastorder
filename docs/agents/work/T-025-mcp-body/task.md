@@ -2,7 +2,7 @@
 id: T-025
 title: MCP тела в mind-N — исполнитель C1, события, сторож, детектор смерти
 stage: E2
-status: ready
+status: accepted
 criticality: critical
 branch: z/T-025-mcp-body
 created: 2026-10-17

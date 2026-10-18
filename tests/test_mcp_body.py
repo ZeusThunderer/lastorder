@@ -1,11 +1,15 @@
-"""The minimal body MCP server of the harness spike (T-024).
+"""The body MCP server (T-024 spike, full section-4 set in T-025).
 
 Everything runs against a fake body with the real Py4jBody method surface; the MCP layer is
 exercised through the real streamable HTTP transport (uvicorn on port 0 in a thread), because
-that is what OpenCode and ZCode will talk to. Checks the acceptance items one by one: the tool
-set, the `command` rejection, `say` guards, the uc service-line filter with plain names, and
-`wait_events` by timeout and by event — plus the death -> respawn path and the JSONL call log
-(review P1-2…P1-5, P1-8).
+that is what the harness talks to. C1 runs in its own thread (the same wiring as production,
+a fast tick); the runner endpoints ride the same port and go through real HTTP calls.
+
+Checks the acceptance items one by one: the section-4 tool set, the `command`/`chat`
+rejection, `say` guards, the uc service-line filter with plain names, `wait_events` by
+timeout and by event, the death -> runner-only respawn path, `retire_stuck` refusals and
+the JSONL call log (spike P1-2…P1-5, P1-8). The T-024 review R2-1 fix: the tests split out
+during the spike are back under honest names.
 """
 
 from __future__ import annotations
@@ -15,9 +19,9 @@ import dataclasses
 import json
 import threading
 import time
-import uuid
 from datetime import datetime
 
+import httpx
 import pytest
 import uvicorn
 from mcp import Client
@@ -25,12 +29,12 @@ from mcp.client.streamable_http import streamable_http_client
 
 from runtime.mind.mcp_body import (
     SAY_MAX_LEN,
-    JsonlCallLog,
     ToolError,
-    build_server,
+    build_mind,
     check_say,
     validate_args,
 )
+from runtime.mind.executor import JsonlLog
 from runtime.ports import BlockInfo, EntityInfo, Event, ItemStack
 
 
@@ -71,7 +75,7 @@ class FakeBody:
 
     def entities(self, radius: int = 16):
         return (
-            EntityInfo(kind="hostile", name="minecraft:zombie", dist_m=3.5, pos=(1, 64, 1)),
+            EntityInfo(kind="zombie", name="minecraft:zombie", dist_m=3.5, pos=(1, 64, 1)),
             EntityInfo(kind="animal", name="Cow", dist_m=8.0, pos=(5, 64, 5)),
         )
 
@@ -96,7 +100,7 @@ class FakeBody:
 
     def respawn(self, timeout: float = 60.0, poll: float = 1.0):
         self.respawn_calls += 1
-        if self.respawn_fail_times > 0:  # scripted bridge failures (review R1-4 tests)
+        if self.respawn_fail_times > 0:  # scripted bridge failures (spike R1-4 tests)
             self.respawn_fail_times -= 1
             raise RuntimeError(f"scripted respawn failure #{self.respawn_calls}")
         self.set_state(hp=20.0)
@@ -125,20 +129,18 @@ class SimpleState:
 
 
 class Stack:
-    """The whole spike stack in-process: fake body, server, uvicorn, a client call helper."""
+    """The whole mind in-process: fake body, C1, server, uvicorn, client call helpers."""
 
-    def __init__(self, body: FakeBody | None = None, respawn_delay: float = 0.3):
+    def __init__(self, body: FakeBody | None = None, idle_s: float = 10_000.0):
         self.body = body or FakeBody()
-        self.calls = JsonlCallLog()
-        self._tmp = f".mcp-body-test-{uuid.uuid4().hex[:8]}.jsonl"
-        self.calls_file = JsonlCallLog(self._tmp)
-        server, self.impl = build_server(
+        self._tmp = f".mcp-body-test-{time.monotonic_ns()}.jsonl"
+        self.calls_file = JsonlLog(self._tmp)
+        server, self.impl, self.executor = build_mind(
             self.body,
             username="LastOrder01",
             call_log=self.calls_file,
-            poll_interval=0.05,
-            respawn_delay=respawn_delay,
-            start_poller=True,
+            tick_interval=0.25,
+            idle_s=idle_s,  # the watchdog has its own tests; keep it quiet here
         )
         app = server.streamable_http_app(stateless_http=True, streamable_http_path="/mcp")
         config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
@@ -161,14 +163,26 @@ class Stack:
         async with Client(streamable_http_client(self.url())) as client:
             return await coro_fn(client)
 
+    def runner(self, method: str, path: str, json_body: dict | None = None) -> httpx.Response:
+        return httpx.request(method, f"http://127.0.0.1:{self.port}{path}", json=json_body, timeout=30.0)
+
     def log_lines(self) -> list[dict]:
         with self.calls_file._lock:
-            return [json.loads(line) for line in open(self._tmp, encoding="utf-8")]
+            with open(self._tmp, encoding="utf-8") as fh:
+                return [json.loads(line) for line in fh if line.strip()]
+
+    def wait_until(self, predicate, timeout: float = 5.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(0.05)
+        raise AssertionError(f"condition not met within {timeout:.0f} s")
 
     def close(self) -> None:
         self.uvicorn.should_exit = True
         self.thread.join(timeout=5)
-        self.impl.stop_poller()
+        self.executor.stop()
         self.calls_file.close()
         import os
 
@@ -251,23 +265,25 @@ def test_check_say_accepts_plain_line() -> None:
     assert check_say("  Иду на север. ") == "Иду на север."
 
 
-# --- over MCP --------------------------------------------------------------------------
+# --- over MCP: the section-4 tool set --------------------------------------------------
 
 
-def test_tool_set_is_exactly_the_spike_five(stack: Stack) -> None:
+def test_tool_set_is_exactly_section_four(stack: Stack) -> None:
     names = stack.call(lambda c: c.list_tools())
-
-    def pick(tools):
-        return sorted(t.name for t in tools.tools)
-
-    assert pick(names) == ["act", "observe", "say", "stop", "wait_events"]
+    assert sorted(t.name for t in names.tools) == [
+        "act",
+        "observe",
+        "retire_stuck",
+        "say",
+        "stop",
+        "wait_events",
+    ]
 
 
 def test_act_over_mcp_returns_intent_id_and_reaches_body(stack: Stack) -> None:
-    stack.body.busy_flag = True
     result = stack.call(lambda c: c.call_tool("act", {"intent": "goto", "args": {"x": 5, "y": 64, "z": 5}}))
-    assert parse(result) == {"intent_id": 1, "busy": True}
-    assert stack.body.acts == [("goto", {"x": 5, "y": 64, "z": 5})]
+    assert parse(result) == {"intent_id": 1}
+    stack.wait_until(lambda: ("goto", {"x": 5, "y": 64, "z": 5}) in stack.body.acts)  # C1 applies it
 
 
 def test_act_command_is_rejected_over_mcp(stack: Stack) -> None:
@@ -275,7 +291,7 @@ def test_act_command_is_rejected_over_mcp(stack: Stack) -> None:
     assert "not available" in error_text(result)
     result = stack.call(lambda c: c.call_tool("act", {"intent": "chat", "args": {"text": "hi"}}))
     assert "not available" in error_text(result)
-    assert stack.body.acts == []
+    assert stack.body.acts == []  # rejected at the door, C1 never saw an intent
 
 
 def test_say_guards_over_mcp(stack: Stack) -> None:
@@ -315,7 +331,20 @@ def test_observe_filters_service_lines_and_plain_names(stack: Stack) -> None:
     assert obs["self"]["hp"] == 20.0
 
 
+# --- wait_events ------------------------------------------------------------------------
+
+
 def test_wait_events_timeout_and_event(stack: Stack) -> None:
+    # by timeout: nothing accumulates, the wait runs out
+    result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 0.3}))
+    assert parse(result) == {"type": "timeout", "timeout_s": 0.3}
+
+    # by event: a queued chat line is served first (T-024 review R2-1: one test, both paths)
+    stack.body.push_event("chat.line", "<LastOrder01> реплика")
+    result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0}))
+    assert parse(result) == {"type": "chat.line", "text": "<LastOrder01> реплика"}
+
+    # and again the timeout path once the queue is empty
     result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 0.3}))
     assert parse(result) == {"type": "timeout", "timeout_s": 0.3}
 
@@ -337,41 +366,64 @@ def test_wait_events_filters_service_and_formatting(stack: Stack) -> None:
     assert ev["text"] == "<Steve> дай oak_log"
 
 
-def test_damage_event_text_cleaned(stack: Stack) -> None:
+def test_damage_event_text_cleaned_with_plain_source(stack: Stack) -> None:
     stack.body.push_event("game.damage", "§cукусил zombie, держи minecraft:rotten_flesh")
     result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0}))
     ev = parse(result)
     assert ev["type"] == "game.damage"
     assert ev["text"] == "укусил zombie, держи rotten_flesh"
-
-    stack.body.push_event("chat.line", "<LastOrder01> реплика")
-    result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0}))
-    assert parse(result) == {"type": "chat.line", "text": "<LastOrder01> реплика"}
+    assert ev["source"] == "ent:zombie zombie"  # the hostile of the fake body, plain
 
 
-def test_death_event_then_single_respawn(stack: Stack) -> None:
+def test_wait_events_serves_accumulated_events_one_by_one(stack: Stack) -> None:
+    # events that piled up between waits are served in order, oldest first
+    stack.body.push_event("chat.line", "<Steve> первая")
+    stack.body.push_event("game.damage", "zombie hit")
+    first = parse(stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0})))
+    second = parse(stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0})))
+    assert first["text"] == "<Steve> первая"
+    assert second["type"] == "game.damage"
+
+
+# --- death and the runner endpoints -----------------------------------------------------
+
+
+def test_death_event_served_and_respawn_only_via_runner(stack: Stack) -> None:
     stack.body.set_state(hp=0.0)
     stack.body.chat = ["LastOrder01 was slain by Zombie"]
     result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0}))
-    assert parse(result)["type"] == "game.death"
-    assert "slain by Zombie" in parse(result)["text"]
-    deadline = time.monotonic() + 5.0
-    while stack.body.respawn_calls == 0 and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert stack.body.respawn_calls == 1
-    time.sleep(0.4)  # a second poll cycle must not respawn again
-    assert stack.body.respawn_calls == 1
+    death = parse(result)
+    assert death["type"] == "game.death"
+    assert "slain by Zombie" in death["text"]
+
+    # status carries the death for the runner (review P1-1), cause included
+    status = stack.runner("GET", "/runner/status").json()
+    assert status["dead"] is True and status["cause"] == "game"
+
+    # no auto-respawn (T-025: respawn is the runner's command), and act refuses while dead
+    time.sleep(0.6)
+    assert stack.body.respawn_calls == 0
+    result = stack.call(lambda c: c.call_tool("act", {"intent": "goto", "args": {"x": 1, "y": 64, "z": 1}}))
+    assert "dead" in error_text(result)
+
+    # the runner's respawn works; on the living body that follows, a 409 without action (P1-7)
+    assert stack.runner("POST", "/runner/respawn").status_code == 200
+    stack.wait_until(lambda: stack.body.respawn_calls == 1)
+    assert stack.runner("GET", "/runner/status").json()["alive"] is True
+    assert stack.runner("POST", "/runner/respawn").status_code == 409
+    time.sleep(0.3)
+    assert stack.body.respawn_calls == 1  # the 409 did not touch the body
 
 
 def test_death_logged_by_poller_without_wait_events(stack: Stack) -> None:
-    # The host orchestrator watches the JSONL log; a death must be visible there even if the
-    # agent never calls wait_events again (checker C-5). No client call in this test at all.
+    # The runner watches log.jsonl; a death must be visible there even if the agent never
+    # calls wait_events again (spike checker C-5). No client call in this test at all.
     stack.body.set_state(hp=0.0)
     stack.body.chat = ["LastOrder01 was killed"]
     deadline = time.monotonic() + 5.0
     entries: list[dict] = []
     while time.monotonic() < deadline:
-        entries = [e for e in stack.log_lines() if e.get("tool") == "event"]
+        entries = [e for e in stack.log_lines() if e.get("kind") == "death"]
         if entries:
             break
         time.sleep(0.05)
@@ -380,50 +432,68 @@ def test_death_logged_by_poller_without_wait_events(stack: Stack) -> None:
     assert isinstance(entries[0]["ts"], float)
 
 
-def test_respawn_retried_then_success(stack: Stack) -> None:
-    # A flaky bridge must not leave the body dead: one scripted failure, then success
-    # (review R1-4). One successful respawn per death still holds (P1-4).
-    stack.body.respawn_fail_times = 1
-    stack.body.set_state(hp=0.0)
-    stack.body.chat = ["LastOrder01 was slain by Zombie"]
-    deadline = time.monotonic() + 8.0
-    retry_lines: list[dict] = []
-    while time.monotonic() < deadline:
-        retry_lines = [e for e in stack.log_lines() if e.get("event", "").startswith("respawn.")]
-        if stack.body.respawn_calls >= 2 and retry_lines:
-            break
-        time.sleep(0.05)
-    assert stack.body.respawn_calls == 2  # one failed attempt + one success
-    assert [e["event"] for e in retry_lines] == ["respawn.retry"]
-    assert retry_lines[0]["attempt"] == 1
-    time.sleep(0.5)  # no more attempts after the success
-    assert stack.body.respawn_calls == 2
+def test_runner_birth_endpoint_arms_the_life_clock(stack: Stack) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    born = (datetime.now(timezone.utc) - timedelta(minutes=42)).isoformat()
+    response = stack.runner(
+        "POST", "/runner/birth", {"serial": 8, "born_at": born, "ttl_min": 45}
+    )
+    assert response.status_code == 200 and response.json()["armed"] is True
+    stack.wait_until(
+        lambda: any(e.get("event") == "life.expiring" for e in stack.log_lines()
+                    if e.get("kind") == "event")
+    )
+    result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0}))
+    assert parse(result)["type"] == "life.expiring"
+    # one arming per life (review R1-2): a second birth must not overwrite the serial
+    second = stack.runner("POST", "/runner/birth", {"serial": 666, "born_at": born, "ttl_min": 45})
+    assert second.status_code == 409
+    assert stack.runner("GET", "/runner/status").json()["serial"] == 8
+    # a bad payload is a 400, not a crash
+    assert stack.runner("POST", "/runner/birth", {"serial": "x"}).status_code == 400
 
 
-def test_respawn_gives_up_after_bound(stack: Stack) -> None:
-    stack.body.respawn_fail_times = 99  # the bridge never comes back
-    stack.body.set_state(hp=0.0)
-    stack.body.chat = ["LastOrder01 was slain by Zombie"]
-    deadline = time.monotonic() + 10.0
-    gave_up: list[dict] = []
-    while time.monotonic() < deadline:
-        gave_up = [e for e in stack.log_lines() if e.get("event") == "respawn.gave_up"]
-        if gave_up:
-            break
-        time.sleep(0.05)
-    assert gave_up and gave_up[0]["attempt"] == 3
-    time.sleep(0.5)  # bounded: no fourth attempt
-    assert stack.body.respawn_calls == 3
+# --- retire_stuck ------------------------------------------------------------------------
+
+
+def test_retire_stuck_refused_without_idle_signal(stack: Stack) -> None:
+    result = stack.call(lambda c: c.call_tool("retire_stuck", {}))
+    assert "idle signal" in error_text(result)
+
+
+def test_retire_stuck_requests_death_after_watchdog(stack: Stack) -> None:
+    class RecordingHive:
+        def __init__(self) -> None:
+            self.requests: list[tuple[int, str]] = []
+
+        def request_death(self, serial: int, cause: str) -> None:
+            self.requests.append((serial, cause))
+
+    hive = RecordingHive()
+    stack.executor._hive = hive
+    born = datetime.now().isoformat()
+    stack.runner("POST", "/runner/birth", {"serial": 7, "born_at": born, "ttl_min": 45})
+    # watchdog: idle past the threshold (set small for this stack)
+    stack.executor._idle_s = 0.5
+    stack.wait_until(lambda: stack.executor.retire_allowed)
+    result = stack.call(lambda c: c.call_tool("retire_stuck", {}))
+    assert parse(result) == {"requested": True, "serial": 7, "cause": "stuck"}
+    assert hive.requests == [(7, "stuck")]
+
+
+# --- the call log ------------------------------------------------------------------------
 
 
 def test_call_log_records_calls_and_rejections(stack: Stack) -> None:
     stack.call(lambda c: c.call_tool("say", {"text": " /kill"}))
     stack.call(lambda c: c.call_tool("say", {"text": "нормальная реплика"}))
     entries = stack.log_lines()
-    assert [e["ok"] for e in entries if e["tool"] == "say"] == [False, True]
-    rejected = entries[0]
-    assert rejected["error"] and rejected["t_end"] >= rejected["ts"]
-    ok_entry = entries[1]
+    says = [e for e in entries if e.get("tool") == "say"]
+    assert [e["ok"] for e in says] == [False, True]
+    rejected = says[0]
+    assert rejected["error"] and rejected["kind"] == "call"
+    ok_entry = says[1]
     assert "said" in ok_entry or ok_entry["tool"] == "say"
     # JSONL: every line parses (checked by json.loads above)
-    assert all({"ts", "tool", "args", "t_end", "ok"} <= set(e) for e in entries)
+    assert all({"ts", "kind"} <= set(e) for e in entries)
