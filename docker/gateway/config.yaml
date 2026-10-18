@@ -10,13 +10,26 @@
 # the subscription token stays in node-N (ADR-033).
 
 model_list:
+  # Each tier is listed twice: under the full litellm name and under the bare provider id.
+  # The litellm SDK strips the provider prefix when a custom api_base is set (verified live:
+  # a node's client sends model=qwen/qwen3.7-flash to the gateway), while OpenAI-style
+  # callers use the full string — the gateway answers to both with the same deployment.
+  #
   # tier `node`: the step model of a node harness
   - model_name: openrouter/qwen/qwen3.7-flash
     litellm_params:
       model: openrouter/qwen/qwen3.7-flash
       api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: qwen/qwen3.7-flash
+    litellm_params:
+      model: openrouter/qwen/qwen3.7-flash
+      api_key: os.environ/OPENROUTER_API_KEY
   # tier `smart`: Last Order, wills and network consolidation
   - model_name: openrouter/z-ai/glm-5.3-flash
+    litellm_params:
+      model: openrouter/z-ai/glm-5.3-flash
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: z-ai/glm-5.3-flash
     litellm_params:
       model: openrouter/z-ai/glm-5.3-flash
       api_key: os.environ/OPENROUTER_API_KEY

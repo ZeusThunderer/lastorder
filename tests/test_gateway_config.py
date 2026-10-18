@@ -40,7 +40,16 @@ class TestGatewayConfig:
     def test_provider_key_is_an_environment_reference(self):
         for model in GATEWAY_CONFIG["model_list"]:
             assert model["litellm_params"]["api_key"] == "os.environ/OPENROUTER_API_KEY"
-            assert model["litellm_params"]["model"] == model["model_name"]
+            # every name routes to the full litellm string of its tier
+            assert model["litellm_params"]["model"].startswith("openrouter/")
+
+    def test_each_tier_answers_to_full_and_bare_names(self):
+        """The SDK strips the provider prefix under a custom api_base; both forms must route."""
+        names = {m["model_name"] for m in GATEWAY_CONFIG["model_list"]}
+        for tier_model in ("LLM_NODE_MODEL", "LLM_SMART_MODEL"):
+            full = env_example_value(tier_model)
+            bare = full.split("/", 1)[1]
+            assert full in names and bare in names
 
     def test_master_key_and_database_are_environment_references(self):
         general = GATEWAY_CONFIG["general_settings"]

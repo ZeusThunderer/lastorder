@@ -59,7 +59,7 @@ def call(spec):
     except urllib.error.URLError as exc:
         sys.exit("gateway unreachable: %s" % exc)
 
-call(%r)
+call(_SPEC)
 '''
 
 
@@ -86,7 +86,7 @@ def run_in_gateway(spec: dict) -> dict:
         sys.exit(f"gateway_keys: no {COMPOSE_FILE} (run from the repo root)")
     proc = subprocess.run(
         ["docker", "compose", "-f", str(COMPOSE_FILE), "exec", "-T", SERVICE, "python", "-"],
-        input=RUNNER % (spec,),
+        input="_SPEC = " + repr(spec) + "\n" + RUNNER,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -102,9 +102,10 @@ def cmd_issue(args: argparse.Namespace) -> int:
         {"method": "POST", "path": "/key/generate",
          "body": build_issue_payload(args.alias, args.rpm, args.hourly_usd, args.models)}
     )
-    token = response.get("token") or response.get("key")
-    if not token:
-        sys.exit(f"gateway_keys: no token in the answer: {json.dumps(response)[:400]}")
+    # the usable virtual key is the sk-... string in `key`; `token` is the bare DB hash
+    token = response.get("key") or response.get("token")
+    if not token or not str(token).startswith("sk-"):
+        sys.exit(f"gateway_keys: no sk-... key in the answer: {json.dumps(response)[:400]}")
     print(f"key alias   : {response.get('key_alias', args.alias)}")
     print(f"rpm limit   : {response.get('rpm_limit', args.rpm)}")
     print(f"hourly budget: {response.get('max_budget', args.hourly_usd)} USD "
@@ -124,18 +125,23 @@ def cmd_revoke(args: argparse.Namespace) -> int:
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
-    response = run_in_gateway({"method": "GET", "path": "/key/info?size=1000", "body": None})
-    keys = response.get("keys", response if isinstance(response, list) else [])
-    if not keys:
+    tokens = run_in_gateway({"method": "GET", "path": "/key/list", "body": None}).get("keys", [])
+    if not tokens:
         print("no virtual keys")
         return 0
-    print(f"{'alias':16} {'spend, USD':>10} {'rpm':>4} {'$/h':>6}  key")
-    for entry in sorted(keys, key=lambda k: str(k.get("key_alias") or "")):
-        alias = entry.get("key_alias") or "-"
-        spend = entry.get("spend")
+    entries = []
+    for token in tokens:
+        info = run_in_gateway(
+            {"method": "GET", "path": f"/key/info?key={token}", "body": None}).get("info", {})
+        entries.append((token, info))
+    print(f"{'alias':16} {'spend, USD':>10} {'rpm':>4} {'$/h':>6}  {'reset at':20}  key")
+    for token, info in sorted(entries, key=lambda e: str(e[1].get("key_alias") or "")):
+        alias = info.get("key_alias") or "-"
+        spend = info.get("spend")
         spend = f"{float(spend):.4f}" if spend is not None else "-"
-        print(f"{alias:16} {spend:>10} {str(entry.get('rpm_limit') or '-'):>4} "
-              f"{str(entry.get('max_budget') or '-'):>6}  {entry.get('key', '-')}")
+        reset = str(info.get("budget_reset_at") or "-")[:19]
+        print(f"{alias:16} {spend:>10} {str(info.get('rpm_limit') or '-'):>4} "
+              f"{str(info.get('max_budget') or '-'):>6}  {reset:20}  {token[:8]}…")
     return 0
 
 

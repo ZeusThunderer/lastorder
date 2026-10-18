@@ -43,8 +43,11 @@ def fetch(since_s: float) -> dict:
     per_model = run_in_gateway({"method": "GET",
                                 "path": f"/global/spend/models?start_date={start}&end_date={end}",
                                 "body": None})
-    info = run_in_gateway({"method": "GET", "path": "/key/info?size=1000", "body": None})
-    return {"per_key": per_key, "per_model": per_model, "keys": info}
+    aliases = {}
+    for token in run_in_gateway({"method": "GET", "path": "/key/list", "body": None}).get("keys", []):
+        info = run_in_gateway({"method": "GET", "path": f"/key/info?key={token}", "body": None})
+        aliases[token] = (info.get("info") or {}).get("key_alias") or token[:8]
+    return {"per_key": per_key, "per_model": per_model, "keys": aliases}
 
 
 def _rows(payload, total_field, name_fields) -> list[tuple[str, float]]:
@@ -59,14 +62,8 @@ def _rows(payload, total_field, name_fields) -> list[tuple[str, float]]:
 
 
 def render(data: dict, since_s: float) -> str:
-    aliases = {}
-    for entry in data["keys"].get("keys", data["keys"] if isinstance(data["keys"], list) else []):
-        for field in ("key", "token", "api_key"):
-            if entry.get(field):
-                aliases[str(entry[field])] = entry.get("key_alias") or str(entry.get("key_alias") or "-")
-
     def named(row: tuple[str, float]) -> tuple[str, float]:
-        return aliases.get(row[0], row[0]), row[1]
+        return data["keys"].get(row[0], row[0]), row[1]
 
     key_rows = [named(r) for r in _rows(data["per_key"], "total_spend", ("api_key", "key", "token"))]
     model_rows = _rows(data["per_model"], "total_spend", ("model", "model_group"))
