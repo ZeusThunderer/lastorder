@@ -96,6 +96,7 @@ class NodeState:
     kill_reason: str | None = None  # "ttl" (deadline passed) | "stuck" (the node asked)
     kill_confirmed: bool = False  # the server answered a real kill
     kill_error: str | None = None  # last failure signature, to not spam the event log (R1-3)
+    dead: bool = False  # the body died (mark_dead or a confirmed kill); gates submit_will (T-028)
 
 
 class Lifecycle:
@@ -255,6 +256,30 @@ class Lifecycle:
         if (self._store.root / "nodes" / format_serial(serial) / "will.md").exists():
             raise AlreadyRetiredError(f"node {format_serial(serial)} is retired")
         raise UnknownNodeError(f"unknown node {format_serial(serial)}")
+
+    def mark_dead(self, serial: int) -> None:
+        """Mark the node's body dead — the death signal mind-N/the runner owes hive
+        (NETWORK.md section 3: `MIND -> |смерть, срок| HIVE`). The wiring of the caller is
+        T-027; until then this is the only setter besides a confirmed RCON kill. The mark
+        gates `submit_will` (T-028): a will session starts only for a dead sister."""
+        with self._lock:
+            node = self.require_node(serial)
+            if not node.dead:
+                node.dead = True
+                self._save()
+                self._log.event("life.dead_mark", {"serial": serial, "slot": node.slot})
+
+    def body_dead(self, serial: int) -> bool:
+        """True when hive knows this node's body is dead (the mark or a confirmed kill).
+
+        Unknown, retired and lost nodes answer False: their refusal comes from
+        `require_node`, not from a death ambiguity."""
+        with self._lock:
+            try:
+                node = self.require_node(serial)
+            except (UnknownNodeError, AlreadyRetiredError):
+                return False
+            return node.dead or node.kill_confirmed
 
     def request_death(self, serial: int, cause: str) -> None:
         if cause != CAUSE_STUCK:
