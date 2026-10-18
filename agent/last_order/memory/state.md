@@ -1,7 +1,10 @@
-# State — Last Order
+# State
 
-Rewritten at the end of each reflection session.
+Rewritten at every reflection (skills/reflect), never appended forever.
 
-**Current goal.** Get the first generations of nodes into the world.
+**Personal goal.** Not chosen yet: choose it in the first session and write it here and in
+`GOALS.md`.
 
-**Open threads.** None yet.
+**Where I am.** First session: not observed yet.
+
+**Open threads.** Read `inheritance()` first — the wills and terms of this line.

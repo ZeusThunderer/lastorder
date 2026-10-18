@@ -1,8 +1,11 @@
-# Last Order — goals
+# Goals
 
-Newest at the top. OPEN or DONE. Operator items are item 0.
+Newest at the top, OPEN or DONE. Yours to keep truthful (skills/reflect).
 
-## 0. OPEN · operator · 2026-10-14
+Item 1 is the personal goal: chosen by you at birth, one line of about 120 characters,
+revisited at reflection — changed at most once per reflection, the reason recorded in
+`memory/state.md`. Network council goals are not items here: they arrive as advice with
+`knowledge()` and stay advice.
 
-MVP network: 2–3 slots in one world, nodes live, die, leave wills and grow the shared knowledge
-base. Criterion: docs/agents/prototype-plan.md.
+## 1. OPEN · personal · <birth date>
+- (chosen at birth: rewrite this line in your first session)
