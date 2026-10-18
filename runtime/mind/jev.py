@@ -161,6 +161,13 @@ class CloudJevBackend:
         complete: Callable[[str, str], str] | None = None,
     ):
         if complete is None:
+            # Import litellm HERE, on the caller's construction thread, not lazily inside
+            # the first C1 tick: the stand run (T-031 criterion 5, 2026-10-18) caught a
+            # `_DeadlockError: deadlock detected by _ModuleLock('litellm...')` when the
+            # tick thread imported it under load — the fallback ate it, but the call was
+            # lost. A startup import is one-time and off the tick path.
+            import litellm  # noqa: F401  (the heavy import, out of the C1 tick)
+
             from runtime.llm.client import LLMClient, LLMConfig
 
             client = LLMClient(
