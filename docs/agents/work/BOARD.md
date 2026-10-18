@@ -30,9 +30,9 @@
 | T-024 | Спайк харнесса — узел 15 мин в OpenCode и ZCode через MCP тела | E2 | done | critical | z/T-024-harness-spike |
 | T-025 | MCP тела в mind-N — исполнитель C1, события, сторож, детектор смерти | E2 | done | critical | z/T-025-mcp-body |
 | T-026 | Шлюз LLM — LiteLLM proxy, виртуальные ключи узлов, учёт и потолки | E2 | done | normal | z/T-026-llm-gateway |
-| T-027 | Контейнер узла node-N — песочница, раннер с адаптерами харнесса, архив | E2 | queued | critical | z/T-027-node-container |
-| T-028 | MCP сети в hive — знания, предложения, Мисака-нет, завещание | E2 | ready | critical | z/T-028-mcp-hive |
+| T-027 | Контейнер узла node-N — песочница, раннер с адаптерами харнесса, архив | E2 | ready | critical | z/T-027-node-container |
+| T-028 | MCP сети в hive — знания, предложения, Мисака-нет, завещание | E2 | done | critical | z/T-028-mcp-hive |
 | T-029 | Шаблон рабочего места сестры — ядро, правила, стартовые скилы | E2 | done | critical | z/T-029-sister-instructions |
-| T-030 | Last Order — агент-администратор сети по событиям | E3 | queued | critical | z/T-030-last-order-agent |
+| T-030 | Last Order — агент-администратор сети по событиям | E3 | ready | critical | z/T-030-last-order-agent |
 | T-031 | Jev в C1 по текстовой политике сестры | E3 | ready | normal | z/T-031-jev-policy |
 | T-032 | Отчёт MVP и 2-часовой прогон сети агентов | E3 | queued | normal | z/T-032-mvp-run |
