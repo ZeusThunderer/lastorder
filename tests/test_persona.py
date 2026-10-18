@@ -134,10 +134,12 @@ def test_core_template_is_marked_read_only():
 def test_core_renders_for_both_presets(key, name):
     rendered = core(key)
     assert not re.search(r"\{[a-z_]+\}", rendered)  # no empty placeholders left
-    assert "<!--" not in rendered  # the READ-ONLY marker comment is stripped
+    assert "<!--" not in rendered  # the provenance comment is stripped
+    assert "READ-ONLY" in rendered  # the marker itself stays visible to the born node
     assert name in rendered
     assert preset(key).speech_style in rendered
     assert "a quirk" in rendered
+    assert "Never use outside knowledge" in rendered  # task1 wording kept verbatim
 
 
 def test_core_traits_are_words_not_numbers():
