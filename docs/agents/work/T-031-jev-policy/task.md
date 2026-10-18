@@ -2,7 +2,7 @@
 id: T-031
 title: Jev в C1 по текстовой политике сестры
 stage: E3
-status: queued
+status: ready
 criticality: normal
 branch: z/T-031-jev-policy
 created: 2026-10-17
