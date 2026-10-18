@@ -487,16 +487,22 @@ class Executor:
         One arming per life (review R1-2): the endpoint is reachable from the agent's
         sandbox, and an overwrite would let a node aim its own retire_stuck at another
         sister's serial — hive does not check the caller. While a birth is armed, a second
-        request is a refusal; a fresh life (after the respawn cleared the clock) may arm."""
-        if self._dead:
-            raise RuntimeError("birth refused: the body is still dead")
-        if self._birth is not None:
-            raise RuntimeError(
-                f"birth refused: the life clock is already armed for serial {self._birth.serial}"
+        request is a refusal; a fresh life (after the respawn cleared the clock) may arm.
+        The whole check-and-arm runs under the body lock, so a birth racing the respawn's
+        critical section cannot arm onto the dying life nor be wiped by _after_respawn
+        (checker C-1, round 2)."""
+        with self.body_lock:
+            if self._dead:
+                raise RuntimeError("birth refused: the body is still dead")
+            if self._birth is not None:
+                raise RuntimeError(
+                    f"birth refused: the life clock is already armed for serial {self._birth.serial}"
+                )
+            self._birth = BirthRecord(serial=int(serial), born_at=str(born_at), ttl_min=int(ttl_min))
+            self._life_warned = False
+            self._log.record(
+                "event", event="birth.armed", serial=int(serial), ttl_min=int(ttl_min)
             )
-        self._birth = BirthRecord(serial=int(serial), born_at=str(born_at), ttl_min=int(ttl_min))
-        self._life_warned = False
-        self._log.record("event", event="birth.armed", serial=int(serial), ttl_min=int(ttl_min))
         return {"armed": True, "serial": int(serial)}
 
     # -- the life clock (life.expiring, 3 min before ttl_min) ------------------------------
