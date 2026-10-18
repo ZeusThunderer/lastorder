@@ -633,6 +633,17 @@ class KnowledgeStore:
 
     # --- decisions, skills and hive's own layers (T-028) ---------------------------------
 
+    def _layer_path(self, raw: Path | str) -> Path:
+        """Resolve one layer path against the root; it must stay inside `base/`."""
+        path = Path(raw)
+        if not path.is_absolute():
+            path = self.root / path
+        resolved = path.resolve()
+        base = (self.root / "base").resolve()
+        if resolved == base or not resolved.is_relative_to(base):
+            raise StoreError(f"layer write outside base/: {raw}")
+        return resolved
+
     def _layer_files(self, files: Mapping[Path, str] | None) -> dict[Path, str]:
         """Caller files of a layer write: base/-relative paths only, plain text values.
 
@@ -640,18 +651,11 @@ class KnowledgeStore:
         helpers may touch stays inside `base/` — records of nodes and the `nodes/` tree are
         out of reach by construction, so the personality core can never ride this path.
         """
-        base = (self.root / "base").resolve()
         out: dict[Path, str] = {}
         for raw, text in (files or {}).items():
-            path = Path(raw)
-            if not path.is_absolute():
-                path = self.root / path
-            resolved = path.resolve()
-            if resolved == base or not resolved.is_relative_to(base):
-                raise StoreError(f"layer write outside base/: {raw}")
             if not isinstance(text, str):
                 raise StoreError(f"layer write {raw}: expected text")
-            out[resolved] = text
+            out[self._layer_path(raw)] = text
         return out
 
     def apply_decision(
@@ -764,6 +768,19 @@ class KnowledgeStore:
             raise StoreError("layer commit: message is required")
         with self._locked():
             self._commit_op(message, self._layer_files(files))
+
+    def append_layer(self, relpath: Path | str, text: str, *, message: str) -> None:
+        """Append `text` to one base/ layer file as one locked commit. The chronicle
+        appends read-modify-write: the read and the write share one hold of the lock,
+        so a concurrent commit can never interleave (T-028 checker C-5)."""
+        if not isinstance(message, str) or not message.strip():
+            raise StoreError("layer commit: message is required")
+        if not isinstance(text, str):
+            raise StoreError("layer append: expected text")
+        with self._locked():
+            path = self._layer_path(relpath)
+            old = path.read_text(encoding="utf-8") if path.exists() else ""
+            self._commit_op(message, {path: old + text})
 
     # --- catalog and goals -----------------------------------------------------------------
 

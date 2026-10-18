@@ -15,10 +15,12 @@ wrappers, every decision stays in the service and the store):
 Identity is the key, never a bare header (plan review P1-1/P1-2): `X-Node-Key` maps a
 virtual key to a SLOT (env `HIVE_MCP_NODE_KEYS`, `LastOrder01=sk-a;LastOrder02=sk-b`) and
 the serial is the slot's current living node from `Lifecycle` — a rebirth in the slot
-moves the key to the new number, a dead or lost one is unreachable. The runner header
-`X-Runner-Node`, when present, is a cross-check against the key's serial; a mismatch is
-a refusal. Last Order authenticates with `HIVE_MCP_LO_KEY`. The docker network is the
-boundary (ADR-033); keys are the names inside it.
+moves the key to the new number, while a dead-but-not-yet-retired node stays reachable:
+that is exactly whose will session `submit_will` serves. Retired and lost nodes are out
+of `alive()` and unreachable. The runner header `X-Runner-Node`, when present, is a
+cross-check against the key's serial; a mismatch is a refusal. Last Order authenticates
+with `HIVE_MCP_LO_KEY`. The docker network is the boundary (ADR-033); keys are the names
+inside it.
 
 `submit_will` runs only in the will session: the runner marks it with
 `X-Runner-Session: will` after the death, AND hive must already know the body is dead
@@ -41,7 +43,7 @@ from mcp.server.mcpserver.exceptions import ToolError as SdkToolError
 
 from runtime.comms.schema import MSG_MAX_CHARS
 from runtime.hive.client import (
-    _entry_to_json,
+    entry_to_json,
     inheritance_to_json,
     message_to_json,
     slice_to_json,
@@ -190,7 +192,7 @@ class HiveMcp:
                     continue
                 claim = _norm(record.claim)
                 if all(token in claim for token in tokens):
-                    matched.append(_entry_to_json(record.to_entry()))
+                    matched.append(entry_to_json(record.to_entry()))
                 if len(matched) >= MATCHED_MAX:
                     break
             out["matched"] = matched

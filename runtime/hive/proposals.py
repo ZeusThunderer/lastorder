@@ -96,9 +96,12 @@ def parse_unified_diff(diff: str) -> tuple[Hunk, ...]:
     """Structure-check one unified diff against the common instructions file.
 
     Hunks carry ' ', '-' and '+' lines; `--- `/`+++ ` headers may only name
-    `base/instructions.md`. Anything else — another path, the personality core, a bare
-    `\\`-marker line, no hunks at all — is a ProposalError, so a poisoned diff dies at
-    submit time and never reaches a decision."""
+    `base/instructions.md` and only stand before the first @@ (the file-header
+    position). Anything else — another path, the personality core, a header pair after
+    hunk content (a second file of a multi-file diff), a bare `\\`-marker line, no
+    hunks at all — is a ProposalError, so a poisoned diff dies at submit time and never
+    reaches a decision. A lone `--- `-looking line inside a hunk stays what GNU patch
+    reads it as: content."""
 
     if not isinstance(diff, str) or not diff.strip():
         raise ProposalError("instructions diff: empty")
@@ -115,27 +118,38 @@ def parse_unified_diff(diff: str) -> tuple[Hunk, ...]:
             )
         old_lines, new_lines = [], []
 
-    for raw in diff.splitlines():
+    raw_lines = diff.splitlines()
+    for index, raw in enumerate(raw_lines):
         head = HUNK_HEAD.match(raw)
         if head:
             finish_hunk()
             start = int(head.group(1))
             continue
         file_line = DIFF_FILE.match(raw)
-        if file_line and not old_lines and not new_lines:
-            path = _diff_path(file_line.group(2))
-            if path == "/dev/null":
-                continue
-            if path not in INSTRUCTIONS_NAMES:
-                if path == CORE_HINT or "agent/" in path or "prompt_template" in path:
+        if file_line:
+            if start < 0:
+                path = _diff_path(file_line.group(2))
+                if path == "/dev/null":
+                    continue
+                if path not in INSTRUCTIONS_NAMES:
+                    if path == CORE_HINT or "agent/" in path or "prompt_template" in path:
+                        raise ProposalError(
+                            f"instructions diff: {path} is outside the common instructions; "
+                            "the personality core is operator-only (ADR-034)"
+                        )
                     raise ProposalError(
-                        f"instructions diff: {path} is outside the common instructions; "
-                        "the personality core is operator-only (ADR-034)"
+                        f"instructions diff: only {INSTRUCTIONS_REL} is editable, not {path}"
                     )
+                continue
+            # Inside or after a hunk: a ---/+++ PAIR is a second file's header (a
+            # multi-file diff), not content — refuse it instead of swallowing it
+            # as deletion and addition lines (checker C-3).
+            following = raw_lines[index + 1] if index + 1 < len(raw_lines) else ""
+            if DIFF_FILE.match(following) and following[:3] != raw[:3]:
                 raise ProposalError(
-                    f"instructions diff: only {INSTRUCTIONS_REL} is editable, not {path}"
+                    "instructions diff: a ---/+++ header stands after hunk content — "
+                    f"multi-file diffs are not accepted (only {INSTRUCTIONS_REL})"
                 )
-            continue
         if start < 0:
             raise ProposalError("instructions diff: content before the first @@ hunk")
         if raw.startswith(" "):
@@ -558,19 +572,16 @@ class CommonLayers:
 
     def append_chronicle(self, text: str) -> str:
         """Append one entry to `base/chronicle.md` — the log the Telegram channel of the
-        chronicle will publish (ADR-030). One entry, one commit."""
+        chronicle will publish (ADR-030). One entry, one commit; the read-modify-write
+        runs inside the store's own lock (`append_layer`, checker C-5)."""
         if not isinstance(text, str) or not text.strip():
             raise ProposalError("chronicle: expected a non-empty text")
         entry = " ".join(text.split())
         if len(entry) > CHRONICLE_MAX_CHARS:
             raise ProposalError(f"chronicle: longer than {CHRONICLE_MAX_CHARS} chars")
-        path = Path("base/chronicle.md")
-        current = self._store.root / path
-        old = current.read_text(encoding="utf-8") if current.exists() else ""
         line = f"- {self._now()} — {entry}\n"
-        self._store.commit_layer(
-            f"chronicle: {entry[:CHRONICLE_LINE_SNIPPET]}",
-            {path: old + line},
+        self._store.append_layer(
+            Path("base/chronicle.md"), line, message=f"chronicle: {entry[:CHRONICLE_LINE_SNIPPET]}"
         )
         return line
 

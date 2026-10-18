@@ -278,6 +278,11 @@ def test_instructions_reject_keeps_the_file(book: Book) -> None:
         ("@@ -1 +1 @@\n-один\n+два\n\\ No newline at end of file\n", "cannot parse"),
         ("--- a/base/instructions.md\n+++ b/base/instructions.md\n", "no @@ hunks"),
         ("просто текст без хунков\n", "content before"),
+        (
+            "--- a/base/instructions.md\n+++ b/base/instructions.md\n@@ -1 +1 @@\n-старое\n+новое\n"
+            "--- a/base/goals.md\n+++ b/base/goals.md\n@@ -1 +1 @@\n-x\n+y\n",
+            "multi-file diffs are not accepted",
+        ),
         ("", "empty"),
     ],
 )
@@ -308,6 +313,18 @@ def test_unified_diff_roundtrip_on_creation() -> None:
     )
     hunks = parse_unified_diff(diff)
     assert apply_unified_diff("", hunks) == "первая строка\nвторая\n"
+
+
+def test_header_looking_content_inside_a_hunk_stays_content() -> None:
+    # A removed line that itself starts with "--" renders as "--- x" inside the hunk;
+    # GNU patch reads that as content, and so does this parser (checker C-3 keeps
+    # the refusal for real header PAIRS only).
+    diff = (
+        "--- a/base/instructions.md\n+++ b/base/instructions.md\n"
+        "@@ -1,2 +1 @@\n строка\n--- два дефиса\n"
+    )
+    hunks = parse_unified_diff(diff)
+    assert hunks[0].old_lines == ("строка", "-- два дефиса")
 
 
 # --- the store's new surface ----------------------------------------------------------------
