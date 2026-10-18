@@ -84,12 +84,22 @@ def mcp_summary(entries: list[dict]) -> dict:
     errors: dict[str, int] = {}
     says: list[str] = []
     durations: dict[str, list[float]] = {}
+    gaps: list[float] = []
+    prev_end: float | None = None
     for e in entries:
         tool = str(e.get("tool", "?"))
+        if tool == "event":
+            continue  # poller-side lines (death, respawn retries), not agent calls
         by_tool[tool] = by_tool.get(tool, 0) + 1
-        durations.setdefault(tool, []).append(
-            float(e.get("t_end", e.get("ts", 0))) - float(e.get("ts", 0))
-        )
+        ts = float(e.get("ts", 0) or 0)
+        t_end = float(e.get("t_end", ts) or ts)
+        durations.setdefault(tool, []).append(t_end - ts)
+        # review R1-1: the gap from the previous call's end to this call's start is the
+        # agent/harness latency — a wait_events DURATION is waiting, not latency, and stays
+        # outside these gaps by construction.
+        if prev_end is not None and ts > prev_end:
+            gaps.append(ts - prev_end)
+        prev_end = t_end
         if tool == "wait_events":
             timeout = (e.get("args") or {}).get("timeout_s")
             if isinstance(timeout, (int, float)):
@@ -119,6 +129,9 @@ def mcp_summary(entries: list[dict]) -> dict:
         },
         "act_to_effect_ms": {"p50": pct(effect_ms, 0.5), "p95": pct(effect_ms, 0.95), "n": len(effect_ms),
                              "note": "resolution ~200 ms (the 5 Hz burst after act)"},
+        "turn_gap_s": {"p50": pct(gaps, 0.5), "p95": pct(gaps, 0.95), "n": len(gaps),
+                       "note": "idle between consecutive MCP calls (t_end -> next ts): "
+                               "model+harness latency, waiting excluded"},
         "tool_duration_ms": tool_durations,
         "rejections": errors,
         "say_quotes": says,

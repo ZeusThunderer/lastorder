@@ -35,14 +35,18 @@ services:
     mem_limit: 2g
     working_dir: /workplace
     environment:
-      # opencode: the node model straight from OpenRouter for the spike (the gateway is T-026)
-      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      # opencode: the node model straight from OpenRouter for the spike (the gateway is T-026).
+      # `:-` defaults keep the file interpolable without any secrets — the task's plain
+      # `up -d mc-server body-1 mind-1` must work in a clean env (review R1-3); spike.sh
+      # passes the real values when it starts a harness profile.
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       SPIKE_MINUTES: "${SPIKE_MINUTES:-15}"
       SPIKE_MODEL: "${SPIKE_MODEL:-openrouter/qwen/qwen3.7-flash}"
     command: ["run_opencode.sh"]
     volumes:
       - type: bind
-        source: ${SPIKE_RUN_DIR:?set SPIKE_RUN_DIR to the throwaway workplace dir}
+        # default keeps interpolation alive; spike.sh always sets the real throwaway dir
+        source: ${SPIKE_RUN_DIR:-./spike-workplace}
         target: /workplace
     restart: "no"
     profiles: ["opencode"]
@@ -58,7 +62,8 @@ services:
     environment:
       # The GLM Coding Plan key: the zcode-harness entrypoint renders it into the personal
       # provider config (~/.zcode/v2, tmpfs — never persists, never enters the image).
-      ZAI_API_KEY: "${ZCODE_API_KEY}"
+      # `:-` default: interpolation without secrets (review R1-3).
+      ZAI_API_KEY: "${ZCODE_API_KEY:-}"
       ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"
       ZCODE_MODE: yolo
       ZCODE_MODEL_RETRY_MAX_RETRIES: "3"
@@ -68,7 +73,7 @@ services:
     command: ["bash", "/usr/local/bin/run_zcode.sh"]
     volumes:
       - type: bind
-        source: ${SPIKE_RUN_DIR:?set SPIKE_RUN_DIR to the throwaway workplace dir}
+        source: ${SPIKE_RUN_DIR:-./spike-workplace}
         target: /workspace
     read_only: true
     tmpfs:

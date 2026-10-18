@@ -43,6 +43,7 @@ class FakeBody:
         self.acts: list[tuple[str, dict]] = []
         self.busy_flag = False
         self.respawn_calls = 0
+        self.respawn_fail_times = 0
         self._events: list[Event] = []
         self._seq = 0
 
@@ -95,6 +96,9 @@ class FakeBody:
 
     def respawn(self, timeout: float = 60.0, poll: float = 1.0):
         self.respawn_calls += 1
+        if self.respawn_fail_times > 0:  # scripted bridge failures (review R1-4 tests)
+            self.respawn_fail_times -= 1
+            raise RuntimeError(f"scripted respawn failure #{self.respawn_calls}")
         self.set_state(hp=20.0)
 
 
@@ -315,6 +319,31 @@ def test_wait_events_timeout_and_event(stack: Stack) -> None:
     result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 0.3}))
     assert parse(result) == {"type": "timeout", "timeout_s": 0.3}
 
+
+def test_wait_events_filters_service_and_formatting(stack: Stack) -> None:
+    # uc bookkeeping with the service flag: never delivered, wait runs to its timeout
+    stack.body.push_event("chat.line", "§7[Alto Clef]§r finished @get 1", service=True)
+    result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 1.0}))
+    assert parse(result)["type"] == "timeout"
+    # the same service line WITHOUT the flag is dropped by the text cleaner too
+    stack.body.push_event("chat.line", "§7[Alto Clef]§r finished @get 1")
+    result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 1.0}))
+    assert parse(result)["type"] == "timeout"
+    # a player line arrives cleaned: no § codes, no minecraft: namespace (plain mode)
+    stack.body.push_event("chat.line", "§a<Steve> дай minecraft:oak_log")
+    result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0}))
+    ev = parse(result)
+    assert ev["type"] == "chat.line"
+    assert ev["text"] == "<Steve> дай oak_log"
+
+
+def test_damage_event_text_cleaned(stack: Stack) -> None:
+    stack.body.push_event("game.damage", "§cукусил zombie, держи minecraft:rotten_flesh")
+    result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0}))
+    ev = parse(result)
+    assert ev["type"] == "game.damage"
+    assert ev["text"] == "укусил zombie, держи rotten_flesh"
+
     stack.body.push_event("chat.line", "<LastOrder01> реплика")
     result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0}))
     assert parse(result) == {"type": "chat.line", "text": "<LastOrder01> реплика"}
@@ -349,6 +378,42 @@ def test_death_logged_by_poller_without_wait_events(stack: Stack) -> None:
     assert entries and entries[0]["event"] == "game.death"
     assert "was killed" in entries[0]["text"]
     assert isinstance(entries[0]["ts"], float)
+
+
+def test_respawn_retried_then_success(stack: Stack) -> None:
+    # A flaky bridge must not leave the body dead: one scripted failure, then success
+    # (review R1-4). One successful respawn per death still holds (P1-4).
+    stack.body.respawn_fail_times = 1
+    stack.body.set_state(hp=0.0)
+    stack.body.chat = ["LastOrder01 was slain by Zombie"]
+    deadline = time.monotonic() + 8.0
+    retry_lines: list[dict] = []
+    while time.monotonic() < deadline:
+        retry_lines = [e for e in stack.log_lines() if e.get("event", "").startswith("respawn.")]
+        if stack.body.respawn_calls >= 2 and retry_lines:
+            break
+        time.sleep(0.05)
+    assert stack.body.respawn_calls == 2  # one failed attempt + one success
+    assert [e["event"] for e in retry_lines] == ["respawn.retry"]
+    assert retry_lines[0]["attempt"] == 1
+    time.sleep(0.5)  # no more attempts after the success
+    assert stack.body.respawn_calls == 2
+
+
+def test_respawn_gives_up_after_bound(stack: Stack) -> None:
+    stack.body.respawn_fail_times = 99  # the bridge never comes back
+    stack.body.set_state(hp=0.0)
+    stack.body.chat = ["LastOrder01 was slain by Zombie"]
+    deadline = time.monotonic() + 10.0
+    gave_up: list[dict] = []
+    while time.monotonic() < deadline:
+        gave_up = [e for e in stack.log_lines() if e.get("event") == "respawn.gave_up"]
+        if gave_up:
+            break
+        time.sleep(0.05)
+    assert gave_up and gave_up[0]["attempt"] == 3
+    time.sleep(0.5)  # bounded: no fourth attempt
+    assert stack.body.respawn_calls == 3
 
 
 def test_call_log_records_calls_and_rejections(stack: Stack) -> None:

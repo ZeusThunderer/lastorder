@@ -34,7 +34,7 @@ from mcp.server.mcpserver.exceptions import ToolError as SdkToolError
 
 from runtime.game.py4j_body import LEVERS
 from runtime.lastorder.death import DeathDetector
-from runtime.perception.chat import clean_chat
+from runtime.perception.chat import clean_chat, is_service_line, strip_formatting
 from runtime.perception.translate import Perception
 
 log = logging.getLogger("mcp_body")
@@ -48,6 +48,7 @@ POLL_INTERVAL_S = 1.0
 ACT_BURST_INTERVAL_S = 0.2  # after each act: poll ~5 Hz for 5 s to time "act -> effect" (P2-4)
 ACT_BURST_SPAN_S = 5.0
 RESPAWN_DELAY_S_DEFAULT = 45.0  # the will session needs time to react to the death event
+RESPAWN_MAX_ATTEMPTS = 3  # bounded respawn retries, then the body stays dead (review R1-4)
 ITEM_RE = re.compile(r"^[a-z0-9_]+$")
 NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,32}$")
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -330,9 +331,21 @@ class BodyMcp:
         self._dead = False
         self._respawn_at: float | None = None
         self._respawned_for_death = False
+        self._respawn_attempts = 0
         self._pending_act: dict[str, Any] | None = None
         self._stop_event = threading.Event()
         self._poll_thread: threading.Thread | None = None
+
+    # -- event text (review R1-2) -----------------------------------------------------
+
+    def _clean_event_text(self, raw: Any) -> str | None:
+        """Event text fit for the agent — the same cleaning observe applies to chat:
+        service lines dropped, `§` codes stripped, `minecraft:` ids normalized; text that
+        cleans to nothing is not delivered. Returns None for "drop it"."""
+        text = str(raw or "")
+        if is_service_line(text):
+            return None
+        return self._perception.scrub(strip_formatting(text)).strip() or None
 
     # -- lifecycle ------------------------------------------------------------------
 
@@ -368,10 +381,14 @@ class BodyMcp:
             self._events_watermark = idx
             payload = dict(event.payload or {})
             if event.type == "chat.line" and not payload.get("service"):
-                self._emit_event("chat.line", text=str(payload.get("text", "")))
+                text = self._clean_event_text(payload.get("text"))
+                if text is not None:  # empty/service-looking chat never reaches the agent
+                    self._emit_event("chat.line", text=text)
             elif event.type == "game.damage" and not payload.get("service"):
                 self._last_damage_at = self._clock()
-                self._emit_event("game.damage", text=str(payload.get("text", "")))
+                text = self._clean_event_text(payload.get("text"))
+                damage: dict[str, Any] = {} if text is None else {"text": text}
+                self._emit_event("game.damage", **damage)
             # server.info and game.event are uc bookkeeping: dropped (ADR-037)
 
         state = self._body.state()
@@ -385,13 +402,17 @@ class BodyMcp:
             self._dead = True
             self._respawn_at = self._clock() + self._respawn_delay
             self._respawned_for_death = False
+            self._respawn_attempts = 0
             self._pending_act = None
-            self._emit_event("game.death", text=death.text)
+            # The death event always fires (it drives the will and the respawn); its text
+            # gets the same cleaning as chat (review R1-2).
+            death_text = self._clean_event_text(death.text) or "game.death"
+            self._emit_event("game.death", text=death_text)
             # Log the death at detection time, not only when a wait_events call delivers it:
             # the host orchestrator watches this file (a death must never be missed even if
             # the agent never waits again — CLAUDE.md: no death without a will).
             self._calls.record(
-                {"ts": time.time(), "tool": "event", "event": "game.death", "text": death.text}
+                {"ts": time.time(), "tool": "event", "event": "game.death", "text": death_text}
             )
 
         if self._dead and state.in_game and hp > 0.0:
@@ -402,12 +423,31 @@ class BodyMcp:
             and not self._respawned_for_death
             and self._clock() >= self._respawn_at
         ):
-            self._respawned_for_death = True  # exactly one respawn per death (review P1-4)
-            self._respawn_at = None
             try:
                 self._body.respawn()
-            except Exception as exc:
-                log.warning("respawn failed: %s: %s", type(exc).__name__, exc)
+                self._respawned_for_death = True  # exactly one respawn per death (P1-4)
+                self._respawn_at = None
+            except Exception as exc:  # a failed respawn must not leave the body dead
+                # forever with no trace (review R1-4): retry with a bound, log every miss.
+                self._respawn_attempts += 1
+                log.warning(
+                    "respawn failed (attempt %d): %s: %s", self._respawn_attempts, type(exc).__name__, exc
+                )
+                self._calls.record(
+                    {
+                        "ts": time.time(),
+                        "tool": "event",
+                        "event": "respawn.retry"
+                        if self._respawn_attempts < RESPAWN_MAX_ATTEMPTS
+                        else "respawn.gave_up",
+                        "attempt": self._respawn_attempts,
+                    }
+                )
+                if self._respawn_attempts >= RESPAWN_MAX_ATTEMPTS:
+                    self._respawned_for_death = True  # stop trying; the body stays dead
+                    self._respawn_at = None
+                else:
+                    self._respawn_at = self._clock() + self._respawn_delay
 
         busy = bool(self._body.busy())
         if self._pending_act is not None:
