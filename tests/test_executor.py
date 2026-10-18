@@ -315,7 +315,7 @@ def test_flee_under_low_hp_then_return_to_intent() -> None:
         # damage: hp is critical, a hostile 2 m away -> the chain yields, a flee goto runs
         rig.body.set_state(hp=3.0)
         rig.body.hostiles = [
-            EntityInfo(kind="hostile", name="minecraft:zombie", dist_m=2.0, pos=(2, 64, 0))
+            EntityInfo(kind="zombie", name="minecraft:zombie", dist_m=2.0, pos=(2, 64, 0))
         ]
         rig.body.push_event("game.damage", "zombie hit")
         rig.tick()
@@ -333,7 +333,7 @@ def test_flee_under_low_hp_then_return_to_intent() -> None:
 
         # the hostile moved: the next free tick re-aims the flee at a new target
         rig.body.hostiles = [
-            EntityInfo(kind="hostile", name="minecraft:zombie", dist_m=2.0, pos=(0, 64, 4))
+            EntityInfo(kind="zombie", name="minecraft:zombie", dist_m=2.0, pos=(0, 64, 4))
         ]
         rig.tick()
         reaim = [a for a in rig.body.acts if a[0] == "goto" and a[1] != {"x": 20, "y": 64, "z": 20}]
@@ -362,7 +362,7 @@ def test_fight_when_hostile_in_reach() -> None:
     try:
         rig.body.set_state(hp=15.0)
         rig.body.hostiles = [
-            EntityInfo(kind="hostile", name="minecraft:zombie", dist_m=2.5, pos=(3, 64, 1))
+            EntityInfo(kind="zombie", name="minecraft:zombie", dist_m=2.5, pos=(3, 64, 1))
         ]
         rig.body.push_event("game.damage", "zombie hit")
         rig.tick()
@@ -377,7 +377,7 @@ def test_damage_event_text_and_source_are_plain() -> None:
     rig = Rig()
     try:
         rig.body.hostiles = [
-            EntityInfo(kind="hostile", name="minecraft:zombie", dist_m=2.0, pos=(2, 64, 0))
+            EntityInfo(kind="zombie", name="minecraft:zombie", dist_m=2.0, pos=(2, 64, 0))
         ]
         rig.body.push_event("game.damage", "§cукусил minecraft:zombie")
         rig.body.push_event("chat.line", "§7[Alto Clef]§r finished @get 1")
@@ -661,7 +661,7 @@ def test_c1_maneuvers_and_py4j_errors_land_in_the_log(tmp_path) -> None:
     try:
         rig.body.set_state(hp=3.0)
         rig.body.hostiles = [
-            EntityInfo(kind="hostile", name="minecraft:zombie", dist_m=2.0, pos=(2, 64, 0))
+            EntityInfo(kind="zombie", name="minecraft:zombie", dist_m=2.0, pos=(2, 64, 0))
         ]
         rig.body.push_event("game.damage", "zombie hit")
         rig.tick()  # a flee maneuver runs
@@ -715,3 +715,24 @@ def test_run_loop_survives_a_broken_tick(tmp_path) -> None:
 def test_bad_tick_interval_is_a_startup_error() -> None:
     with pytest.raises(ValueError, match="1-4 Hz"):
         Rig(tick_interval=2.0)
+
+
+def test_nearest_hostile_matches_real_uc_types() -> None:
+    # uc reports the entity TYPE id ("zombie", "cow", "item"), never a hostility flag
+    # (Py4jEntryPoint.getEntitiesInfo); the threat source must match those real values.
+    rig = Rig()
+    try:
+        from runtime.mind.executor import HOSTILE_TYPES
+
+        rig.body.hostiles = [
+            EntityInfo(kind="item", name="minecraft:oak_log", dist_m=0.5, pos=(1, 64, 1)),
+            EntityInfo(kind="zombie", name="minecraft:zombie", dist_m=4.0, pos=(4, 64, 4)),
+        ]
+        rig.body.set_state(hp=3.0)
+        rig.body.push_event("game.damage", "hit")
+        rig.tick()
+        damage = rig.events_of("game.damage")[0]
+        assert damage["source"] == "ent:zombie zombie"  # the item drop at 0.5 m is not a threat
+        assert "hostile" not in HOSTILE_TYPES  # no fictional kinds in the table
+    finally:
+        rig.close()

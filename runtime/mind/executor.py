@@ -62,6 +62,21 @@ TARGET_LEVERS = ("goto", "goto_far", "bridge_to", "pillar_to")  # arrival by pos
 GET_LEVER = "get"  # arrival by inventory count
 DEAD_ACT_ERROR = "the body is dead: the runner decides the respawn, the intent is not accepted"
 
+# What counts as a threat source: uc's getEntitiesInfo reports the entity TYPE id
+# ("zombie", "cow", "item"…, Py4jEntryPoint.getEntitiesInfo), never a hostility flag,
+# so the overworld/nether hostiles are listed here. Environment knowledge for the rule
+# fallback, not character behavior (ADR-032). Items, drops, animals and players never match.
+HOSTILE_TYPES = frozenset(
+    {
+        "zombie", "zombie_villager", "husk", "drowned", "skeleton", "stray", "bogged",
+        "creeper", "spider", "cave_spider", "witch", "enderman", "phantom", "slime",
+        "magma_cube", "silverfish", "endermite", "pillager", "vindicator", "evoker",
+        "ravager", "vex", "illusioner", "guardian", "elder_guardian", "shulker",
+        "blaze", "ghast", "hoglin", "piglin", "piglin_brute", "zombified_piglin",
+        "zoglin", "breeze", "creaking", "warden", "wither", "ender_dragon", "giant",
+    }
+)
+
 
 # --- the JSONL log of one mind ------------------------------------------------------------
 
@@ -346,7 +361,7 @@ class Executor:
         self._hp = hp
 
     def _nearest_hostile(self) -> Any | None:
-        hostiles = [e for e in self._body.entities(radius=16) if str(e.kind) == "hostile"]
+        hostiles = [e for e in self._body.entities(radius=16) if str(e.kind) in HOSTILE_TYPES]
         if not hostiles:
             return None
         return min(hostiles, key=lambda e: float(e.dist_m))

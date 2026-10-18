@@ -75,7 +75,7 @@ class FakeBody:
 
     def entities(self, radius: int = 16):
         return (
-            EntityInfo(kind="hostile", name="minecraft:zombie", dist_m=3.5, pos=(1, 64, 1)),
+            EntityInfo(kind="zombie", name="minecraft:zombie", dist_m=3.5, pos=(1, 64, 1)),
             EntityInfo(kind="animal", name="Cow", dist_m=8.0, pos=(5, 64, 5)),
         )
 
