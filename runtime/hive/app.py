@@ -6,10 +6,16 @@ in-memory Misaka-net inboxes into `HiveService` — one object implementing the
 
     POST /memory/inheritance | /memory/knowledge | /memory/core_memory
     POST /memory/store_core_memory | /memory/submit_candidate | /memory/submit_vote
-    POST /registry/birth | /registry/request_death | /registry/retire
+    POST /registry/birth | /registry/request_death | /registry/mark_dead | /registry/retire
     GET  /registry/alive
     POST /comms/inbox | /comms/send | /comms/chatter_turn
     GET  /health
+
+Next to the ports (T-028) the same app serves the network MCP of NETWORK.md section 4 —
+stateless streamable HTTP, the T-024 format: `/node/mcp` carries the sisters' tools and
+`/last-order/mcp` the administrator's (`runtime/hive/mcp.py`); the queue behind `propose`
+and `decide` lives in `runtime/hive/proposals.py`. Mounted Starlette apps get no lifespan
+events, so the MCP session managers start in this app's lifespan.
 
 Endpoints are a mechanical JSON bridge (codecs from `runtime/hive/client.py`);
 every decision lives in the service. One error schema everywhere, including FastAPI's
@@ -55,6 +61,8 @@ from runtime.hive.client import (
     vote_from_json,
 )
 from runtime.hive.lifecycle import HiveLog, Lifecycle, LifecycleError, TTL_SCAN_S
+from runtime.hive.mcp import HiveMcp, build_mcp, parse_node_keys
+from runtime.hive.proposals import CommonLayers, ProposalBook
 from runtime.hive.rcon import RconClient, RconError
 from runtime.knowledge.store import (
     AlreadyRetiredError,
@@ -193,6 +201,13 @@ class HiveService:
     def request_death(self, serial: int, cause: str) -> None:
         self.lifecycle.request_death(serial, cause)
 
+    def mark_dead(self, serial: int) -> None:
+        """The death signal mind-N owes hive (T-028 review R1-3): the body died in-game,
+        no kill to confirm. Gates `submit_will`; idempotent — retries after a flaky
+        network land on an already-marked node without an error. The wiring of the
+        caller (the mind's death detector) is T-027."""
+        self.lifecycle.mark_dead(serial)
+
     def retire(self, serial: int, cause: str, will_text: str) -> None:
         self.lifecycle.retire(serial, cause, will_text)
 
@@ -222,6 +237,8 @@ def create_app(
     clock: Callable[[], datetime] | None = None,
     knowledge_dir: Path | str | None = None,
     scan_s: float | None = None,
+    node_keys: dict[str, str] | None = None,
+    lo_key: str | None = None,
 ) -> FastAPI:
     clock = clock or (lambda: datetime.now(timezone.utc))
     run_dir = Path(run_dir if run_dir is not None else (env("RUN_DIR") or "run"))
@@ -234,6 +251,41 @@ def create_app(
         lifecycle = Lifecycle(store, rcon, log=log, run_dir=run_dir, clock=clock)
     service = HiveService(store, lifecycle, CommsBook(lifecycle, log=log, clock=clock))
     scan_seconds = float(scan_s if scan_s is not None else (env("HIVE_TTL_SCAN_S") or TTL_SCAN_S))
+
+    # --- the network MCP (T-028): same port, two mounted servers ------------------------
+
+    keys = (
+        dict(node_keys)
+        if node_keys is not None
+        else parse_node_keys(env("HIVE_MCP_NODE_KEYS") or "")
+    )
+    last_order_key = lo_key if lo_key is not None else (env("HIVE_MCP_LO_KEY") or "")
+    now = lambda: clock().isoformat()  # noqa: E731 - one clock for every layer write
+    proposals = ProposalBook(store, now=now)
+    layers = CommonLayers(store, now=now)
+    node_server, lo_server = build_mcp(
+        HiveMcp(
+            store,
+            lifecycle,
+            service,
+            proposals,
+            layers,
+            node_keys=keys,
+            lo_key=last_order_key,
+            run_dir=run_dir,
+            log=log,
+            now=now,
+        )
+    )
+    # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the
+    # harnesses reach the port by service name (hive:8000) inside the docker network,
+    # the same call as the body MCP (T-024).
+    node_app = node_server.streamable_http_app(
+        stateless_http=True, streamable_http_path="/mcp", host="0.0.0.0"
+    )
+    lo_app = lo_server.streamable_http_app(
+        stateless_http=True, streamable_http_path="/mcp", host="0.0.0.0"
+    )
 
     def scan_once() -> None:
         lifecycle.scan(clock())
@@ -254,7 +306,12 @@ def create_app(
 
         task = asyncio.create_task(scan_loop())
         try:
-            yield
+            # Mounted Starlette apps receive no lifespan events from FastAPI: the MCP
+            # session managers of /node and /last-order start here (T-028).
+            async with contextlib.AsyncExitStack() as stack:
+                for sub in (node_app, lo_app):
+                    await stack.enter_async_context(sub.router.lifespan_context(sub))
+                yield
         finally:
             stop.set()
             task.cancel()
@@ -389,6 +446,10 @@ def create_app(
     def registry_request_death(body: dict) -> None:
         service.request_death(_serial(body), _text(body, "cause"))
 
+    @app.post("/registry/mark_dead")
+    def registry_mark_dead(body: dict) -> None:
+        service.mark_dead(_serial(body))
+
     @app.post("/registry/retire")
     def registry_retire(body: dict) -> None:
         serial = _serial(body)
@@ -412,5 +473,10 @@ def create_app(
     @app.post("/comms/chatter_turn")
     def comms_chatter_turn(body: dict) -> dict | None:
         return chatter_turn_to_json(service.chatter_turn(_serial(body)))
+
+    # --- the network MCP mounts (T-028) ---------------------------------------------------
+
+    app.mount("/node", node_app)
+    app.mount("/last-order", lo_app)
 
     return app

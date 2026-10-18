@@ -234,6 +234,11 @@ def _entry_to_json(entry: KnowledgeEntry) -> dict:
     }
 
 
+# The public face of the codec above (T-028): the network MCP renders matched records
+# with it too, and a private import across modules would hide that dependency.
+entry_to_json = _entry_to_json
+
+
 def _goal_from_json(data: Any) -> NetworkGoal:
     data = _want(data, ("text",))
     return NetworkGoal(
