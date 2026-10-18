@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Bring up the llm-gateway with its secrets lifted from the repo root .env.
+#
+# Why not a bare `docker compose -f docker/compose.yml up -d llm-gateway`: compose reads .env
+# from the project directory (docker/), never from the repo root, so without lifting it would
+# interpolate an empty GATEWAY_MASTER_KEY — and the proxy refuses to start without a master
+# key (verified: fail-closed). Values are lifted as single variables, never echoed, never
+# env_file'd over the whole .env (T-024 review P1-6), and quotes are stripped because
+# hand-edited .env values may carry them (T-025: baked-in quotes mean 401s downstream).
+#
+#   bash docker/gateway/up.sh            # up gateway-db + llm-gateway
+#   bash docker/gateway/up.sh --dry-run  # extra args pass through to compose
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+for key in GATEWAY_MASTER_KEY OPENROUTER_API_KEY GATEWAY_DB_PASSWORD; do
+  if [ -z "${!key:-}" ] && [ -f "$ROOT/.env" ]; then
+    val="$(sed -n "s/^${key}=//p" "$ROOT/.env" | head -1 | tr -d '\r')"
+    val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
+    [ -n "$val" ] && export "$key=$val"
+  fi
+done
+
+if [ -z "${GATEWAY_MASTER_KEY:-}" ]; then
+  echo "up.sh: GATEWAY_MASTER_KEY is not set and not in $ROOT/.env;" >&2
+  echo "       the gateway refuses to start without it. Generate one, e.g.:" >&2
+  echo "       uv run python -c \"import secrets; print('sk-'+secrets.token_urlsafe(32))\"" >&2
+  exit 2
+fi
+
+exec docker compose -f "$ROOT/docker/compose.yml" up -d gateway-db llm-gateway "$@"

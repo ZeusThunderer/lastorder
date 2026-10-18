@@ -107,6 +107,19 @@ class TestNoSecretsInFiles:
                      "GATEWAY_KEY_HIVE", "GATEWAY_KEY_MIND_1"):
             assert re.search(rf"^{name}=$", ENV_EXAMPLE, re.M)
 
+    def test_up_sh_lifts_secrets_and_strips_quotes(self):
+        """The wrapper is the only supported `up` path: compose never sees the root .env."""
+        text = (ROOT / "docker" / "gateway" / "up.sh").read_text(encoding="utf-8")
+        for_loop = re.search(r"^for key in (.*)$", text, re.M).group(1)
+        for key in ("GATEWAY_MASTER_KEY", "OPENROUTER_API_KEY", "GATEWAY_DB_PASSWORD"):
+            assert key in for_loop
+        assert 's/^${key}=//p' in text    # per-variable sed lift, no env_file (P1-6)
+        assert "tr -d" in text            # CR stripped, quotes peeled both sides (T-025 lesson)
+        assert r'${val%\"}' in text
+        # lifted values are never echoed ($ROOT in a hint is a path, not a secret)
+        for leaked in ('echo "$val"', 'echo "${!key', "$GATEWAY_MASTER_KEY", "$OPENROUTER_API_KEY"):
+            assert leaked not in text, leaked
+
 
 class TestClientVirtualKey:
     def test_tier_key_overrides_the_shared_one(self, monkeypatch):

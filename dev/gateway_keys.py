@@ -93,7 +93,10 @@ def run_in_gateway(spec: dict) -> dict:
         timeout=300,
     )
     if proc.returncode != 0:
-        sys.exit(f"gateway_keys: {(proc.stderr or proc.stdout).strip()}")
+        hint = ""
+        if "is not running" in (proc.stderr or "") or "not found" in (proc.stderr or ""):
+            hint = "\nis the gateway up? start it with: bash docker/gateway/up.sh"
+        sys.exit(f"gateway_keys: {(proc.stderr or proc.stdout).strip()}{hint}")
     return json.loads(proc.stdout)
 
 

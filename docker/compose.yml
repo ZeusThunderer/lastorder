@@ -166,7 +166,10 @@ services:
   # keys (env, never files). Port 4000 stays inside the docker network — nothing is published to
   # the host; consumers reach it as llm-gateway:4000. Virtual keys, per-key ceilings (rpm, $/h)
   # and spend tracking live in its Postgres DB; dev/gateway_keys.py and dev/gateway_report.py
-  # drive both through `docker compose exec`, so no admin port is needed either.
+  # drive both through `docker compose exec`, so no admin port is needed either. Compose cannot
+  # read the repo-root .env, and the proxy refuses to start without a master key — bring it up
+  # with `bash docker/gateway/up.sh`, which lifts GATEWAY_MASTER_KEY (and the provider key)
+  # from the root .env as single variables.
   llm-gateway:
     image: ghcr.io/berriai/litellm:main-stable
     depends_on:
