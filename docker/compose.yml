@@ -70,6 +70,11 @@ services:
       MIND_TICK_S: "${MIND_TICK_S:-0.5}"
       MIND_IDLE_S: "${MIND_IDLE_S:-120}"
       MIND_FLEE_HP: "${MIND_FLEE_HP:-6}"
+      # LLM through the gateway (T-026, ADR-033): the mind's own virtual key covers its cloud
+      # Jev calls (ADR-027; no tier model is picked yet — when T-031 wires it, for_tier reads
+      # these). No provider key ever enters this container.
+      LLM_API_BASE: http://llm-gateway:4000
+      LLM_API_KEY: "${GATEWAY_KEY_MIND_1:-}"
     command: ["python", "-m", "runtime.mind"]
     volumes:
       - mind-1-run:/mind-run
@@ -94,6 +99,11 @@ services:
       RCON_HOST: mc-server
       RCON_PASSWORD: "${RCON_PASSWORD:-lastorder}"
       MAX_LIFE_MIN: "${MAX_LIFE_MIN:-45}"
+      # LLM through the gateway (T-026, ADR-033): Last Order runs here, so the hive carries the
+      # gateway address and its own virtual key (tier models are a gateway setting; LLM_API_KEY
+      # is read by every tier of runtime/llm/client.py). No provider key in this container.
+      LLM_API_BASE: http://llm-gateway:4000
+      LLM_API_KEY: "${GATEWAY_KEY_HIVE:-}"
     command:
       - uvicorn
       - runtime.hive.app:create_app
@@ -152,6 +162,51 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # The LLM gateway (NETWORK.md section 3, ADR-033): LiteLLM proxy, the only holder of provider
+  # keys (env, never files). Port 4000 stays inside the docker network — nothing is published to
+  # the host; consumers reach it as llm-gateway:4000. Virtual keys, per-key ceilings (rpm, $/h)
+  # and spend tracking live in its Postgres DB; dev/gateway_keys.py and dev/gateway_report.py
+  # drive both through `docker compose exec`, so no admin port is needed either.
+  llm-gateway:
+    image: ghcr.io/berriai/litellm:main-stable
+    depends_on:
+      gateway-db:
+        condition: service_healthy
+    environment:
+      LITELLM_MASTER_KEY: "${GATEWAY_MASTER_KEY:-}"   # issues virtual keys; set in .env
+      DATABASE_URL: postgresql://litellm:${GATEWAY_DB_PASSWORD:-lastorder}@gateway-db:5432/litellm
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"   # the only provider key in the stack
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    networks: [default, gateway-internal]
+    volumes:
+      - ./gateway/config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+    restart: unless-stopped
+
+  # Postgres of the gateway: virtual keys and spend rows. Only llm-gateway sees it (private
+  # network, no published port); the default password matches the mc-server RCON precedent of
+  # an internal-only secret with an .env override.
+  gateway-db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: "${GATEWAY_DB_PASSWORD:-lastorder}"
+      POSTGRES_DB: litellm
+    volumes:
+      - gateway-db:/var/lib/postgresql/data
+    networks: [gateway-internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   world:
   body-1:
@@ -159,3 +214,7 @@ volumes:
   jev-hf:
   knowledge:
   hive-run:
+  gateway-db:
+
+networks:
+  gateway-internal: {}

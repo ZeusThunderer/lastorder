@@ -1,0 +1,33 @@
+# LiteLLM proxy config of the llm-gateway service (T-026, ADR-033). The gateway is the only
+# path to cloud models: provider keys live in its environment, consumers (node sandboxes, the
+# hive with Last Order, the minds) get the gateway address plus their own virtual key issued by
+# dev/gateway_keys.py. The proxy port stays inside the docker network.
+#
+# ADR-023 tiers become gateway settings here. `model_name` is the full litellm model string —
+# the same value consumers already keep in LLM_<TIER>_MODEL, so runtime/llm/client.py needs no
+# model rewriting when LLM_API_BASE points at the gateway. GLM Coding Plan is NOT routed here:
+# Z.ai usage policy allows only supported tools (T-024, docs/agents/harness-spike.md step 0),
+# the subscription token stays in node-N (ADR-033).
+
+model_list:
+  # tier `node`: the step model of a node harness
+  - model_name: openrouter/qwen/qwen3.7-flash
+    litellm_params:
+      model: openrouter/qwen/qwen3.7-flash
+      api_key: os.environ/OPENROUTER_API_KEY
+  # tier `smart`: Last Order, wills and network consolidation
+  - model_name: openrouter/z-ai/glm-5.3-flash
+    litellm_params:
+      model: openrouter/z-ai/glm-5.3-flash
+      api_key: os.environ/OPENROUTER_API_KEY
+
+litellm_settings:
+  # consumers send tier-specific extras (reasoning off); anything the provider does not know
+  # is dropped instead of failing the call
+  drop_params: true
+  num_retries: 2
+  request_timeout: 120
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
