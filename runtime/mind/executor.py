@@ -437,7 +437,8 @@ class Executor:
                 f"respawn gave up after {self._respawn_attempts} attempts; the body stays dead"
             )
         try:
-            self._body.respawn()
+            with self.body_lock:  # one writer with C1 (checker C-1); C1 is silent while dead
+                self._body.respawn()
         except Exception as exc:
             self._respawn_attempts += 1
             gave_up = self._respawn_attempts >= RESPAWN_MAX_ATTEMPTS
@@ -450,7 +451,8 @@ class Executor:
             )
             raise
         self._log.record("event", event="respawn.ok", attempt=self._respawn_attempts + 1)
-        self._after_respawn()
+        with self.body_lock:
+            self._after_respawn()
         return {"respawned": True}
 
     def _after_respawn(self) -> None:
@@ -563,17 +565,20 @@ class Executor:
     def submit(self, lever: str, args: Mapping[str, Any]) -> Intent:
         if self._dead:
             raise RuntimeError(DEAD_ACT_ERROR)
-        if self._current is not None and not self._current.finished:
+        with self.body_lock:  # intent state changes never race the C1 tick (checker C-2)
+            if self._current is not None and not self._current.finished:
+                self._log.record(
+                    "intent", phase="cleared", intent_id=self._current.id, lever=self._current.lever
+                )
+                self._current.state = Intent.CLEARED
+            self._intent_seq += 1
+            intent = Intent(self._intent_seq, lever, dict(args), self._clock())
+            self._current = intent
+            self._idle_flag = False
+            self._last_activity_at = self._clock()
             self._log.record(
-                "intent", phase="cleared", intent_id=self._current.id, lever=self._current.lever
+                "intent", phase="submitted", intent_id=intent.id, lever=lever, args=intent.args
             )
-            self._current.state = Intent.CLEARED
-        self._intent_seq += 1
-        intent = Intent(self._intent_seq, lever, dict(args), self._clock())
-        self._current = intent
-        self._idle_flag = False
-        self._last_activity_at = self._clock()
-        self._log.record("intent", phase="submitted", intent_id=intent.id, lever=lever, args=intent.args)
         return intent
 
     def stop_intent(self) -> None:
