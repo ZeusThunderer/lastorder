@@ -63,7 +63,10 @@ def _rows(payload, total_field, name_fields) -> list[tuple[str, float]]:
 
 def render(data: dict, since_s: float) -> str:
     def named(row: tuple[str, float]) -> tuple[str, float]:
-        return data["keys"].get(row[0], row[0]), row[1]
+        # a spend row whose token is absent from the live key list belongs to a revoked key:
+        # revocation deletes the row, the hash is all that is left to show
+        name = data["keys"].get(row[0]) or f"{row[0][:8]}… (revoked)"
+        return name, row[1]
 
     key_rows = [named(r) for r in _rows(data["per_key"], "total_spend", ("api_key", "key", "token"))]
     model_rows = _rows(data["per_model"], "total_spend", ("model", "model_group"))

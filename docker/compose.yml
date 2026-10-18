@@ -72,7 +72,11 @@ services:
       MIND_FLEE_HP: "${MIND_FLEE_HP:-6}"
       # LLM through the gateway (T-026, ADR-033): the mind's own virtual key covers its cloud
       # Jev calls (ADR-027; no tier model is picked yet — when T-031 wires it, for_tier reads
-      # these). No provider key ever enters this container.
+      # these). No provider key ever enters this container. Deliberately no depends_on health
+      # gate on llm-gateway: callers retry a down gateway by design (NETWORK.md section 9),
+      # the mind makes no LLM calls before T-031, and a service_healthy gate would wedge the
+      # spike overlay's clean-env `up -d mc-server body-1 mind-1` (the fail-closed gateway
+      # refuses to start without GATEWAY_MASTER_KEY).
       LLM_API_BASE: http://llm-gateway:4000
       LLM_API_KEY: "${GATEWAY_KEY_MIND_1:-}"
     command: ["python", "-m", "runtime.mind"]
@@ -102,6 +106,8 @@ services:
       # LLM through the gateway (T-026, ADR-033): Last Order runs here, so the hive carries the
       # gateway address and its own virtual key (tier models are a gateway setting; LLM_API_KEY
       # is read by every tier of runtime/llm/client.py). No provider key in this container.
+      # Same no-health-gate call as mind-1 above: gateway downtime is a retry case
+      # (NETWORK.md section 9), and the hive makes no LLM calls before T-030.
       LLM_API_BASE: http://llm-gateway:4000
       LLM_API_KEY: "${GATEWAY_KEY_HIVE:-}"
     command:
@@ -177,6 +183,8 @@ services:
         condition: service_healthy
     environment:
       LITELLM_MASTER_KEY: "${GATEWAY_MASTER_KEY:-}"   # issues virtual keys; set in .env
+      # the password lands in the URL raw (no url-encoding in compose): letters/digits only,
+      # see .env.example
       DATABASE_URL: postgresql://litellm:${GATEWAY_DB_PASSWORD:-lastorder}@gateway-db:5432/litellm
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"   # the only provider key in the stack
     command: ["--config", "/app/config.yaml", "--port", "4000"]

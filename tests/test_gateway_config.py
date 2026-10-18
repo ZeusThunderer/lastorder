@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "dev"))
 
 from gateway_keys import build_issue_payload, build_revoke_payload  # noqa: E402
-from gateway_report import parse_since  # noqa: E402
+from gateway_report import parse_since, render  # noqa: E402
 from runtime.llm.client import LLMConfig  # noqa: E402
 
 COMPOSE = yaml.safe_load((ROOT / "docker" / "compose.yml").read_text(encoding="utf-8"))
@@ -175,3 +175,20 @@ class TestSinceParsing:
             except SystemExit:
                 continue
             raise AssertionError(f"{bad!r} must not parse")
+
+
+class TestReportRender:
+    def test_revoked_keys_get_a_mark(self):
+        """Spend rows of revoked keys must not look like live hex garbage (checker C-1)."""
+        data = {
+            "per_key": [
+                {"api_key": "a" * 64, "total_spend": "0.00010"},
+                {"api_key": "b" * 64, "total_spend": "0.00020"},
+            ],
+            "per_model": [{"model": "openrouter/qwen/qwen3.7-flash", "total_spend": "0.00030"}],
+            "keys": {"a" * 64: "node-1"},  # token b… is revoked: absent from the live list
+        }
+        text = render(data, since_s=3600)
+        assert "node-1" in text
+        assert "b" * 8 + "… (revoked)" in text
+        assert "$0.00030/h" in text
