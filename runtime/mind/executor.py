@@ -641,10 +641,9 @@ class Executor:
         source = self._nearest_hostile()
         live = self._clock() - self._last_damage_at <= self._threat_calm_s and source is not None
         if decision is not None:
-            option = next((o for o in request.options if o.id == decision.option_id), None)
-            if option is not None and option.lever == "strike" and (
-                not live or float(source.dist_m) > self._fight_radius_m
-            ):
+            # a stale pick never runs: the picture it answered is gone (P1-1)
+            option = next((o for o in request.options if o.id == decision.option_id), None) if live else None
+            if option is not None and option.lever == "strike" and float(source.dist_m) > self._fight_radius_m:
                 option = None  # fight was offered in reach; the reach is gone
             if option is None:
                 self._log.record(
