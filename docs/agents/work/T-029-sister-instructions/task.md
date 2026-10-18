@@ -2,7 +2,7 @@
 id: T-029
 title: Шаблон рабочего места сестры — ядро, правила, стартовые скилы
 stage: E2
-status: ready
+status: in_progress
 criticality: critical
 branch: z/T-029-sister-instructions
 created: 2026-10-17
