@@ -97,11 +97,12 @@ EOF
 }
 
 death_seen() {
-  local n
-  n="$(docker exec "$(docker ps -a --format '{{.Names}}' | grep -E 'mind-1' | head -1)" \
-    sh -c 'wc -l < /spike-run/mind-calls.jsonl 2>/dev/null' 2>/dev/null || echo 0)"
+  # The container path must stay INSIDE a quoted sh -c: as a direct docker exec argument
+  # MSYS (Git Bash) rewrites it to a Windows path and cat finds nothing (bit us in run 1:
+  # the phantom death at minute 7 was missed and /kill hit the respawned body).
   awk -v skip="$LAST_MCP_LINES" 'NR > skip && /"woke_by": "game.death"/ {found=1} END {exit !found}' \
-    <(docker exec "$(docker ps -a --format '{{.Names}}' | grep -E 'mind-1' | head -1)" cat /spike-run/mind-calls.jsonl 2>/dev/null)
+    <(docker exec "$(docker ps -a --format '{{.Names}}' | grep -E 'mind-1' | head -1)" \
+      sh -c 'cat /spike-run/mind-calls.jsonl' 2>/dev/null)
 }
 
 log "watching the run for ${MINUTES} minutes…"
@@ -179,8 +180,23 @@ log "deadline reached; stopping the harness container (the stand stays up)"
 docker stop "$HARNESS_CT" >/dev/null 2>&1 || true
 
 docker logs "$HARNESS_CT" > "$RUN/logs/harness.log" 2>&1 || true
+# zcode prints its turn JSON to files, not stdout: docker logs stay empty, take the session log
+if [ "$HARNESS" = zcode ] && [ -s "$RUN/workplace/.logs/zcode.jsonl" ]; then
+  cp "$RUN/workplace/.logs/zcode.jsonl" "$RUN/logs/harness.log"
+  cp "$RUN/workplace/.logs/zcode.stderr.log" "$RUN/logs/" 2>/dev/null || true
+fi
 MIND_CT="$(docker ps -a --format '{{.Names}}' | grep -E 'mind-1' | head -1)"
-docker exec "$MIND_CT" cat /spike-run/mind-calls.jsonl > "$RUN/logs/mcp-calls.jsonl" 2>/dev/null || true
+# Quoted sh -c again (MSYS path rewrite); the mind log is append-mode across runs, so keep
+# only the calls of this run (ts >= START) — the volume survives stand restarts.
+docker exec "$MIND_CT" sh -c 'cat /spike-run/mind-calls.jsonl' 2>/dev/null \
+  | uv run --no-project python -c 'import json,sys
+start = float(sys.argv[1])
+for line in sys.stdin:
+    try:
+        if float(json.loads(line).get("ts", 0)) >= start:
+            sys.stdout.write(line)
+    except ValueError:
+        pass' "$START" > "$RUN/logs/mcp-calls.jsonl" || true
 docker logs "$(docker ps -a --format '{{.Names}}' | grep -E 'mc-server' | head -1)" > "$RUN/logs/mc-server.log" 2>&1 || true
 
 log "summary:"

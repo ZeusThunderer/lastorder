@@ -35,7 +35,7 @@ def pct(values: list[float], q: float) -> float | None:
 
 
 def load_jsonl(path: Path) -> list[dict]:
-    out = []
+    out: list[dict] = []
     if not path.exists():
         return out
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -46,6 +46,30 @@ def load_jsonl(path: Path) -> list[dict]:
             out.append(json.loads(line))
         except ValueError:
             continue
+    return out
+
+
+def load_json_stream(path: Path) -> list[dict]:
+    """Parse concatenated pretty-printed JSON objects (the zcode CLI prints one per run)."""
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    decoder = json.JSONDecoder()
+    out: list[dict] = []
+    i = 0
+    while i < len(text):
+        while i < len(text) and text[i] not in "{":
+            i += 1
+        if i >= len(text):
+            break
+        try:
+            obj, end = decoder.raw_decode(text, i)
+        except ValueError:
+            i += 1
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+        i = end
     return out
 
 
@@ -158,27 +182,49 @@ def opencode_summary(events: list[dict]) -> dict:
 
 
 def zcode_summary(events: list[dict]) -> dict:
-    # The zcode CLI jsonl differs; collect whatever token/cost fields look familiar and mark
-    # the rest as not found rather than guessing.
-    tokens_in = tokens_out = 0
+    # The zcode harness (zcode-app-cli -p --json) prints one JSON object per run/resume:
+    # {sessionId, response, usage{inputTokens,outputTokens,cacheReadTokens,...}, projection}.
     turns = 0
-    cost = 0.0
+    tokens_in = tokens_out = cache_read = 0
+    per_turn: list[dict] = []
     for ev in events:
-        if not isinstance(ev, dict):
+        if not isinstance(ev, dict) or "usage" not in ev:
             continue
-        usage = ev.get("usage") or (ev.get("message") or {}).get("usage") or {}
-        if usage:
-            turns += 1
-            tokens_in += int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
-            tokens_out += int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
-        c = ev.get("cost") or ev.get("total_cost_usd")
-        if isinstance(c, (int, float)):
-            cost += float(c)
+        u = ev["usage"] or {}
+        if not isinstance(u, dict) or not u.get("modelRequestCount"):
+            continue
+        turns += 1
+        tin = int(u.get("inputTokens") or u.get("input_tokens") or 0)
+        tout = int(u.get("outputTokens") or u.get("output_tokens") or 0)
+        tcr = int(u.get("cacheReadTokens") or u.get("cache_read_tokens") or 0)
+        tcw = int(u.get("cacheWriteTokens") or u.get("cache_write_tokens") or 0)
+        tokens_in += tin
+        tokens_out += tout
+        cache_read += tcr
+        per_turn.append(
+            {
+                "in": tin,
+                "out": tout,
+                "cache_read": tcr,
+                "cache_write": tcw,
+                "model_requests": int(u.get("modelRequestCount") or 0),
+            }
+        )
+    prefix_total = tokens_in + sum(t["cache_write"] for t in per_turn)
     return {
         "turns": turns or None,
-        "tokens": {"in_total": tokens_in or None, "out_total": tokens_out or None,
-                   "note": "zcode jsonl: per-turn fields depend on CLI version"},
-        "cost_usd": cost or None,
+        "model_requests": sum(t["model_requests"] for t in per_turn) or None,
+        "tokens": {
+            "in_per_turn": round(tokens_in / turns, 1) if turns else None,
+            "out_per_turn": round(tokens_out / turns, 1) if turns else None,
+            "cache_read_total": cache_read or 0,
+            "cache_write_total": sum(t["cache_write"] for t in per_turn) or 0,
+            "cache_share": round(cache_read / prefix_total, 3) if prefix_total and cache_read else None,
+            "note": "zcode: one json object per run/resume turn; inputTokens includes cache read",
+        },
+        # The Coding Plan has no per-call $ price: cost is credits (docs.z.ai formulas),
+        # computed in the summary table of harness-spike.md, not here.
+        "cost_usd": None,
     }
 
 
@@ -247,7 +293,11 @@ def main() -> None:
     run = args.run
     workplace = run / "workplace"
     mcp = mcp_summary(load_jsonl(run / "logs" / "mcp-calls.jsonl"))
-    events = load_jsonl(run / "logs" / "harness.log")
+    events = (
+        load_json_stream(run / "logs" / "harness.log")
+        if args.harness == "zcode"
+        else load_jsonl(run / "logs" / "harness.log")
+    )
     harness = (opencode_summary if args.harness == "opencode" else zcode_summary)(events)
     summary = {
         "harness": args.harness,
