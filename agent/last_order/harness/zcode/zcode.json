@@ -1,0 +1,7 @@
+{
+  "mcp": {
+    "servers": {
+      "body": {"type": "http", "url": "http://body-1:8700/mcp", "enabled": true}
+    }
+  }
+}
