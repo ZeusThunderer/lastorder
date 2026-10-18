@@ -555,3 +555,22 @@ class TestStatics:
         for key in ("GATEWAY_KEY_MIND_1", "GATEWAY_KEY_HIVE", "GATEWAY_KEY_NODE_1"):
             assert key in UP_SH
         assert "${GATEWAY_KEY_MIND_1" not in UP_SH.replace("${!key}", "")  # lifted, not interpolated
+
+    def test_up_sh_lift_loop_words_are_exactly_the_six_keys(self):
+        """Checker C-2: a broken line continuation lands as a literal backslash-n inside
+        the word list — bash -n passes, the lift silently loses a key to a phantom word.
+        The loop statement must be one line and split into exactly these six words."""
+        import re
+
+        match = re.search(r"^for key in (.+); do$", UP_SH, re.M)
+        assert match, "the lift loop must be a single `for key in ...; do` line"
+        words = match.group(1).split()
+        assert words == [
+            "GATEWAY_MASTER_KEY",
+            "OPENROUTER_API_KEY",
+            "GATEWAY_DB_PASSWORD",
+            "GATEWAY_KEY_MIND_1",
+            "GATEWAY_KEY_HIVE",
+            "GATEWAY_KEY_NODE_1",
+        ]
+        assert "\\n" not in UP_SH and "\\\n" not in UP_SH, "no literal \\n, no continuations"

@@ -22,7 +22,9 @@ ROOT="$(git -C "$HERE" worktree list --porcelain 2>/dev/null | sed -n '1s/^workt
 
 # Consumer virtual keys ride the same lift (T-026 review R1-1): a plain `docker compose up`
 # would interpolate them empty, because compose reads .env from docker/, not the repo root.
-for key in GATEWAY_MASTER_KEY OPENROUTER_API_KEY GATEWAY_DB_PASSWORD \n           GATEWAY_KEY_MIND_1 GATEWAY_KEY_HIVE GATEWAY_KEY_NODE_1; do
+# One physical line on purpose: a broken `\` continuation reads as a phantom key word that
+# bash -n does not catch (checker C-2); tests/test_jev_policy.py pins the exact word list.
+for key in GATEWAY_MASTER_KEY OPENROUTER_API_KEY GATEWAY_DB_PASSWORD GATEWAY_KEY_MIND_1 GATEWAY_KEY_HIVE GATEWAY_KEY_NODE_1; do
   if [ -z "${!key:-}" ] && [ -f "$ROOT/.env" ]; then
     val="$(sed -n "s/^${key}=//p" "$ROOT/.env" | head -1 | tr -d '\r')"
     val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
