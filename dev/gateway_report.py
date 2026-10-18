@@ -72,10 +72,10 @@ def render(data: dict, since_s: float) -> str:
 
     lines = [f"window: last {since_s / 3600:g} h"]
     lines.append("by key:")
-    lines.extend(f"  {name:24} ${spend:.4f}" for name, spend in key_rows or [("(nothing spent)", 0.0)])
+    lines.extend(f"  {name:24} ${spend:.5f}" for name, spend in key_rows or [("(nothing spent)", 0.0)])
     lines.append("by model:")
-    lines.extend(f"  {name:44} ${spend:.4f}" for name, spend in model_rows or [("(nothing spent)", 0.0)])
-    lines.append(f"total ${total:.4f} -> ${total / hours:.4f}/h over the window")
+    lines.extend(f"  {name:44} ${spend:.5f}" for name, spend in model_rows or [("(nothing spent)", 0.0)])
+    lines.append(f"total ${total:.5f} -> ${total / hours:.5f}/h over the window")
     return "\n".join(lines)
 
 

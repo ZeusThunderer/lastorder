@@ -12,7 +12,11 @@
 #   bash docker/gateway/up.sh --dry-run  # extra args pass through to compose
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+HERE="$(cd "$(dirname "$0")/../.." && pwd)"   # this checkout: its docker/compose.yml runs
+# .env lives only in the MAIN worktree (it is gitignored, worktrees never have a copy), so
+# resolve the main root the way dev/_common.sh does; fall back to this checkout.
+ROOT="$(git -C "$HERE" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+[ -n "${ROOT:-}" ] || ROOT="$HERE"
 
 for key in GATEWAY_MASTER_KEY OPENROUTER_API_KEY GATEWAY_DB_PASSWORD; do
   if [ -z "${!key:-}" ] && [ -f "$ROOT/.env" ]; then
@@ -29,4 +33,4 @@ if [ -z "${GATEWAY_MASTER_KEY:-}" ]; then
   exit 2
 fi
 
-exec docker compose -f "$ROOT/docker/compose.yml" up -d gateway-db llm-gateway "$@"
+exec docker compose -f "$HERE/docker/compose.yml" up -d gateway-db llm-gateway "$@"
