@@ -387,6 +387,12 @@ class BodyMcp:
             self._respawned_for_death = False
             self._pending_act = None
             self._emit_event("game.death", text=death.text)
+            # Log the death at detection time, not only when a wait_events call delivers it:
+            # the host orchestrator watches this file (a death must never be missed even if
+            # the agent never waits again — CLAUDE.md: no death without a will).
+            self._calls.record(
+                {"ts": time.time(), "tool": "event", "event": "game.death", "text": death.text}
+            )
 
         if self._dead and state.in_game and hp > 0.0:
             self._dead = False  # a living body again — the respawn worked

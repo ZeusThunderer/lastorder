@@ -334,6 +334,23 @@ def test_death_event_then_single_respawn(stack: Stack) -> None:
     assert stack.body.respawn_calls == 1
 
 
+def test_death_logged_by_poller_without_wait_events(stack: Stack) -> None:
+    # The host orchestrator watches the JSONL log; a death must be visible there even if the
+    # agent never calls wait_events again (checker C-5). No client call in this test at all.
+    stack.body.set_state(hp=0.0)
+    stack.body.chat = ["LastOrder01 was killed"]
+    deadline = time.monotonic() + 5.0
+    entries: list[dict] = []
+    while time.monotonic() < deadline:
+        entries = [e for e in stack.log_lines() if e.get("tool") == "event"]
+        if entries:
+            break
+        time.sleep(0.05)
+    assert entries and entries[0]["event"] == "game.death"
+    assert "was killed" in entries[0]["text"]
+    assert isinstance(entries[0]["ts"], float)
+
+
 def test_call_log_records_calls_and_rejections(stack: Stack) -> None:
     stack.call(lambda c: c.call_tool("say", {"text": " /kill"}))
     stack.call(lambda c: c.call_tool("say", {"text": "нормальная реплика"}))

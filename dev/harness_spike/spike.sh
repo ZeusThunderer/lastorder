@@ -102,10 +102,11 @@ EOF
 }
 
 death_seen() {
-  # The container path must stay INSIDE a quoted sh -c: as a direct docker exec argument
-  # MSYS (Git Bash) rewrites it to a Windows path and cat finds nothing (bit us in run 1:
-  # the phantom death at minute 7 was missed and /kill hit the respawned body).
-  awk -v skip="$LAST_MCP_LINES" 'NR > skip && /"woke_by": "game.death"/ {found=1} END {exit !found}' \
+  # Death matches either shape in the mind log: the poller's own {"tool":"event",
+  # "event":"game.death"} line (written at detection time, review C-5) or a wait_events
+  # reply woken by game.death. Container paths stay INSIDE a quoted sh -c: as direct docker
+  # exec arguments MSYS (Git Bash) rewrites them to Windows paths and cat finds nothing.
+  awk -v skip="$LAST_MCP_LINES" 'NR > skip && (/"event": "game.death"/ || /"woke_by": "game.death"/) {found=1} END {exit !found}' \
     <(docker exec "$(docker ps -a --format '{{.Names}}' | grep -E 'mind-1' | head -1)" \
       sh -c 'cat /spike-run/mind-calls.jsonl' 2>/dev/null)
 }
