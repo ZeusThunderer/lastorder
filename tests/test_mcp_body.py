@@ -446,6 +446,10 @@ def test_runner_birth_endpoint_arms_the_life_clock(stack: Stack) -> None:
     )
     result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0}))
     assert parse(result)["type"] == "life.expiring"
+    # one arming per life (review R1-2): a second birth must not overwrite the serial
+    second = stack.runner("POST", "/runner/birth", {"serial": 666, "born_at": born, "ttl_min": 45})
+    assert second.status_code == 409
+    assert stack.runner("GET", "/runner/status").json()["serial"] == 8
     # a bad payload is a 400, not a crash
     assert stack.runner("POST", "/runner/birth", {"serial": "x"}).status_code == 400
 

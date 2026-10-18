@@ -249,6 +249,7 @@ class Executor:
         self._idle_fired_at = -1e9
         self._last_activity_at = self._clock()
         self._life_warned = False
+        self._stuck_requested = False  # a successful retire_stuck rules its own death cause (R1-4)
         self._pending_act: dict[str, Any] | None = None  # act->effect burst bookkeeping
         self._busy_last = False
 
@@ -406,9 +407,11 @@ class Executor:
 
     def _rule_cause(self, text: str) -> str:
         if self._birth is None:
-            return "game"  # no life clock configured: the honest default, hive corrects at retire
+            # No life clock configured: the honest default is `game` — unless this life asked
+            # for its own death (R1-4); hive corrects the ruling at retire either way.
+            return "stuck" if self._stuck_requested else "game"
         try:
-            return classify_death(self._wall_clock(), self._birth, False, text).cause
+            return classify_death(self._wall_clock(), self._birth, self._stuck_requested, text).cause
         except Exception as exc:
             self._log.record("error", scope="classify_death", error=f"{type(exc).__name__}: {exc}")
             return "game"
@@ -428,30 +431,31 @@ class Executor:
         }
 
     def runner_respawn(self) -> dict[str, Any]:
-        """The runner's respawn command (POST /runner/respawn). Only in the dead state;
-        bounded retries, then the body stays dead and the runner sees gave_up."""
-        if not self._dead:
-            raise RuntimeError("respawn refused: the body is not dead")
-        if self._respawn_attempts >= RESPAWN_MAX_ATTEMPTS:
-            raise RuntimeError(
-                f"respawn gave up after {self._respawn_attempts} attempts; the body stays dead"
-            )
-        try:
-            with self.body_lock:  # one writer with C1 (checker C-1); C1 is silent while dead
-                self._body.respawn()
-        except Exception as exc:
-            self._respawn_attempts += 1
-            gave_up = self._respawn_attempts >= RESPAWN_MAX_ATTEMPTS
-            self._log.record(
-                "error",
-                scope="respawn",
-                event="respawn.gave_up" if gave_up else "respawn.retry",
-                attempt=self._respawn_attempts,
-                error=f"{type(exc).__name__}: {exc}",
-            )
-            raise
-        self._log.record("event", event="respawn.ok", attempt=self._respawn_attempts + 1)
+        """The runner's respawn command (POST /runner/respawn). The dead check, the attempt
+        bound and the respawn itself are ONE critical section under the body lock (checker
+        C-1, review R1-3): the dead C1 tick and a second concurrent POST serialize here,
+        so the body is respawned at most once per death."""
         with self.body_lock:
+            if not self._dead:
+                raise RuntimeError("respawn refused: the body is not dead")
+            if self._respawn_attempts >= RESPAWN_MAX_ATTEMPTS:
+                raise RuntimeError(
+                    f"respawn gave up after {self._respawn_attempts} attempts; the body stays dead"
+                )
+            try:
+                self._body.respawn()
+            except Exception as exc:
+                self._respawn_attempts += 1
+                gave_up = self._respawn_attempts >= RESPAWN_MAX_ATTEMPTS
+                self._log.record(
+                    "error",
+                    scope="respawn",
+                    event="respawn.gave_up" if gave_up else "respawn.retry",
+                    attempt=self._respawn_attempts,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                raise
+            self._log.record("event", event="respawn.ok", attempt=self._respawn_attempts + 1)
             self._after_respawn()
         return {"respawned": True}
 
@@ -467,6 +471,10 @@ class Executor:
         self._last_activity_at = self._clock()
         self._threat = None
         self._evading = False
+        self._stuck_requested = False  # the cause flag belongs to the life that asked (R1-4)
+        # Whatever intent object survived into this moment (a submit racing the death tick,
+        # review R1-3) dies with the old node: the new life starts with no intent.
+        self._current = None
         self.events.clear()  # a new life does not replay the old one's events
         # The life clock belongs to the node that died; the runner arms the next one
         # with POST /runner/birth. Until then life.expiring stays silent.
@@ -474,9 +482,18 @@ class Executor:
         self._life_warned = False
 
     def runner_birth(self, serial: int, born_at: str, ttl_min: int) -> dict[str, Any]:
-        """Arm the life clock for the next node after a respawn (POST /runner/birth)."""
+        """Arm the life clock for the next node after a respawn (POST /runner/birth).
+
+        One arming per life (review R1-2): the endpoint is reachable from the agent's
+        sandbox, and an overwrite would let a node aim its own retire_stuck at another
+        sister's serial — hive does not check the caller. While a birth is armed, a second
+        request is a refusal; a fresh life (after the respawn cleared the clock) may arm."""
         if self._dead:
             raise RuntimeError("birth refused: the body is still dead")
+        if self._birth is not None:
+            raise RuntimeError(
+                f"birth refused: the life clock is already armed for serial {self._birth.serial}"
+            )
         self._birth = BirthRecord(serial=int(serial), born_at=str(born_at), ttl_min=int(ttl_min))
         self._life_warned = False
         self._log.record("event", event="birth.armed", serial=int(serial), ttl_min=int(ttl_min))
@@ -512,15 +529,17 @@ class Executor:
                 self._evading = False
                 self._last_evade = None
                 self._last_activity_at = now
-                if self._current is not None and self._current.state == Intent.SUSPENDED:
-                    self._apply(self._current)  # calm: back to the agent's intent
+            if self._current is not None and self._current.state == Intent.SUSPENDED:
+                self._apply(self._current)  # calm: back to the agent's intent
             return
         source = self._nearest_hostile()
         if source is None:
             return  # damage without a visible hostile: nothing to aim a maneuver at
-        self._suspend_intent()
         pos = tuple(round(float(c), 1) for c in getattr(state, "pos", ()) or ())
         if hp <= self._flee_hp:
+            # The maneuver owns the body from here: the intent is suspended and its verdict
+            # is counted only after the calm re-apply (review P1-3).
+            self._suspend_intent()
             self._threat = "flee"
             target = self._evade_target(pos, source)
             if not self._evading:
@@ -534,11 +553,15 @@ class Executor:
                 self._maneuver("goto", target, why="flee")
                 self._last_evade = target
         elif float(source.dist_m) <= self._fight_radius_m and now - self._last_strike_at >= STRIKE_INTERVAL_S:
+            self._suspend_intent()
             self._threat = "fight"
             self._last_strike_at = now
             self._maneuver(
                 "strike", {"pos": [float(c) for c in (source.pos or pos)]}, why="fight"
             )
+        # else: damage from beyond the rules' reach (a skeleton at 10 m while hp is high) —
+        # an event for the agent, but NO maneuver runs, so the intent is NOT suspended:
+        # it keeps the body, settles on its own and the idle watchdog stays armed (R1-1).
 
     def _evade_target(self, pos: tuple[float, ...], source: Any) -> dict[str, int]:
         sp = tuple(float(c) for c in (source.pos or ())) or (0.0, 0.0, 0.0)
@@ -563,9 +586,11 @@ class Executor:
     # -- intents (section 2 arbitration) ---------------------------------------------------
 
     def submit(self, lever: str, args: Mapping[str, Any]) -> Intent:
-        if self._dead:
-            raise RuntimeError(DEAD_ACT_ERROR)
-        with self.body_lock:  # intent state changes never race the C1 tick (checker C-2)
+        with self.body_lock:  # intent state changes never race the C1 tick (checker C-2);
+            # the dead check is inside the same critical section, so a death landing between
+            # the check and the swap cannot arm an intent for the next node's body (R1-3)
+            if self._dead:
+                raise RuntimeError(DEAD_ACT_ERROR)
             if self._current is not None and not self._current.finished:
                 self._log.record(
                     "intent", phase="cleared", intent_id=self._current.id, lever=self._current.lever
@@ -715,6 +740,7 @@ class Executor:
         except HiveRejected as exc:
             raise RuntimeError(f"retire_stuck: hive rejected the request ({exc})") from exc
         self._idle_flag = False  # one signal retires one node; a refusal keeps the signal armed
+        self._stuck_requested = True  # this death is self-chosen: the cause rules as stuck (R1-4)
         self._log.record("event", event="retire.requested", serial=serial, cause="stuck")
         return {"requested": True, "serial": serial, "cause": "stuck"}
 

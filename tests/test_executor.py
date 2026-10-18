@@ -759,3 +759,95 @@ def test_respawn_clears_the_event_queue() -> None:
         assert served == [{"type": "chat.line", "text": "<Steve> новая жизнь"}]
     finally:
         rig.close()
+
+
+# --- review round 1: R1-1…R1-4 ------------------------------------------------------------
+
+
+def test_damage_beyond_rules_reach_keeps_intent_alive() -> None:
+    # R1-1, the supervisor's example: a skeleton shooting from 10 m while hp is high.
+    # The old code suspended the intent on any damage with a hostile around, but no
+    # maneuver ran — no done/failed, and the stuck intent silenced the idle watchdog.
+    rig = Rig()
+    try:
+        intent = rig.x.submit("goto", {"x": 5, "y": 64, "z": 5})
+        rig.tick()
+        rig.body.busy_flag = True
+        rig.tick()
+
+        rig.body.set_state(hp=15.0)
+        rig.body.hostiles = [
+            EntityInfo(kind="skeleton", name="minecraft:skeleton", dist_m=10.0, pos=(10, 64, 0))
+        ]
+        rig.body.push_event("game.damage", "arrow")
+        rig.tick()
+        assert intent.state == Intent.ACTIVE  # NOT suspended: no maneuver owns the body
+        rig.tick(dt=1.0)  # the damage keeps coming from beyond the reach
+        assert intent.state == Intent.ACTIVE
+        assert not [a for a in rig.body.acts if a[0] in ("goto", "strike") and a != ("goto", {"x": 5, "y": 64, "z": 5})]
+
+        # and the intent settles on its own, the watchdog stays armed (R1-1's tail)
+        rig.body.busy_flag = False
+        rig.body.set_state(pos=(5.0, 64.0, 5.4))
+        rig.tick(dt=7.0)  # past the calm window and the instant grace
+        assert intent.state == Intent.DONE
+        assert rig.events_of("intent.done")
+        rig.tick(dt=6.0)  # nothing happens: idle past the threshold
+        assert rig.events_of("task.idle"), "the watchdog must stay reachable"
+    finally:
+        rig.close()
+
+
+def test_runner_birth_refused_while_armed() -> None:
+    # R1-2: the endpoint is reachable from the agent's sandbox; an overwrite would aim
+    # the node's retire_stuck at another sister's serial. One arming per life.
+    rig = Rig()
+    try:
+        born = FakeWall().now.isoformat()
+        assert rig.x.runner_birth(7, born, 45)["armed"] is True
+        with pytest.raises(RuntimeError, match="already armed for serial 7"):
+            rig.x.runner_birth(8, born, 45)
+        assert rig.x._birth.serial == 7  # the armed clock did not change
+    finally:
+        rig.close()
+
+
+def test_respawn_drops_any_intent_that_survived_the_death() -> None:
+    # R1-3: a submit racing the death tick could arm an intent for the NEXT node's body.
+    # The check now lives inside the lock; whatever still survived dies at the respawn.
+    rig = Rig()
+    try:
+        rig.body.set_state(hp=0.0)
+        rig.body.chat = ["LastOrder01 died"]
+        rig.tick()
+        rig.x._current = Intent(99, "goto", {"x": 1, "y": 64, "z": 1}, rig.clock.t)  # the raced intent
+        rig.x.runner_respawn()
+        assert rig.x._current is None
+        rig.tick()
+        assert ("goto", {"x": 1, "y": 64, "z": 1}) not in rig.body.acts  # never applied
+    finally:
+        rig.close()
+
+
+def test_stuck_request_rules_its_own_death_cause() -> None:
+    # R1-4: after a successful retire_stuck the mind rules its death "stuck", not "game".
+    rig = Rig(hive=FakeHive())
+    try:
+        rig.x.runner_birth(7, FakeWall().now.isoformat(), 45)
+        rig.tick(dt=5.1)  # the watchdog fires
+        assert rig.x.retire_stuck()["requested"] is True
+        rig.body.set_state(hp=0.0)
+        rig.body.chat = ["LastOrder01 was killed"]  # the RCON kill hive sent
+        rig.tick()
+        status = rig.x.death_status()
+        assert status["cause"] == "stuck"
+        # the flag belongs to one life: after the respawn the ruling is honest again
+        rig.x.runner_respawn()
+        rig.x.runner_birth(8, FakeWall().now.isoformat(), 45)
+        rig.tick()  # a living tick re-arms the death detector (production: C1 ticks nonstop)
+        rig.body.set_state(hp=0.0)
+        rig.body.chat = ["LastOrder01 drowned"]
+        rig.tick()
+        assert rig.x.death_status()["cause"] == "game"
+    finally:
+        rig.close()
