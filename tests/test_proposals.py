@@ -155,6 +155,47 @@ def test_decide_reject_retires_the_record(book: Book) -> None:
     assert record.decision.accept is False
 
 
+# --- a decision settles the record (review R1-1) -------------------------------------------
+
+
+def test_votes_after_decision_do_not_unsettle_the_record(book: Book) -> None:
+    from runtime.ports import Vote
+
+    proposal = book.book.submit(book.first, "knowledge", knowledge_payload())
+    book.book.decide(proposal.id, accept=True, why="принято")
+    third = book.store.birth("LastOrder03", traits(33)).serial
+    for serial in (book.second, third):
+        book.store.submit_vote(
+            serial, Vote(entry_id=proposal.record_id, accept=False, why="вижу иное")
+        )
+    record = book.store.record(proposal.record_id)
+    assert record.status == "confirmed"  # the decision outranks refuters (R1-1)
+    assert len(record.votes) == 2  # the votes themselves still land on record
+
+
+def test_decided_record_keeps_status_through_duplicate_evidence(book: Book) -> None:
+    proposal = book.book.submit(book.first, "knowledge", knowledge_payload())
+    book.book.decide(proposal.id, accept=True, why="принято")
+    duplicate = book.book.submit(book.second, "knowledge", knowledge_payload())
+    assert duplicate.record_id == proposal.record_id
+    record = book.store.record(proposal.record_id)
+    assert record.status == "confirmed"  # evidence joins never un-decide (R1-1)
+    assert len(record.evidence) == 2
+
+
+def test_accepted_skill_survives_a_vote(book: Book) -> None:
+    from runtime.ports import Vote
+
+    proposal = book.book.submit(book.first, "skill", {"description": "Мост", "script": "x"})
+    updated, _ = book.book.decide(proposal.id, accept=True, why="годится")
+    book.store.submit_vote(
+        book.second, Vote(entry_id=updated.record_id, accept=False, why="мост шаткий")
+    )
+    record = book.store.record(updated.record_id)
+    assert record.status == "confirmed"  # not hypothesis: the decision settles (R1-1)
+    assert len(record.votes) == 1
+
+
 def test_decide_requires_a_reason(book: Book) -> None:
     proposal = book.book.submit(book.first, "knowledge", knowledge_payload())
     with pytest.raises(ProposalError, match="why"):
@@ -313,6 +354,24 @@ def test_unified_diff_roundtrip_on_creation() -> None:
     )
     hunks = parse_unified_diff(diff)
     assert apply_unified_diff("", hunks) == "первая строка\nвторая\n"
+
+
+def test_unified_diff_u0_pure_insertion_lands_after_line_n() -> None:
+    # `diff -U0` shape: @@ -N,0 +M,K @@ inserts AFTER old line N (review R1-2).
+    old = "первая\nвторая\nтретья\n"
+    new = "первая\nвторая\nНОВАЯ СТРОКА\nтретья\n"
+    diff = "".join(
+        difflib.unified_diff(
+            old.splitlines(keepends=True),
+            new.splitlines(keepends=True),
+            fromfile="a/base/instructions.md",
+            tofile="b/base/instructions.md",
+            n=0,
+        )
+    )
+    assert "@@ -2,0 +3 @@" in diff  # the shape the finding is about
+    hunks = parse_unified_diff(diff)
+    assert apply_unified_diff(old, hunks) == new
 
 
 def test_header_looking_content_inside_a_hunk_stays_content() -> None:

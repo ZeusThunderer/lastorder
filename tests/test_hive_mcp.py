@@ -392,6 +392,26 @@ def test_submit_will_gates(stack: Stack) -> None:
     )
 
 
+def test_mark_dead_endpoint_opens_the_will_path(stack: Stack) -> None:
+    serial = stack.birth("LastOrder01")
+    will = will_markdown(serial)
+    # alive: even the will-session header does not help
+    assert "not dead" in node_error(
+        stack, KEY1, "submit_will", {"text": will}, extra={"X-Runner-Session": "will"}
+    )
+    # the death signal mind-N owes hive (review R1-3): POST /registry/mark_dead
+    response = stack.http("POST", "/registry/mark_dead", {"serial": serial})
+    assert response.status_code == 200
+    response = stack.http("POST", "/registry/mark_dead", {"serial": serial})  # idempotent
+    assert response.status_code == 200
+    out = node_call(stack, KEY1, "submit_will", {"text": will}, extra={"X-Runner-Session": "will"})
+    assert out == {"staged": True, "serial": serial}
+    # unknown serial: the single error envelope
+    response = stack.http("POST", "/registry/mark_dead", {"serial": 999})
+    assert response.status_code == 404
+    assert response.json()["error"]["kind"] == "unknown_node"
+
+
 # --- Last Order's tools --------------------------------------------------------------------------
 
 

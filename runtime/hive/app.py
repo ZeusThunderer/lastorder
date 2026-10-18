@@ -6,7 +6,7 @@ in-memory Misaka-net inboxes into `HiveService` — one object implementing the
 
     POST /memory/inheritance | /memory/knowledge | /memory/core_memory
     POST /memory/store_core_memory | /memory/submit_candidate | /memory/submit_vote
-    POST /registry/birth | /registry/request_death | /registry/retire
+    POST /registry/birth | /registry/request_death | /registry/mark_dead | /registry/retire
     GET  /registry/alive
     POST /comms/inbox | /comms/send | /comms/chatter_turn
     GET  /health
@@ -200,6 +200,13 @@ class HiveService:
 
     def request_death(self, serial: int, cause: str) -> None:
         self.lifecycle.request_death(serial, cause)
+
+    def mark_dead(self, serial: int) -> None:
+        """The death signal mind-N owes hive (T-028 review R1-3): the body died in-game,
+        no kill to confirm. Gates `submit_will`; idempotent — retries after a flaky
+        network land on an already-marked node without an error. The wiring of the
+        caller (the mind's death detector) is T-027."""
+        self.lifecycle.mark_dead(serial)
 
     def retire(self, serial: int, cause: str, will_text: str) -> None:
         self.lifecycle.retire(serial, cause, will_text)
@@ -438,6 +445,10 @@ def create_app(
     @app.post("/registry/request_death")
     def registry_request_death(body: dict) -> None:
         service.request_death(_serial(body), _text(body, "cause"))
+
+    @app.post("/registry/mark_dead")
+    def registry_mark_dead(body: dict) -> None:
+        service.mark_dead(_serial(body))
 
     @app.post("/registry/retire")
     def registry_retire(body: dict) -> None:

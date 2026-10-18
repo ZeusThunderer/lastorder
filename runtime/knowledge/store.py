@@ -570,7 +570,11 @@ class KnowledgeStore:
                 joined = duplicate.evidence + evidence
                 data = duplicate.to_dict()
                 data["evidence"] = [e.to_dict() for e in joined]
-                data["status"] = status_of(duplicate.source, duplicate.author, joined, duplicate.votes)
+                # The duplicate's decision rides along (review R1-1): evidence joins never
+                # un-decide a record Last Order has ruled on.
+                data["status"] = status_of(
+                    duplicate.source, duplicate.author, joined, duplicate.votes, duplicate.decision
+                )
                 try:
                     updated = Record.from_dict(data)
                 except SchemaError as exc:
@@ -609,7 +613,11 @@ class KnowledgeStore:
             )
             data = record.to_dict()
             data["votes"] = [v.to_dict() for v in votes]
-            data["status"] = status_of(record.source, record.author, record.evidence, votes)
+            # The record's decision rides along (review R1-1): a vote never un-decides
+            # what Last Order has ruled on — it is recorded, the status stays settled.
+            data["status"] = status_of(
+                record.source, record.author, record.evidence, votes, record.decision
+            )
             try:
                 updated = Record.from_dict(data)
             except SchemaError as exc:

@@ -182,7 +182,13 @@ def apply_unified_diff(current: str, hunks: Sequence[Hunk]) -> str:
     pos = 0
     for hunk in hunks:
         want = list(hunk.old_lines)
-        start = (hunk.old_start - 1) if hunk.old_start > 0 else 0
+        if want:
+            start = hunk.old_start - 1  # 1-based old line -> 0-based index
+        else:
+            # Pure insertion (@@ -N,0 +M,K @@): the new lines go AFTER old line N,
+            # which is the 0-based index N itself (review R1-2; -U0 diffs land here).
+            # A creation hunk (@@ -0,0 …) also lands on index 0.
+            start = hunk.old_start
         start = max(start, pos)
         if lines[start : start + len(want)] != want:
             found = next(
