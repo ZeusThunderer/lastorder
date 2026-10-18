@@ -203,3 +203,55 @@ keyless inbox -> 200 refused ( MCP is_error: «identify yourself: … X-Node-Key
 - C-3 · fixed e453477 (пара ---/+++ после содержимого хунка — отказ «multi-file diffs are not accepted»; одиночная «--- »-строка внутри хунка остаётся контентом, тест добавлен)
 - C-4 · fixed e453477 (публичный `entry_to_json` в client.py)
 - C-5 · fixed e453477 (`append_layer` стора: чтение и запись летописи под одной блокировкой)
+
+## Раунд 2 · 2026-10-18
+Коммиты: f1d0cff (раунд ревью надзора, `Agent: claude` — headless-сессии без git) · 741beac (changes → in_progress) · bbf2667 (R1-1…R1-3)
+
+### Сделано
+- R1-1: `submit_vote` и соединение дублей с evidence передают `decision` записи в `status_of` —
+  голоса и evidence после решения Last Order пишутся, статус остаётся решённым (контракт
+  `status_of` и NETWORK §7). Тесты: accept → два опровержения → `confirmed`; дубль решённой
+  записи → статус прежний, evidence 2; принятый навык → голос → `confirmed`.
+- R1-2: чистая вставка `@@ -N,0 +M,K @@` (вывод `diff -U0`) вставляется после строки N, а не
+  перед ней; тест на `-U0`-дифф (вставка в середину файла).
+- R1-3: `POST /registry/mark_dead` (расширение порта NodeRegistry, «расширять можно») —
+  идемпотентный, единый error envelope (unknown_node 404 / already_retired 409); естественная
+  смерть теперь доходит до `submit_will` по HTTP. Вызов со стороны `mind-N` разводит T-027;
+  аутентификация порта 8000 — зона T-027 (заметка надзора в task.md, не чинил здесь).
+
+### Проверки
+```
+$ uv run pytest
+588 passed in 35.73s
+$ uv run python tools/check.py
+CHARACTERS: last_order, vesper
+Every workplace is intact: files present, links resolve, boxes parse.
+$ docker compose -f docker/compose.yml up -d --build hive
+Container lastorder-hive-1 Started   (оба StreamableHTTP session manager стартовали)
+$ docker compose -f docker/compose.yml exec -T hive python -c «urllib …»
+health: {"status": "ok"} · /node/mcp 200 · /last-order/mcp 200
+/registry/mark_dead -> 409 {"error":{"kind":"already_retired", …}} (накопленный volume стенда;
+на чистом — 404 unknown_node, покрыто тестом test_mark_dead_endpoint_opens_the_will_path)
+```
+
+### Отклонения от задачи
+- нет (сверх согласованных в раунде 1)
+
+### Вне задачи
+- без изменений относительно раунда 1 (праймер-каталог T-010, раскладка volume в KNOWLEDGE.md,
+  доставка общих инструкций T-027/T-029, разведка HIVE_MCP_* в compose)
+
+### Вопросы
+- нет
+
+### Вызовы надзора
+- 2026-10-18 · plan · 1285c58 · VERDICT: revise (P1-1…P1-6) · cost_usd: n/a — хвост вывода скрипта оборвался
+- 2026-10-18 · result · 65eeb80 · VERDICT: changes · cost_usd: 1.34 · effort: high (критичная, diff 2504>800)
+
+### Самопроверка
+- lo-checker: раундов 2, оба CHECK: clean (раунд 2 — ни blocker, ни major, ни minor; R1-1…R1-3 подтверждены тестами)
+
+### Ответ на ревью
+- R1-1 · fixed bbf2667 (decision в оба пересчёта status_of + 3 теста)
+- R1-2 · fixed bbf2667 (позиция чистой вставки + тест -U0)
+- R1-3 · fixed bbf2667 (POST /registry/mark_dead + тест; разводка вызова от mind-N — T-027)
