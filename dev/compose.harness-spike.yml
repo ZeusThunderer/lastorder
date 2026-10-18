@@ -39,8 +39,6 @@ services:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
       SPIKE_MINUTES: "${SPIKE_MINUTES:-15}"
       SPIKE_MODEL: "${SPIKE_MODEL:-openrouter/qwen/qwen3.7-flash}"
-      # zcode: the GLM Coding Plan key through the built-in zai-api provider (step 0)
-      ANTHROPIC_API_KEY: "${ZCODE_API_KEY}"
     command: ["run_opencode.sh"]
     volumes:
       - type: bind
@@ -50,21 +48,37 @@ services:
     profiles: ["opencode"]
 
   harness-zcode:
-    image: lastorder-harness:spike
     build:
       context: ..
-      dockerfile: dev/harness_spike/Dockerfile
+      dockerfile: dev/harness_spike/zcode/Dockerfile
+    image: lastorder-harness-zcode:spike
     networks: [harness-spike]
     mem_limit: 2g
-    working_dir: /workplace
+    working_dir: /workspace
     environment:
-      ANTHROPIC_API_KEY: "${ZCODE_API_KEY}"
+      # The GLM Coding Plan key: the zcode-harness entrypoint renders it into the personal
+      # provider config (~/.zcode/v2, tmpfs — never persists, never enters the image).
+      ZAI_API_KEY: "${ZCODE_API_KEY}"
+      ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"
+      ZCODE_MODE: yolo
+      ZCODE_MODEL_RETRY_MAX_RETRIES: "3"
       SPIKE_MINUTES: "${SPIKE_MINUTES:-15}"
-    command: ["run_zcode.sh"]
+    # bash passthrough of the entrypoint (before key rendering): the session script calls
+    # `zcode-harness run/resume` itself, each call renders the provider atomically.
+    command: ["bash", "/usr/local/bin/run_zcode.sh"]
     volumes:
       - type: bind
         source: ${SPIKE_RUN_DIR:?set SPIKE_RUN_DIR to the throwaway workplace dir}
-        target: /workplace
+        target: /workspace
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+      # single-container session, no cross-container resume (setup README, "Грабли" #2);
+      # tmpfs also keeps the rendered provider config (with the key) out of any volume
+      - /home/agent/.zcode:size=512m,mode=1777
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    pids_limit: 512
     restart: "no"
     profiles: ["zcode"]
 
