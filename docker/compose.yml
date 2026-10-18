@@ -52,6 +52,10 @@ services:
     volumes:
       - body-1:/data
 
+  # The mind of slot 1 (NETWORK.md section 3): C1 plus the body MCP server on :8700 in the
+  # body's network namespace (the py4j bridge stays localhost-only). The runner endpoints
+  # (/runner/status, /runner/respawn, /runner/birth) ride the same port. log.jsonl goes to
+  # the run volume; the C1 thresholds below are env-tunable with the listed defaults.
   mind-1:
     build:
       context: ..
@@ -61,10 +65,15 @@ services:
     depends_on: [body-1]
     environment:
       MC_USERNAME: LastOrder01
-      RCON_HOST: mc-server
-      RCON_PASSWORD: "${RCON_PASSWORD:-lastorder}"
-    command: ["python", "tools/body_probe.py", "--kill"]
-    restart: "no"
+      MCP_BODY_PORT: "8700"
+      MCP_LOG_PATH: /mind-run/log.jsonl
+      MIND_TICK_S: "${MIND_TICK_S:-0.5}"
+      MIND_IDLE_S: "${MIND_IDLE_S:-120}"
+      MIND_FLEE_HP: "${MIND_FLEE_HP:-6}"
+    command: ["python", "-m", "runtime.mind"]
+    volumes:
+      - mind-1-run:/mind-run
+    restart: unless-stopped
 
   # The hive (NETWORK.md section 3): node registry, knowledge base under git (T-012 store),
   # the lifetime scan and RCON deaths (T-022). Port 8000 stays inside the docker network —
@@ -146,6 +155,7 @@ services:
 volumes:
   world:
   body-1:
+  mind-1-run:
   jev-hf:
   knowledge:
   hive-run:

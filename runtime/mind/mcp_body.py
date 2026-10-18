@@ -1,54 +1,54 @@
-"""Minimal body MCP server for the harness spike (T-024; NETWORK.md section 4, ADR-035, ADR-037).
+"""The body MCP server of one slot (NETWORK.md section 4, ADR-035, ADR-037; T-024 spike,
+full set in T-025).
 
-One service per slot: the agent (OpenCode or ZCode in its container) sees the game ONLY through
-these tools — no raw uc commands, no `@gamer`, no server commands. Names pass through perception
-(`plain`, ADR-037); uc's own chat lines are dropped before anything reaches a prompt, and `say`
-is the only way into the player chat, guarded (no `/`, `@`, leading `#`, control characters or
-`§`; length and rate caps).
+The agent sees the game ONLY through these tools — no raw uc commands, no `@gamer`, no
+server commands. The tool set is exactly section 4: `observe`, `act`, `stop`, `say`,
+`wait_events`, `retire_stuck`. C1 (`runtime/mind/executor.py`) owns the body; this file is
+thin async glue: validation of one call, one JSONL line, and handoff. All body access —
+from C1's thread and from tool calls — goes through the executor's body lock (review P1-6).
 
-The spike keeps C1 thin on purpose (the full one is T-025): a ~1 Hz poller feeds the death
-detector (hp = 0 plus the vanilla line — onDeath is silent for mob deaths), collects body
-callback events into the `wait_events` queue, times "act -> effect" with a short 5 Hz burst
-after each act, notices intent completion (`busy` True -> False) and — after a death has been
-served — respawns the body itself, because uc does not auto-respawn without a running task (E1).
-Every tool call is one JSONL line in the call log: the spike's numbers come from there.
+Next to `/mcp` the same port serves the runner's endpoints (review P1-1): the runner in
+`node-N` has no docker access, so `GET /runner/status` carries the death (cause included,
+NETWORK section 6.3) and `POST /runner/respawn` / `POST /runner/birth` command the body
+after it. The port lives in the body's network namespace and is never published to the
+host; respawn outside the dead state is a 409 (review P1-7).
 
-Run: `python -m runtime.mind.mcp_body` (streamable HTTP, 0.0.0.0:${MCP_BODY_PORT:-8700}/mcp).
-The port is published inside the body's network namespace; the py4j bridge stays on localhost
-and is NOT reachable from the harness network (checked during the spike run, review P1-1).
+Run: `python -m runtime.mind` (or `python -m runtime.mind.mcp_body`) — streamable HTTP on
+0.0.0.0:${MCP_BODY_PORT:-8700}/mcp.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
-import threading
 import time
-from collections import deque
-from typing import Any, Callable, Mapping
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError as SdkToolError
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 from runtime.game.py4j_body import LEVERS
-from runtime.lastorder.death import DeathDetector
-from runtime.perception.chat import clean_chat, is_service_line, strip_formatting
+from runtime.mind.executor import (
+    DEAD_ACT_ERROR,
+    TICK_MAX_S,
+    TICK_MIN_S,
+    Executor,
+    JsonlLog,
+)
+from runtime.perception.chat import clean_chat
 from runtime.perception.translate import Perception
 
 log = logging.getLogger("mcp_body")
 
-# --- limits (spike values; rate caps move to the gateway in T-026) ---------------------
+# --- limits (rate caps move to the gateway in T-026) --------------------------------------
 
 SAY_MAX_LEN = 256  # vanilla rejects longer chat anyway
 SAY_MIN_INTERVAL_S = 4.0  # one line per 4 s; no chatter director anymore (ADR-035)
 WAIT_TIMEOUT_MAX_S = 600.0
-POLL_INTERVAL_S = 1.0
-ACT_BURST_INTERVAL_S = 0.2  # after each act: poll ~5 Hz for 5 s to time "act -> effect" (P2-4)
-ACT_BURST_SPAN_S = 5.0
-RESPAWN_DELAY_S_DEFAULT = 45.0  # the will session needs time to react to the death event
-RESPAWN_MAX_ATTEMPTS = 3  # bounded respawn retries, then the body stays dead (review R1-4)
 ITEM_RE = re.compile(r"^[a-z0-9_]+$")
 NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,32}$")
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -58,7 +58,7 @@ COORD_ABS_MAX = 30_000_000
 FORBIDDEN_LEVERS = ("command", "chat")
 
 # tap_key/hold_key allowlist: movement keys only; no chat, no console, no inventory screens
-# (review P1-8). Values are uc KeyboardKey names as the levers accept them.
+# (spike review P1-8). Values are uc KeyboardKey names as the levers accept them.
 KEY_ALLOWLIST = frozenset({"w", "a", "s", "d", "space", "shift"})
 
 INT_ARGS: dict[tuple[str, str], tuple[int, int]] = {
@@ -120,7 +120,7 @@ def _err(message: str) -> None:
     raise ToolError(message)
 
 
-# --- validation (pure; unit-tested) ----------------------------------------------------
+# --- validation (pure; unit-tested) --------------------------------------------------------
 
 
 def _as_int(value: Any, what: str, lo: int, hi: int) -> int:
@@ -145,7 +145,7 @@ def _as_item(value: Any, what: str) -> str:
     """A plain item name ("oak log", "oak_log") to its registry id ("oak_log").
 
     Anything that is not a plain name — a command tail, stray punctuation, a bare number —
-    is a rejection, so an injected `@` command can never ride into `@get` (review P1-2)."""
+    is a rejection, so an injected `@` command can never ride into `@get` (spike P1-2)."""
     if not isinstance(value, str):
         _err(f"{what} must be a string")
     tokens = value.strip().lower().split()
@@ -176,7 +176,7 @@ def validate_args(lever: str, args: Mapping[str, Any]) -> dict[str, Any]:
     """Check one act() call against the lever specs; returns the cleaned args dict.
 
     Unknown levers, forbidden levers, unknown argument names, wrong types and out-of-range
-    values are rejections, not silent fixes: the agent sees the reason and can retry (P1-2)."""
+    values are rejections, not silent fixes: the agent sees the reason and can retry."""
     if lever in FORBIDDEN_LEVERS:
         _err(f"lever {lever!r} is not available to the agent (ADR-037)")
     if lever not in _KNOWN_LEVERS:
@@ -246,7 +246,7 @@ def _validate_mine(args: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def check_say(text: Any) -> str:
-    """Validate one chat line; returns the cleaned text (review P1-3).
+    """Validate one chat line; returns the cleaned text (spike review P1-3).
 
     Vanilla kicks the player for `§` and control characters — that would lose the body
     mid-run; `#` at the start is Baritone's chat command prefix in this fork (unionclef
@@ -271,237 +271,64 @@ def check_say(text: Any) -> str:
     return cleaned
 
 
-# --- call log --------------------------------------------------------------------------
-
-
-class JsonlCallLog:
-    """One JSON line per tool call; the spike's numbers come from here (review P1-5)."""
-
-    def __init__(self, path: str | None = None):
-        self._lock = threading.Lock()
-        self._fh = open(path, "a", encoding="utf-8") if path else None
-        self.entries: list[dict[str, Any]] = []
-
-    def record(self, entry: dict[str, Any]) -> None:
-        with self._lock:
-            self.entries.append(dict(entry))
-            if self._fh:
-                self._fh.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
-                self._fh.flush()
-        log.info("call %s", json.dumps(entry, ensure_ascii=False, default=str))
-
-    def close(self) -> None:
-        if self._fh:
-            self._fh.close()
-
-
-# --- the server ------------------------------------------------------------------------
+# --- the tools ----------------------------------------------------------------------------
 
 
 class BodyMcp:
-    """The five spike tools over one body. The MCP layer is async glue; the body is sync."""
+    """The six section-4 tools over one Executor. The MCP layer is async glue; C1 owns
+    the body, this class only validates and forwards, one JSONL line per call."""
 
     def __init__(
         self,
-        body: Any,
+        executor: Executor,
         *,
-        username: str,
         perception: Perception | None = None,
-        call_log: JsonlCallLog | None = None,
-        poll_interval: float = POLL_INTERVAL_S,
-        respawn_delay: float = RESPAWN_DELAY_S_DEFAULT,
         clock: Callable[[], float] = time.monotonic,
     ):
-        self._body = body
-        self._username = username
+        self._x = executor
         self._perception = perception or Perception(descriptions={}, salt="", mode="plain")
-        self._calls = call_log or JsonlCallLog()
         self._clock = clock
-        self._poll_interval = poll_interval
-        self._respawn_delay = respawn_delay
-        self._detector = DeathDetector(username)
-        self._queue: deque[dict[str, Any]] = deque(maxlen=200)
-        self._queue_cond = threading.Condition()
-        self._events_watermark = 0
-        self._intent_seq = 0
         self._last_say_at = -1e9
-        self._busy = False
-        self._hp = -1.0
-        self._last_damage_at = -1e9
-        self._dead = False
-        self._respawn_at: float | None = None
-        self._respawned_for_death = False
-        self._respawn_attempts = 0
-        self._pending_act: dict[str, Any] | None = None
-        self._stop_event = threading.Event()
-        self._poll_thread: threading.Thread | None = None
 
-    # -- event text (review R1-2) -----------------------------------------------------
-
-    def _clean_event_text(self, raw: Any) -> str | None:
-        """Event text fit for the agent — the same cleaning observe applies to chat:
-        service lines dropped, `§` codes stripped, `minecraft:` ids normalized; text that
-        cleans to nothing is not delivered. Returns None for "drop it"."""
-        text = str(raw or "")
-        if is_service_line(text):
-            return None
-        return self._perception.scrub(strip_formatting(text)).strip() or None
-
-    # -- lifecycle ------------------------------------------------------------------
-
-    def start_poller(self) -> None:
-        if self._poll_thread is not None:
-            return
-        self._poll_thread = threading.Thread(target=self._poll_loop, name="mcp-body-poll", daemon=True)
-        self._poll_thread.start()
-
-    def stop_poller(self) -> None:
-        self._stop_event.set()
-
-    def _poll_loop(self) -> None:
-        while not self._stop_event.is_set():
-            started = self._clock()
-            try:
-                self._poll_once()
-            except Exception as exc:  # a flaky bridge must not kill the poller
-                log.warning("poll failed: %s: %s", type(exc).__name__, exc)
-            interval = ACT_BURST_INTERVAL_S if self._pending_act else self._poll_interval
-            delay = interval - (self._clock() - started)
-            if delay > 0:
-                time.sleep(delay)
-
-    def _poll_once(self) -> None:
-        for event in self._body.events():
-            try:
-                idx = int(str(event.id).rsplit("#", 1)[1])
-            except (IndexError, ValueError):
-                idx = 0
-            if idx <= self._events_watermark:
-                continue
-            self._events_watermark = idx
-            payload = dict(event.payload or {})
-            if event.type == "chat.line" and not payload.get("service"):
-                text = self._clean_event_text(payload.get("text"))
-                if text is not None:  # empty/service-looking chat never reaches the agent
-                    self._emit_event("chat.line", text=text)
-            elif event.type == "game.damage" and not payload.get("service"):
-                self._last_damage_at = self._clock()
-                text = self._clean_event_text(payload.get("text"))
-                damage: dict[str, Any] = {} if text is None else {"text": text}
-                self._emit_event("game.damage", **damage)
-            # server.info and game.event are uc bookkeeping: dropped (ADR-037)
-
-        state = self._body.state()
-        hp = float(getattr(state, "hp", 0.0) or 0.0)
-        if self._hp >= 0.0 and 0.0 < hp < self._hp and self._clock() - self._last_damage_at > 2.0:
-            self._emit_event("game.damage", hp_from=self._hp, hp_to=hp)  # poll-fed fallback
-        self._hp = hp
-
-        death = self._detector.feed(state, list(self._body.recent_chat(10)))
-        if death is not None:
-            self._dead = True
-            self._respawn_at = self._clock() + self._respawn_delay
-            self._respawned_for_death = False
-            self._respawn_attempts = 0
-            self._pending_act = None
-            # The death event always fires (it drives the will and the respawn); its text
-            # gets the same cleaning as chat (review R1-2).
-            death_text = self._clean_event_text(death.text) or "game.death"
-            self._emit_event("game.death", text=death_text)
-            # Log the death at detection time, not only when a wait_events call delivers it:
-            # the host orchestrator watches this file (a death must never be missed even if
-            # the agent never waits again — CLAUDE.md: no death without a will).
-            self._calls.record(
-                {"ts": time.time(), "tool": "event", "event": "game.death", "text": death_text}
-            )
-
-        if self._dead and state.in_game and hp > 0.0:
-            self._dead = False  # a living body again — the respawn worked
-        if (
-            self._dead
-            and self._respawn_at is not None
-            and not self._respawned_for_death
-            and self._clock() >= self._respawn_at
-        ):
-            try:
-                self._body.respawn()
-                self._respawned_for_death = True  # exactly one respawn per death (P1-4)
-                self._respawn_at = None
-            except Exception as exc:  # a failed respawn must not leave the body dead
-                # forever with no trace (review R1-4): retry with a bound, log every miss.
-                self._respawn_attempts += 1
-                log.warning(
-                    "respawn failed (attempt %d): %s: %s", self._respawn_attempts, type(exc).__name__, exc
-                )
-                self._calls.record(
-                    {
-                        "ts": time.time(),
-                        "tool": "event",
-                        "event": "respawn.retry"
-                        if self._respawn_attempts < RESPAWN_MAX_ATTEMPTS
-                        else "respawn.gave_up",
-                        "attempt": self._respawn_attempts,
-                    }
-                )
-                if self._respawn_attempts >= RESPAWN_MAX_ATTEMPTS:
-                    self._respawned_for_death = True  # stop trying; the body stays dead
-                    self._respawn_at = None
-                else:
-                    self._respawn_at = self._clock() + self._respawn_delay
-
-        busy = bool(self._body.busy())
-        if self._pending_act is not None:
-            pend = self._pending_act
-            pos = tuple(round(float(c), 2) for c in getattr(state, "pos", ()) or ())
-            moved = pend["pos"] is not None and pos != pend["pos"]
-            changed = busy != pend["busy"]
-            if changed or moved or self._clock() - pend["t"] >= ACT_BURST_SPAN_S:
-                entry = dict(pend["entry"])
-                entry["effect_ms"] = int((self._clock() - pend["t"]) * 1000)
-                entry["effect_reason"] = "moved" if moved else ("busy_change" if changed else "span_end")
-                self._calls.record(entry)
-                self._pending_act = None
-        # intent completion: an active task (busy) that just ended. Instant levers need no
-        # event — the act() reply already told the agent the body is free.
-        if self._busy and not busy and not self._dead:
-            self._emit_event("intent.done")
-        self._busy = busy
-
-    def _emit_event(self, type_: str, **fields: Any) -> None:
-        with self._queue_cond:
-            self._queue.append({"type": type_, **fields})
-            self._queue_cond.notify_all()
-
-    # -- tools -----------------------------------------------------------------------
+    @property
+    def executor(self) -> Executor:
+        return self._x
 
     async def _tool(self, name: str, args: Mapping[str, Any], fn: Callable[[], Any]) -> Any:
-        """One logged call: sync body work in a thread, JSONL line either way (P1-5)."""
-        entry: dict[str, Any] = {"ts": time.time(), "tool": name, "args": dict(args)}
+        """One logged call: sync body work in a thread, one JSONL line either way."""
+        entry: dict[str, Any] = {"tool": name, "args": dict(args)}
         try:
             result = await asyncio.to_thread(fn)
         except ToolError as exc:
-            entry.update(t_end=time.time(), ok=False, error=str(exc))
-            self._calls.record(entry)
+            self._x.journal.record("call", ok=False, error=str(exc), **entry)
             raise
         except Exception as exc:
-            entry.update(t_end=time.time(), ok=False, error=f"{type(exc).__name__}: {exc}")
-            self._calls.record(entry)
+            self._x.journal.record(
+                "call", ok=False, error=f"{type(exc).__name__}: {exc}", **entry
+            )
             raise
-        entry.update(t_end=time.time(), ok=True)
+        fields: dict[str, Any] = {"ok": True}
         if isinstance(result, dict):
             if name == "wait_events":
-                entry["woke_by"] = result.get("type")
+                fields["woke_by"] = result.get("type")
             elif name == "act":
-                entry["intent_id"] = result.get("intent_id")
-        self._calls.record(entry)
+                fields["intent_id"] = result.get("intent_id")
+        self._x.journal.record("call", **fields, **entry)
         return result
 
     def _seen(self, raw: str, kind: str) -> str:
-        seen = self._perception.see(raw, kind)  # type: ignore[arg-type]
-        return seen.render()
+        return self._perception.see(raw, kind).render()
+
+    # -- section 4 tools (sync bodies; the async wrappers in build_server add logging) ---
 
     def observe(self) -> dict[str, Any]:
-        state = self._body.state()
+        body = self._x.body
+        with self._x.body_lock:  # one writer with C1 at a time (review P1-6)
+            state = body.state()
+            entities = tuple(body.entities(radius=16))
+            blocks = tuple(body.blocks_around(radius=4))
+            inventory = tuple(body.inventory())
+            chat = tuple(body.recent_chat(5))
         return {
             "self": {
                 "in_game": bool(getattr(state, "in_game", False)),
@@ -522,43 +349,30 @@ class BodyMcp:
                     "dist_m": round(float(e.dist_m), 1),
                     "pos": list(e.pos) if e.pos else None,
                 }
-                for e in self._body.entities(radius=16)
+                for e in entities
             ],
             "blocks": [
                 {"name": self._seen(b.name, "block"), "pos": list(b.pos) if b.pos else None}
-                for b in self._body.blocks_around(radius=4)
+                for b in blocks
             ],
             "inventory": [
                 {"name": self._seen(i.name, "item"), "count": int(i.count), "slot": int(i.slot)}
-                for i in self._body.inventory()
+                for i in inventory
             ],
-            "chat": [self._perception.scrub(line) for line in clean_chat(self._body.recent_chat(5))],
+            "chat": [self._perception.scrub(line) for line in clean_chat(chat)],
         }
 
     def act(self, intent: str, args: Mapping[str, Any] | None = None) -> dict[str, Any]:
         cleaned = validate_args(intent, args)
-        self._intent_seq += 1
-        intent_id = self._intent_seq
-        self._body.act(intent, cleaned)
-        state = self._body.state()
-        self._pending_act = {
-            "t": self._clock(),
-            "busy": bool(self._body.busy()),
-            "pos": tuple(round(float(c), 2) for c in getattr(state, "pos", ()) or ()) or None,
-            "entry": {
-                "ts": time.time(),
-                "tool": "act",
-                "args": {"intent": intent, **cleaned},
-                "t_end": time.time(),
-                "ok": True,
-                "intent_id": intent_id,
-            },
-        }
-        return {"intent_id": intent_id, "busy": self._body.busy()}
+        try:
+            submitted = self._x.submit(intent, cleaned)
+        except RuntimeError as exc:  # the dead state refuses intents (review P1-2)
+            raise ToolError(str(exc) or DEAD_ACT_ERROR) from exc
+        return {"intent_id": submitted.id}
 
     def stop(self) -> dict[str, Any]:
-        self._body.stop()
-        self._pending_act = None
+        with self._x.body_lock:
+            self._x.stop_intent()
         return {"stopped": True}
 
     def say(self, text: str) -> dict[str, Any]:
@@ -567,7 +381,8 @@ class BodyMcp:
         if now - self._last_say_at < SAY_MIN_INTERVAL_S:
             _err(f"say: too fast, one line per {SAY_MIN_INTERVAL_S:.0f} s")
         self._last_say_at = now
-        self._body.act("chat", {"text": cleaned})
+        with self._x.body_lock:
+            self._x.body.act("chat", {"text": cleaned})
         return {"said": True, "text": cleaned}
 
     def wait_events(self, timeout_s: float) -> dict[str, Any]:
@@ -576,49 +391,38 @@ class BodyMcp:
         timeout_s = float(timeout_s)
         if not 0.0 < timeout_s <= WAIT_TIMEOUT_MAX_S:
             _err(f"wait_events: timeout_s must be within 0 < t <= {WAIT_TIMEOUT_MAX_S:.0f}")
-        deadline = self._clock() + timeout_s
-        with self._queue_cond:
-            while not self._queue:
-                remaining = deadline - self._clock()
-                if remaining <= 0:
-                    return {"type": "timeout", "timeout_s": timeout_s}
-                self._queue_cond.wait(remaining)
-            event = self._queue.popleft()
+        event = self._x.events.pop(timeout_s, self._clock)
+        if event is None:
+            return {"type": "timeout", "timeout_s": timeout_s}
         return {"type": event["type"], **{k: v for k, v in event.items() if k != "type"}}
 
+    def retire_stuck(self) -> dict[str, Any]:
+        try:
+            return self._x.retire_stuck()
+        except RuntimeError as exc:
+            _err(str(exc))
 
-# --- wiring ----------------------------------------------------------------------------
+
+# --- wiring -------------------------------------------------------------------------------
 
 
 def build_server(
-    body: Any,
+    impl: BodyMcp,
     *,
-    username: str,
-    perception: Perception | None = None,
-    call_log: JsonlCallLog | None = None,
-    poll_interval: float = POLL_INTERVAL_S,
-    respawn_delay: float = RESPAWN_DELAY_S_DEFAULT,
-    clock: Callable[[], float] = time.monotonic,
-    start_poller: bool = True,
+    start_c1: bool = True,
 ) -> tuple[MCPServer, BodyMcp]:
-    """Wire BodyMcp into an MCPServer; returns (server, impl) — tests use the impl directly."""
-    impl = BodyMcp(
-        body,
-        username=username,
-        perception=perception,
-        call_log=call_log,
-        poll_interval=poll_interval,
-        respawn_delay=respawn_delay,
-        clock=clock,
-    )
+    """Wire the tools and the runner endpoints; returns (server, impl)."""
+    executor = impl.executor
     server = MCPServer(
         name="body",
-        version="0.1.0",
+        version="0.2.0",
         instructions=(
-            "Minimal body of one slot for the harness spike. Tools: observe (state, entities, "
-            "blocks, inventory, filtered chat), act (levers), stop, say (player chat), "
-            "wait_events (sleep until something happens or the timeout ends). Names are plain "
-            "game names; uc service lines are already filtered out."
+            "The body of one slot, held by C1 between your turns. Tools: observe (state, "
+            "entities, blocks, inventory, filtered chat), act (an intent from the levers; C1 "
+            "applies it and may interrupt it for a threat, then returns to it), stop, say "
+            "(player chat), wait_events (sleep until an event or the timeout — you pick the "
+            "rhythm), retire_stuck (only after a task.idle event). Names are plain game "
+            "names; uc service lines are already filtered out."
         ),
     )
 
@@ -639,14 +443,75 @@ def build_server(
             "wait_events", {"timeout_s": timeout_s}, lambda: impl.wait_events(timeout_s)
         )
 
+    async def retire_stuck() -> dict[str, Any]:
+        return await impl._tool("retire_stuck", {}, impl.retire_stuck)
+
     server.add_tool(observe, name="observe")
     server.add_tool(act, name="act")
     server.add_tool(stop, name="stop")
     server.add_tool(say, name="say")
     server.add_tool(wait_events, name="wait_events")
-    if start_poller:
-        impl.start_poller()
+    server.add_tool(retire_stuck, name="retire_stuck")
+
+    # --- the runner's endpoints (review P1-1, P1-7); same port, same body network ------
+
+    @server.custom_route("/runner/status", methods=["GET"])
+    async def runner_status(request: Request) -> Response:
+        return JSONResponse(executor.death_status())
+
+    @server.custom_route("/runner/respawn", methods=["POST"])
+    async def runner_respawn(request: Request) -> Response:
+        if not executor.dead():
+            return JSONResponse({"error": "the body is not dead"}, status_code=409)
+        try:
+            result = await asyncio.to_thread(executor.runner_respawn)
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+        return JSONResponse(result)
+
+    @server.custom_route("/runner/birth", methods=["POST"])
+    async def runner_birth(request: Request) -> Response:
+        try:
+            payload = await request.json()
+            serial, born_at, ttl_min = (
+                int(payload["serial"]),
+                str(payload["born_at"]),
+                int(payload["ttl_min"]),
+            )
+            result = await asyncio.to_thread(executor.runner_birth, serial, born_at, ttl_min)
+        except (ValueError, KeyError, TypeError) as exc:
+            return JSONResponse({"error": f"bad payload: {exc}"}, status_code=400)
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return JSONResponse(result)
+
+    if start_c1:
+        executor.start()
     return server, impl
+
+
+def build_mind(
+    body: Any,
+    *,
+    username: str,
+    perception: Perception | None = None,
+    call_log: JsonlLog | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    start_c1: bool = True,
+    **executor_kwargs: Any,
+) -> tuple[MCPServer, BodyMcp, Executor]:
+    """Assemble the whole mind of one slot; tests use the impl and executor directly."""
+    executor = Executor(
+        body,
+        username=username,
+        log_=call_log or JsonlLog(),
+        perception=perception,
+        clock=clock,
+        **executor_kwargs,
+    )
+    impl = BodyMcp(executor, perception=perception, clock=clock)
+    server, impl = build_server(impl, start_c1=start_c1)
+    return server, impl, executor
 
 
 def main() -> None:
@@ -654,20 +519,59 @@ def main() -> None:
 
     from runtime.config import env
     from runtime.game.py4j_body import Py4jBody
+    from runtime.hive.client import HiveClient
+    from runtime.ports import BirthRecord
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     port = int(env("MCP_BODY_PORT", default="8700") or "8700")
     username = env("MC_USERNAME", default="LastOrder01") or "LastOrder01"
     log_path = env("MCP_LOG_PATH", default="") or None
-    respawn_delay = float(env("MCP_RESPAWN_DELAY_S", default=str(RESPAWN_DELAY_S_DEFAULT)))
 
-    call_log = JsonlCallLog(log_path)
+    def _env_float(name: str, default: float) -> float:
+        raw = env(name, default=str(default))
+        try:
+            return float(raw)
+        except ValueError:
+            raise ValueError(f"{name} must be a number, got {raw!r}")
+
+    tick = _env_float("MIND_TICK_S", 0.5)
+    if not TICK_MIN_S <= tick <= TICK_MAX_S:
+        raise ValueError(f"MIND_TICK_S must keep C1 within 1-4 Hz ({TICK_MIN_S}..{TICK_MAX_S} s), got {tick}")
+
+    serial_raw = env("NODE_SERIAL", default="")
+    birth: BirthRecord | None = None
+    hive: HiveClient | None = None
+    if serial_raw:
+        serial = int(serial_raw)  # a bad value is a startup error, not a silent no-clock
+        born_at = env("NODE_BORN_AT", default="")
+        ttl_raw = env("NODE_TTL_MIN", default="")
+        if not born_at or not ttl_raw:
+            raise ValueError("NODE_SERIAL set: NODE_BORN_AT and NODE_TTL_MIN are required too")
+        birth = BirthRecord(serial=serial, born_at=born_at, ttl_min=int(ttl_raw))
+        hive = HiveClient(base_url=env("HIVE_URL", default="http://hive:8000") or "http://hive:8000")
+        log.info("life clock armed: serial %d, ttl %s min", serial, ttl_raw)
+
+    call_log = JsonlLog(log_path)
     body = Py4jBody()
-    server, _impl = build_server(body, username=username, call_log=call_log, respawn_delay=respawn_delay)
+    server, _impl, _executor = build_mind(
+        body,
+        username=username,
+        call_log=call_log,
+        birth=birth,
+        hive=hive,
+        tick_interval=tick,
+        flee_hp=_env_float("MIND_FLEE_HP", 6.0),
+        fight_radius_m=_env_float("MIND_FIGHT_RADIUS_M", 3.0),
+        threat_calm_s=_env_float("MIND_THREAT_CALM_S", 6.0),
+        evade_m=_env_float("MIND_EVADE_M", 12.0),
+        idle_s=_env_float("MIND_IDLE_S", 120.0),
+    )
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the harness
     # reaches the port by service name (body-1:8700) inside the docker network, not via localhost.
     app = server.streamable_http_app(stateless_http=True, streamable_http_path="/mcp", host="0.0.0.0")
-    log.info("body MCP for %s on 0.0.0.0:%d/mcp (log: %s)", username, port, log_path or "stderr")
+    log.info(
+        "body MCP for %s on 0.0.0.0:%d/mcp (+/runner/*) log: %s", username, port, log_path or "stderr"
+    )
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 
