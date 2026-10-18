@@ -46,3 +46,67 @@
 настоящий streamable HTTP в тестах, лимит `send` 160, dedup как есть) — принято. После правки
 P1-1…P1-3 в `## План 2` — повторное ревью плана не обязательно, если правки сделаны ровно так;
 иначе — новое ревью.
+
+## Раунд 1 · 2026-10-18 · вердикт: changes · headless
+Проверено: `main...z/T-028-mcp-hive` @ 65eeb80, построчно (criticality: critical): `runtime/hive/mcp.py`,
+`runtime/hive/proposals.py`, `runtime/hive/app.py`, новые части `runtime/hive/lifecycle.py`,
+`runtime/knowledge/store.py` (status_of, submit_candidate, submit_vote, decisions, layers),
+`runtime/knowledge/schema.py` (Decision), тесты по именам и ключевым телам.
+
+### Проверки (прогнаны надзором)
+- `uv run pytest` — **не прогнано**: в этом headless-вызове Bash и PowerShell запрещены (режим don't ask).
+  По правилу скила команда без прав считается непройденной. Цифры отчёта (583 passed) не подтверждены.
+- `uv run python tools/check.py` — не прогнано, та же причина.
+- `docker compose -f docker/compose.yml up -d hive` — не прогнано, та же причина.
+- Коммит этого раунда и `task.md` надзор сделать не смог (git тоже недоступен): правки лежат
+  в worktree незакоммиченными. ZCode коммитит их как есть (`T-028: review round 1`, `Agent: claude`).
+
+### Критерии приёмки
+- [x] Инструменты сестры, личность по ключу → слот → живой узел, сверка `X-Runner-Node` — по коду
+  и тестам `test_identity_needs_a_known_key`, `test_runner_header_is_a_crosscheck_only`,
+  `test_key_follows_the_slot_through_rebirth` (тесты не запускались).
+- [x] Инструменты Last Order на отдельном сервере, у сестры их нет — `test_last_order_tool_set_and_sister_lack`,
+  `test_cross_key_refusals`.
+- [x] `propose` трёх видов, дубль → evidence — тесты есть; виды `recipe`/`term` отдельно не прогоняются
+  (идут той же веткой `submit_candidate`) — приемлемо.
+- [ ] `decide(accept)` пишет в базу под git с автором и причиной, ядро — отказ: запись и коммит есть,
+  но принятое решение не держится — см. R1-1.
+- [x] `submit_will` — только мёртвой, один раз; `send` — лимит — `test_submit_will_gates`, `test_send_inbox_and_limits`.
+- [x] Прогон двух клиентов — `test_two_clients_proposal_decision_slice` (сверяет `matched`, а не сам срез — приемлемо).
+
+### Находки
+- R1-1 · major · `runtime/knowledge/store.py:573`, `runtime/knowledge/store.py:612` · `submit_candidate`
+  (дубль → evidence) и `submit_vote` пересчитывают статус через `status_of(...)` без `decision`. Поле
+  `decision` в записи остаётся, но статус считается так, будто решения нет. Сценарии: (а) Last Order принял
+  знание (confirmed), одна сестра голосует против с причиной — запись становится `disputed`, две — `retired`;
+  (б) принятый навык (`kind=skill`, confirmed, без evidence) после любого голоса падает в `hypothesis`
+  или ниже. Это противоречит собственному контракту `status_of` («a decision settles the record… above
+  refuters and evidence») и NETWORK §7. Ожидается: оба вызова передают `record.decision` /
+  `duplicate.decision`. Голоса и evidence после решения по-прежнему пишутся, а статус остаётся решённым.
+  Тест: accept → два опровержения → `confirmed`; принятый навык → голос → `confirmed`; дубль решённой записи → статус прежний.
+- R1-2 · minor · `runtime/hive/proposals.py:185` · Хунк чистой вставки `@@ -N,0 +M,K @@` (вывод
+  `diff -U0`) по смыслу unified diff вставляет строки **после** строки N, а код вставляет перед ней
+  (`start = old_start - 1`). Контекстные диффы (difflib, `-U3`) это не задевает. Ожидается: при пустом
+  `old_lines` и `old_start > 0` — `start = old_start`, плюс тест на `-U0`.
+- R1-3 · minor · `runtime/hive/lifecycle.py:260` · У `mark_dead` нет вызова через HTTP. `mind-N` и раннер
+  живут в других контейнерах, поэтому T-027 понадобится расширение порта (`POST /registry/mark_dead`).
+  Пока его нет, `submit_will` при естественной смерти недостижим, и путь всегда уходит в аварийное
+  завещание раннера. Аварийный путь цел: регрессии нет, план это согласовал. Отметить в отчёте как
+  точку интеграции T-027; можно добавить endpoint здесь, «расширять можно».
+
+### Чек-лист проекта
+- Проверки надзором не прогнаны (см. выше): `accept` невозможен независимо от R1-1.
+- Восприятие: `_no_raw_ids` на навыке и `_refuse_raw_ids` стора на знаниях и голосах — без замечаний.
+  Сырых команд uc, `@gamer` и команд сервера в инструментах нет.
+- Единственный писатель базы: все записи идут через `KnowledgeStore` под его блокировкой, слои ограничены
+  `base/` (`_layer_path`), ядро вне досягаемости — без замечаний.
+- LLM-вызовов в диффе нет. Решателя в коде нет: `decide` выносит Last Order.
+- Вне «Можно трогать»: `lifecycle.py` (mark_dead) и расширение `store.py` согласованы ревью плана;
+  `client.py` — одна публичная строка (C-4), принимается.
+- **Вне задачи → T-027 (важно).** Порты HTTP (`/registry/retire`, `/registry/request_death`,
+  `/memory/submit_vote`, `/memory/submit_candidate`) без аутентификации отвечают на том же порту 8000,
+  что и MCP. Если песочница `node-N` видит `hive:8000` целиком, агент с bash подделает голос чужим номером
+  или вызовет `request_death`/`retire` для сестры. Проверка ключа в MCP тогда декоративна. Порт MCP
+  на том же порту одобрил надзор в ревью плана, поэтому это не находка исполнителю. Но T-027 обязан
+  закрыть доступ (отдельный listener или прокси только с `/node/mcp` для песочницы, ADR-033), иначе
+  критерий «чужой номер — отказ» не держится на стенде.
