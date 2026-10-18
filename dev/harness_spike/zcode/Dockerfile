@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ZCODE_MODEL=GLM-5.3 \
     ZCODE_PROVIDER_ID=zai-cp
 
-# Инструменты, которые агент реально дёргает через Bash-tool
+# Tools the agent actually exercises through its Bash tool
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates git ripgrep fd-find jq curl openssh-client \
@@ -28,7 +28,7 @@ RUN npm install -g --no-fund --no-audit "zcode-app-cli@${ZCODE_APP_CLI_VERSION}"
  && npm cache clean --force \
  && zcode --version
 
-# node-образ уже содержит пользователя node с uid 1000 — переиспользуем под именем agent
+# The node image already ships a uid-1000 user "node" — rename it to "agent"
 RUN usermod -l agent -d /home/agent -m node \
  && groupmod -n agent node \
  && usermod -u "${AGENT_UID}" agent && groupmod -g "${AGENT_GID}" agent \

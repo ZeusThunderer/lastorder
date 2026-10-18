@@ -136,7 +136,7 @@ def _as_float(value: Any, what: str, lo: float, hi: float) -> float:
         _err(f"{what} must be a number, got {type(value).__name__}")
     fv = float(value)
     if not lo <= fv <= hi:
-        _err(f"{what} must be within {lo}0..{hi}0, got {fv}")
+        _err(f"{what} must be within {lo}..{hi}, got {fv}")
     return fv
 
 
