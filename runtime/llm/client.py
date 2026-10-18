@@ -8,8 +8,14 @@ Env (new name first, NetTyan name as fallback):
   LLM_TIMEOUT_S, LLM_MAX_TOKENS, LLM_TEMPERATURE
 
 Tiers (ADR-023): for_tier("node"|"smart") reads the same variables with an LLM_NODE_ / LLM_SMART_
-prefix first and falls back to the base LLM_* names: LLM_<TIER>_MODEL, _API_BASE, _REASONING_OFF,
-_MAX_TOKENS, _TEMPERATURE, _TIMEOUT_S. The API key stays shared: LLM_API_KEY.
+prefix first and falls back to the base LLM_* names: LLM_<TIER>_MODEL, _API_BASE, _API_KEY,
+_REASONING_OFF, _MAX_TOKENS, _TEMPERATURE, _TIMEOUT_S.
+
+Gateway (ADR-033): containers do not hold provider keys. Point LLM_<TIER>_API_BASE (or the base
+LLM_API_BASE) at the llm-gateway proxy and put the consumer's virtual key into LLM_API_KEY — or
+into LLM_<TIER>_API_KEY when one process needs different keys per tier. The model string stays
+the full litellm name (the gateway routes by it), so only the base URL and the key differ from
+a direct provider setup.
 """
 
 from __future__ import annotations
@@ -58,7 +64,7 @@ class LLMConfig:
         return cls(
             model=model,
             api_base=_url(env(f"{prefix}API_BASE", "LLM_API_BASE", "CORE_LLM_API_BASE")),
-            api_key=env("LLM_API_KEY"),
+            api_key=env(f"{prefix}API_KEY", "LLM_API_KEY"),
             reasoning_off=off,
             timeout_s=float(env(f"{prefix}TIMEOUT_S", "LLM_TIMEOUT_S", default="30")),
             max_tokens=int(env(f"{prefix}MAX_TOKENS", "LLM_MAX_TOKENS", default="600")),
