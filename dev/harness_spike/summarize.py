@@ -128,56 +128,63 @@ def mcp_summary(entries: list[dict]) -> dict:
 # --- the harness event log --------------------------------------------------------------
 
 
-def _assistant_messages(events: list[dict]) -> list[dict]:
-    out = []
+def opencode_summary(events: list[dict]) -> dict:
+    # opencode 1.19.3 `run --format json` emits step_start / tool_use / step_finish parts;
+    # tokens and cost live on the step-finish part: tokens{input,output,reasoning,cache{read,
+    # write}}, cost (a plain number, provider-reported).
+    turns = []
+    starts: dict[str, float] = {}
     for ev in events:
         if not isinstance(ev, dict):
             continue
-        msg = ev.get("message")
-        if isinstance(msg, dict) and msg.get("role") == "assistant":
-            out.append(msg)
-    return out
-
-
-def opencode_summary(events: list[dict]) -> dict:
-    messages = _assistant_messages(events)
-    turns = []
-    for m in messages:
-        info = m.get("info") or {}
-        tokens = info.get("tokens") or {}
-        cache = tokens.get("cache") or {}
-        cost = info.get("cost") or {}
-        turns.append(
-            {
-                "duration_ms": info.get("duration"),
-                "input": tokens.get("input"),
-                "output": tokens.get("output"),
-                "reasoning": tokens.get("reasoning"),
-                "cache_read": cache.get("read"),
-                "cache_write": cache.get("write"),
-                "cost": cost.get("total"),
-            }
-        )
-    durations = [t["duration_ms"] for t in turns if isinstance(t.get("duration_ms"), (int, float))]
+        part = ev.get("part") or {}
+        if part.get("type") == "step-start":
+            mid = str(part.get("messageID"))
+            if mid not in starts:
+                starts[mid] = float(ev.get("timestamp") or 0)
+        elif part.get("type") == "step-finish":
+            t = part.get("tokens") or {}
+            cache = t.get("cache") or {}
+            turns.append(
+                {
+                    "duration_ms": (
+                        float(ev.get("timestamp") or 0) - starts.get(str(part.get("messageID")), 0)
+                        or None
+                    ),
+                    "input": t.get("input"),
+                    "output": t.get("output"),
+                    "reasoning": t.get("reasoning"),
+                    "cache_read": cache.get("read"),
+                    "cache_write": cache.get("write"),
+                    "cost": part.get("cost") if isinstance(part.get("cost"), (int, float)) else None,
+                }
+            )
+    durations = [t["duration_ms"] for t in turns if isinstance(t.get("duration_ms"), (int, float)) and t["duration_ms"] > 0]
     inputs = [t["input"] for t in turns if isinstance(t.get("input"), (int, float))]
     outputs = [t["output"] for t in turns if isinstance(t.get("output"), (int, float))]
     cache_read = [t["cache_read"] for t in turns if isinstance(t.get("cache_read"), (int, float))]
     cache_write = [t["cache_write"] for t in turns if isinstance(t.get("cache_write"), (int, float))]
     cost = [t["cost"] for t in turns if isinstance(t.get("cost"), (int, float))]
-    prefix_total = sum(inputs) + sum(cache_write)
+    # OpenRouter-style accounting: input EXCLUDES cached tokens, so the prefix is in+cache.
+    prefix_total = sum(inputs) + sum(cache_read) + sum(cache_write)
     return {
         "turns": len(turns),
         "tokens": {
-            "in_per_turn": statistics.mean(inputs) if inputs else None,
-            "out_per_turn": statistics.mean(outputs) if outputs else None,
+            "in_per_turn": round(statistics.mean(inputs), 1) if inputs else None,
+            "cache_read_per_turn": round(statistics.mean(cache_read), 1) if cache_read else None,
+            "out_per_turn": round(statistics.mean(outputs), 1) if outputs else None,
+            "reasoning_total": sum(
+                t["reasoning"] for t in turns if isinstance(t.get("reasoning"), (int, float))
+            ),
             "cache_read_total": sum(cache_read) if cache_read else 0,
             "cache_write_total": sum(cache_write) if cache_write else 0,
             "cache_share": (
                 round(sum(cache_read) / prefix_total, 3) if prefix_total and cache_read else None
             ),
+            "note": "opencode/OpenRouter: input excludes cache; prefix = in + cache_read",
         },
         "turn_latency_ms": {"p50": pct(durations, 0.5), "p95": pct(durations, 0.95)},
-        "cost_usd": sum(cost) if cost else None,
+        "cost_usd": round(sum(cost), 4) if cost else None,
     }
 
 

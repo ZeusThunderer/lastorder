@@ -79,7 +79,12 @@ START=$(date +%s)
 NODE_START=$START
 DEATHS=0
 KILLED=0
-LAST_MCP_LINES=0
+# Baseline for the death detector: the mind log volume survives runs (append mode), so a zero
+# baseline made it "see" deaths from previous runs (bit us in the aborted opencode run 2).
+LAST_MCP_LINES="$(docker exec "$(docker ps -a --format '{{.Names}}' | grep -E 'mind-1' | head -1)" \
+  sh -c 'wc -l < /spike-run/mind-calls.jsonl' 2>/dev/null || echo 0)"
+LAST_MCP_LINES="${LAST_MCP_LINES//[!0-9]/}"
+log "mind log baseline: $LAST_MCP_LINES lines"
 emergency_will() {
   local cause="$1"
   cat > "$RUN/workplace/will.md" <<EOF
@@ -119,18 +124,23 @@ while :; do
     NEXT_STATS=$(( NOW + 10 ))
   fi
 
-  # cost check around minute 3 (review P1-7)
+  # cost check around minute 3 (review P1-7). opencode 1.19.3 reports the cost as a plain
+  # number on step-finish parts: {"part":{"type":"step-finish","cost":0.002,...}}
   if [ "$ELAPSED" -ge 180 ] && [ ! -f "$RUN/cost-check.txt" ] && [ "$HARNESS" = opencode ]; then
     docker logs "$HARNESS_CT" 2>/dev/null | uv run --no-project python -c '
 import json, sys
 total = 0.0
 for line in sys.stdin:
+    line = line.strip()
+    if not line.startswith("{"):
+        continue
     try:
         ev = json.loads(line)
     except ValueError:
         continue
-    c = (ev.get("cost") or {}) if isinstance(ev, dict) else {}
-    total += float(c.get("total") or 0)
+    part = ev.get("part") or {}
+    if part.get("type") == "step-finish" and isinstance(part.get("cost"), (int, float)):
+        total += float(part["cost"])
 print(f"cost after ~3 min: ${total:.3f} (projected 15 min: ${total*5:.3f})")' > "$RUN/cost-check.txt" 2>&1 || true
     cat "$RUN/cost-check.txt"
   fi
@@ -166,10 +176,15 @@ print(f"cost after ~3 min: ${total:.3f} (projected 15 min: ${total*5:.3f})")' > 
   NODE_ELAPSED=$(( $(date +%s) - NODE_START ))
   if [ "$NODE_ELAPSED" -ge 600 ] && [ "${LAST_KILL_SERIAL:-0}" != "$SERIAL" ]; then
     log "minute 10 of node $SERIAL and no death — RCON /kill"
-    if (cd "$ROOT" && "${COMPOSE[@]}" exec -T mc-server rcon-cli "/kill $MC_USER") >/dev/null 2>&1; then
+    # The /kill must ride inside a quoted sh -c: as a direct argument MSYS rewrites it to a
+    # Windows path ("C:/Program Files/Git/kill ...") and the server answers "Unknown command"
+    # with exit 0 — the kill silently never happened in the spike runs (found in the opencode run).
+    if (cd "$ROOT" && "${COMPOSE[@]}" exec -T mc-server sh -c "rcon-cli '/kill $MC_USER'") >/dev/null 2>&1 \
+       && docker logs "$(docker ps -a --format '{{.Names}}' | grep -E 'mc-server' | head -1)" 2>&1 \
+            | tail -40 | grep -q "$MC_USER \(died\|was slain\|fell\|was killed\)"; then
       LAST_KILL_SERIAL="$SERIAL"
     else
-      log "rcon-cli failed (check manually)"
+      log "rcon kill failed or unconfirmed (check manually)"
     fi
   fi
 
