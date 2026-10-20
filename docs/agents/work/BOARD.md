@@ -34,5 +34,5 @@
 | T-028 | MCP сети в hive — знания, предложения, Мисака-нет, завещание | E2 | done | critical | z/T-028-mcp-hive |
 | T-029 | Шаблон рабочего места сестры — ядро, правила, стартовые скилы | E2 | done | critical | z/T-029-sister-instructions |
 | T-030 | Last Order — агент-администратор сети по событиям | E3 | ready | critical | z/T-030-last-order-agent |
-| T-031 | Jev в C1 по текстовой политике сестры | E3 | ready | normal | z/T-031-jev-policy |
+| T-031 | Jev в C1 по текстовой политике сестры | E3 | done | normal | z/T-031-jev-policy |
 | T-032 | Отчёт MVP и 2-часовой прогон сети агентов | E3 | queued | normal | z/T-032-mvp-run |
