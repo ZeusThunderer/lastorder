@@ -88,7 +88,7 @@
 - Код Claude правит сам только через `lo-direct-edit` и только по основаниям из протокола.
   Каждая правка — в DIRECT_EDITS.md. Файлы в `docs/agents/work/` и документы — не прямые правки.
 - Основной путь — конвейер ZCode (`lo-run`): он берёт все доступные задачи и сам вызывает Claude
-  headless (`dev/call_supervisor.sh`, только Opus, effort `low`/`medium`/`high`, критичным — `high`)
+  headless (`dev/call_supervisor.sh`, только Opus, effort по умолчанию `medium`, критичным тоже; `high` — только исключения из протокола)
   на ревью, merge и ответы на вопросы, критичные задачи тоже. В таком вызове действует раздел
   «Headless» скила `lo-review`. Оператору — только «Эскалация оператору» из протокола.
 - Скрипты протокола `dev/{_common,tasks,task_worktree,merge_task,on_main,call_supervisor}.sh`

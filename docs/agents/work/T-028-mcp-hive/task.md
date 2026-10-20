@@ -2,7 +2,7 @@
 id: T-028
 title: MCP сети в hive — знания, предложения, Мисака-нет, завещание
 stage: E2
-status: ready
+status: done
 criticality: critical
 branch: z/T-028-mcp-hive
 created: 2026-10-17
@@ -57,3 +57,7 @@ docker compose -f docker/compose.yml up -d hive
 
 ## Заметки надзора
 - 2026-10-17 · утверждена пользователем.
+- 2026-10-18 · review раунд 1 (headless): для T-027 — порты HTTP hive без аутентификации на том же
+  порту, что MCP; песочнице `node-N` открыть только `/node/mcp` (см. review.md, чек-лист раунда 1).
+- 2026-10-19 · review раунд 2 (headless): accept. Для T-027: `/registry/mark_dead` вызывает только
+  `mind-N`, песочнице он недоступен.
