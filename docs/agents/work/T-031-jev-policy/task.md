@@ -2,7 +2,7 @@
 id: T-031
 title: Jev в C1 по текстовой политике сестры
 stage: E3
-status: ready
+status: accepted
 criticality: normal
 branch: z/T-031-jev-policy
 created: 2026-10-17
@@ -54,3 +54,8 @@ uv run python dev/jev_cloud_probe.py --n 100 --max-usd 0.05
 
 ## Заметки надзора
 - 2026-10-17 · утверждена пользователем.
+- 2026-10-18 · план 1 (headless): «Можно трогать» расширено — `docker/gateway/config.yaml` (tier `jev`),
+  `docker/gateway/up.sh` (ключи mind-1/hive/node-1), `runtime/mind/{executor,mcp_body}.py`.
+  Критерий 5 — только живой прогон на стенде. Вызов Jev — вне `body_lock` (review P1-1).
+- 2026-10-21 · раунд 1 (headless): accept. `cloud` не включать без согласования с оператором:
+  по книге шлюза при потолке пола расход ≈ $0.2/ч на узел — выше ориентира NETWORK §6 (R1-3).

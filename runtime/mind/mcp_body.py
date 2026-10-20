@@ -39,6 +39,7 @@ from runtime.mind.executor import (
     Executor,
     JsonlLog,
 )
+from runtime.mind.jev import JevGate
 from runtime.perception.chat import clean_chat
 from runtime.perception.translate import Perception
 
@@ -569,12 +570,19 @@ def main() -> None:
 
     call_log = JsonlLog(log_path)
     body = Py4jBody()
+    # Jev (T-031, ADR-027): JEV_BACKEND=rules keeps C1 on its own rules; cloud/local wire
+    # the decider with the mind's virtual key through the gateway. An unknown backend or a
+    # non-number JEV_* is a startup error, not a silent fallback.
+    jev = JevGate.from_env(log_=call_log)
+    if jev.enabled:
+        log.info("Jev wired: backend %s (threat tactics advise C1, rules stay the fallback)", jev.backend_name)
     server, _impl, _executor = build_mind(
         body,
         username=username,
         call_log=call_log,
         birth=birth,
         hive=hive,
+        jev=jev,
         tick_interval=tick,
         flee_hp=_env_float("MIND_FLEE_HP", 6.0),
         fight_radius_m=_env_float("MIND_FIGHT_RADIUS_M", 3.0),

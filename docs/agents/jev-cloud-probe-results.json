@@ -1,0 +1,1979 @@
+{
+ "model": "typesafe/jev-router",
+ "prices": {
+  "in": 0.042,
+  "out": 0.0
+ },
+ "stopped_early": null,
+ "total_cost_usd": 0.002053,
+ "arms": {
+  "bare": {
+   "n": 100,
+   "good": 62,
+   "errors": 36,
+   "p50_ms": 1998.1,
+   "p95_ms": 2921.4,
+   "mean_ms": 1998.1359375,
+   "avg_prompt_tokens": 179.5,
+   "avg_completion_tokens": 79.38,
+   "cost_usd": 0.000754
+  },
+  "policy": {
+   "n": 100,
+   "good": 69,
+   "errors": 28,
+   "p50_ms": 1762.6,
+   "p95_ms": 3013.8,
+   "mean_ms": 1911.2708333333333,
+   "avg_prompt_tokens": 309.27,
+   "avg_completion_tokens": 91.99,
+   "cost_usd": 0.001299
+  }
+ },
+ "results": [
+  {
+   "arm": "bare",
+   "i": 0,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.192 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 1,
+   "ok": true,
+   "latency_ms": 1833.7,
+   "prompt_tokens": 282,
+   "completion_tokens": 97,
+   "cost_usd": 1.184e-05,
+   "spent_usd": 1.184e-05,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.78, \"probs\": {\"flee\": 0.78, \"keep\": 0.22}}"
+  },
+  {
+   "arm": "bare",
+   "i": 2,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 3,
+   "ok": true,
+   "latency_ms": 2943.7,
+   "prompt_tokens": 284,
+   "completion_tokens": 213,
+   "cost_usd": 1.193e-05,
+   "spent_usd": 2.377e-05,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.7, \"probs\": {\"flee\": 0.7, \"keep\": 0.3}}"
+  },
+  {
+   "arm": "bare",
+   "i": 4,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 5,
+   "ok": true,
+   "latency_ms": 2845.2,
+   "prompt_tokens": 261,
+   "completion_tokens": 87,
+   "cost_usd": 1.096e-05,
+   "spent_usd": 3.473e-05,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.85, \"probs\": {\"flee\": 0.85, \"keep\": 0.15}}"
+  },
+  {
+   "arm": "bare",
+   "i": 6,
+   "ok": true,
+   "latency_ms": 2071.5,
+   "prompt_tokens": 283,
+   "completion_tokens": 81,
+   "cost_usd": 1.189e-05,
+   "spent_usd": 4.662e-05,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.9, \"probs\": {\"flee\": 0.9, \"keep\": 0.1}}"
+  },
+  {
+   "arm": "bare",
+   "i": 7,
+   "ok": true,
+   "latency_ms": 2430.7,
+   "prompt_tokens": 284,
+   "completion_tokens": 118,
+   "cost_usd": 1.193e-05,
+   "spent_usd": 5.855e-05,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.96, \"probs\": {\"flee\": 0.96, \"keep\": 0.04}}"
+  },
+  {
+   "arm": "bare",
+   "i": 8,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "bare",
+   "i": 9,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.19 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback"
+  },
+  {
+   "arm": "bare",
+   "i": 10,
+   "ok": true,
+   "latency_ms": 1597.7,
+   "prompt_tokens": 262,
+   "completion_tokens": 60,
+   "cost_usd": 1.1e-05,
+   "spent_usd": 6.955e-05,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.9, \"probs\": {\"flee\": 0.9, \"keep\": 0.1}}"
+  },
+  {
+   "arm": "bare",
+   "i": 11,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 12,
+   "ok": true,
+   "latency_ms": 1819.0,
+   "prompt_tokens": 282,
+   "completion_tokens": 131,
+   "cost_usd": 1.184e-05,
+   "spent_usd": 8.14e-05,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "bare",
+   "i": 13,
+   "ok": true,
+   "latency_ms": 2268.6,
+   "prompt_tokens": 262,
+   "completion_tokens": 64,
+   "cost_usd": 1.1e-05,
+   "spent_usd": 9.24e-05,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.85, \"probs\": {\"flee\": 0.85, \"keep\": 0.15}}"
+  },
+  {
+   "arm": "bare",
+   "i": 14,
+   "ok": true,
+   "latency_ms": 1469.3,
+   "prompt_tokens": 287,
+   "completion_tokens": 177,
+   "cost_usd": 1.205e-05,
+   "spent_usd": 0.00010445,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.62, \"probs\": {\"fight\": 0.62, \"flee\": 0.3, \"keep\": 0.08}}"
+  },
+  {
+   "arm": "bare",
+   "i": 15,
+   "ok": true,
+   "latency_ms": 1684.2,
+   "prompt_tokens": 285,
+   "completion_tokens": 184,
+   "cost_usd": 1.197e-05,
+   "spent_usd": 0.00011642,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"fight\": 0.18, \"keep\": 0.1}}"
+  },
+  {
+   "arm": "bare",
+   "i": 16,
+   "ok": true,
+   "latency_ms": 1614.3,
+   "prompt_tokens": 288,
+   "completion_tokens": 75,
+   "cost_usd": 1.21e-05,
+   "spent_usd": 0.00012852,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"fight\": 0.12, \"keep\": 0.06}}"
+  },
+  {
+   "arm": "bare",
+   "i": 17,
+   "ok": true,
+   "latency_ms": 2191.8,
+   "prompt_tokens": 284,
+   "completion_tokens": 119,
+   "cost_usd": 1.193e-05,
+   "spent_usd": 0.00014045,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"keep\": 0.18}}"
+  },
+  {
+   "arm": "bare",
+   "i": 18,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 19,
+   "ok": true,
+   "latency_ms": 1549.6,
+   "prompt_tokens": 293,
+   "completion_tokens": 68,
+   "cost_usd": 1.231e-05,
+   "spent_usd": 0.00015275,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"fight\": 0.03, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "bare",
+   "i": 20,
+   "ok": true,
+   "latency_ms": 1640.5,
+   "prompt_tokens": 287,
+   "completion_tokens": 109,
+   "cost_usd": 1.205e-05,
+   "spent_usd": 0.00016481,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.78, \"probs\": {\"flee\": 0.78, \"keep\": 0.22}}"
+  },
+  {
+   "arm": "bare",
+   "i": 21,
+   "ok": true,
+   "latency_ms": 2213.5,
+   "prompt_tokens": 263,
+   "completion_tokens": 93,
+   "cost_usd": 1.105e-05,
+   "spent_usd": 0.00017585,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.93, \"probs\": {\"flee\": 0.93, \"keep\": 0.07}}"
+  },
+  {
+   "arm": "bare",
+   "i": 22,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 23,
+   "ok": true,
+   "latency_ms": 2229.3,
+   "prompt_tokens": 287,
+   "completion_tokens": 108,
+   "cost_usd": 1.205e-05,
+   "spent_usd": 0.00018791,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.86, \"probs\": {\"fight\": 0.86, \"flee\": 0.12, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "bare",
+   "i": 24,
+   "ok": true,
+   "latency_ms": 1213.3,
+   "prompt_tokens": 260,
+   "completion_tokens": 59,
+   "cost_usd": 1.092e-05,
+   "spent_usd": 0.00019883,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"keep\": 0.18}}"
+  },
+  {
+   "arm": "bare",
+   "i": 25,
+   "ok": true,
+   "latency_ms": 1171.3,
+   "prompt_tokens": 288,
+   "completion_tokens": 57,
+   "cost_usd": 1.21e-05,
+   "spent_usd": 0.00021092,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "bare",
+   "i": 26,
+   "ok": true,
+   "latency_ms": 3205.8,
+   "prompt_tokens": 288,
+   "completion_tokens": 90,
+   "cost_usd": 1.21e-05,
+   "spent_usd": 0.00022302,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.78, \"probs\": {\"flee\": 0.78, \"keep\": 0.22}}"
+  },
+  {
+   "arm": "bare",
+   "i": 27,
+   "ok": true,
+   "latency_ms": 1284.9,
+   "prompt_tokens": 261,
+   "completion_tokens": 86,
+   "cost_usd": 1.096e-05,
+   "spent_usd": 0.00023398,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.85, \"probs\": {\"flee\": 0.85, \"keep\": 0.15}}"
+  },
+  {
+   "arm": "bare",
+   "i": 28,
+   "ok": true,
+   "latency_ms": 2247.7,
+   "prompt_tokens": 285,
+   "completion_tokens": 83,
+   "cost_usd": 1.197e-05,
+   "spent_usd": 0.00024595,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"fight\": 0.1, \"keep\": 0.08}}"
+  },
+  {
+   "arm": "bare",
+   "i": 29,
+   "ok": true,
+   "latency_ms": 1530.4,
+   "prompt_tokens": 287,
+   "completion_tokens": 114,
+   "cost_usd": 1.205e-05,
+   "spent_usd": 0.00025801,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.86, \"probs\": {\"flee\": 0.86, \"fight\": 0.1, \"keep\": 0.04}}"
+  },
+  {
+   "arm": "bare",
+   "i": 30,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "bare",
+   "i": 31,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.207 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 32,
+   "ok": true,
+   "latency_ms": 1985.8,
+   "prompt_tokens": 285,
+   "completion_tokens": 118,
+   "cost_usd": 1.197e-05,
+   "spent_usd": 0.00026998,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.93, \"probs\": {\"flee\": 0.93, \"fight\": 0.05, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "bare",
+   "i": 33,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 34,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.19 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback"
+  },
+  {
+   "arm": "bare",
+   "i": 35,
+   "ok": true,
+   "latency_ms": 2550.2,
+   "prompt_tokens": 288,
+   "completion_tokens": 192,
+   "cost_usd": 1.21e-05,
+   "spent_usd": 0.00028207,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.6, \"probs\": {\"fight\": 0.6, \"flee\": 0.3, \"keep\": 0.1}}"
+  },
+  {
+   "arm": "bare",
+   "i": 36,
+   "ok": true,
+   "latency_ms": 1711.3,
+   "prompt_tokens": 289,
+   "completion_tokens": 73,
+   "cost_usd": 1.214e-05,
+   "spent_usd": 0.00029421,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"fight\": 0.03, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "bare",
+   "i": 37,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 38,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.189 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 39,
+   "ok": true,
+   "latency_ms": 2099.6,
+   "prompt_tokens": 284,
+   "completion_tokens": 139,
+   "cost_usd": 1.193e-05,
+   "spent_usd": 0.00030614,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "bare",
+   "i": 40,
+   "ok": true,
+   "latency_ms": 2605.1,
+   "prompt_tokens": 300,
+   "completion_tokens": 616,
+   "cost_usd": 1.26e-05,
+   "spent_usd": 0.00031874,
+   "reply_head": ""
+  },
+  {
+   "arm": "bare",
+   "i": 41,
+   "ok": true,
+   "latency_ms": 2348.3,
+   "prompt_tokens": 284,
+   "completion_tokens": 116,
+   "cost_usd": 1.193e-05,
+   "spent_usd": 0.00033067,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.78, \"probs\": {\"flee\": 0.78, \"keep\": 0.22}}"
+  },
+  {
+   "arm": "bare",
+   "i": 42,
+   "ok": true,
+   "latency_ms": 1406.6,
+   "prompt_tokens": 282,
+   "completion_tokens": 74,
+   "cost_usd": 1.184e-05,
+   "spent_usd": 0.00034251,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"keep\": 0.18}}"
+  },
+  {
+   "arm": "bare",
+   "i": 43,
+   "ok": true,
+   "latency_ms": 1418.1,
+   "prompt_tokens": 287,
+   "completion_tokens": 79,
+   "cost_usd": 1.205e-05,
+   "spent_usd": 0.00035456,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.9, \"probs\": {\"flee\": 0.9, \"keep\": 0.1}}"
+  },
+  {
+   "arm": "bare",
+   "i": 44,
+   "ok": true,
+   "latency_ms": 1766.0,
+   "prompt_tokens": 285,
+   "completion_tokens": 107,
+   "cost_usd": 1.197e-05,
+   "spent_usd": 0.00036653,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.86, \"probs\": {\"flee\": 0.86, \"fight\": 0.1, \"keep\": 0.04}}"
+  },
+  {
+   "arm": "bare",
+   "i": 45,
+   "ok": true,
+   "latency_ms": 1508.9,
+   "prompt_tokens": 282,
+   "completion_tokens": 95,
+   "cost_usd": 1.184e-05,
+   "spent_usd": 0.00037838,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"keep\": 0.18}}"
+  },
+  {
+   "arm": "bare",
+   "i": 46,
+   "ok": true,
+   "latency_ms": 2077.8,
+   "prompt_tokens": 284,
+   "completion_tokens": 65,
+   "cost_usd": 1.193e-05,
+   "spent_usd": 0.00039031,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.85, \"probs\": {\"flee\": 0.85, \"keep\": 0.15}}"
+  },
+  {
+   "arm": "bare",
+   "i": 47,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 48,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.187 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 49,
+   "ok": true,
+   "latency_ms": 2578.1,
+   "prompt_tokens": 283,
+   "completion_tokens": 119,
+   "cost_usd": 1.189e-05,
+   "spent_usd": 0.00040219,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.86, \"probs\": {\"flee\": 0.86, \"keep\": 0.14}}"
+  },
+  {
+   "arm": "bare",
+   "i": 50,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "bare",
+   "i": 51,
+   "ok": true,
+   "latency_ms": 2301.4,
+   "prompt_tokens": 268,
+   "completion_tokens": 111,
+   "cost_usd": 1.126e-05,
+   "spent_usd": 0.00041345,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.93, \"probs\": {\"flee\": 0.93, \"fight\": 0.05, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "bare",
+   "i": 52,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "bare",
+   "i": 53,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=3.27 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback"
+  },
+  {
+   "arm": "bare",
+   "i": 54,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.188 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 55,
+   "ok": true,
+   "latency_ms": 2416.3,
+   "prompt_tokens": 269,
+   "completion_tokens": 207,
+   "cost_usd": 1.13e-05,
+   "spent_usd": 0.00042475,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.62, \"probs\": {\"fight\": 0.62, \"flee\": 0.3, \"keep\": 0.08}}"
+  },
+  {
+   "arm": "bare",
+   "i": 56,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.862 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 57,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.185 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 58,
+   "ok": true,
+   "latency_ms": 2631.8,
+   "prompt_tokens": 286,
+   "completion_tokens": 120,
+   "cost_usd": 1.201e-05,
+   "spent_usd": 0.00043676,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "bare",
+   "i": 59,
+   "ok": true,
+   "latency_ms": 1564.5,
+   "prompt_tokens": 286,
+   "completion_tokens": 64,
+   "cost_usd": 1.201e-05,
+   "spent_usd": 0.00044877,
+   "reply_head": "{\"option_id\": \"keep\", \"confidence\": 0.78, \"probs\": {\"keep\": 0.78, \"flee\": 0.22}}"
+  },
+  {
+   "arm": "bare",
+   "i": 60,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 61,
+   "ok": true,
+   "latency_ms": 1569.6,
+   "prompt_tokens": 269,
+   "completion_tokens": 109,
+   "cost_usd": 1.13e-05,
+   "spent_usd": 0.00046007,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.72, \"probs\": {\"fight\": 0.72, \"flee\": 0.2, \"keep\": 0.08}}"
+  },
+  {
+   "arm": "bare",
+   "i": 62,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 63,
+   "ok": true,
+   "latency_ms": 1896.6,
+   "prompt_tokens": 285,
+   "completion_tokens": 96,
+   "cost_usd": 1.197e-05,
+   "spent_usd": 0.00047204,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "bare",
+   "i": 64,
+   "ok": true,
+   "latency_ms": 1145.3,
+   "prompt_tokens": 259,
+   "completion_tokens": 95,
+   "cost_usd": 1.088e-05,
+   "spent_usd": 0.00048292,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.93, \"probs\": {\"flee\": 0.93, \"keep\": 0.07}}"
+  },
+  {
+   "arm": "bare",
+   "i": 65,
+   "ok": true,
+   "latency_ms": 1757.0,
+   "prompt_tokens": 290,
+   "completion_tokens": 127,
+   "cost_usd": 1.218e-05,
+   "spent_usd": 0.0004951,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.86, \"probs\": {\"flee\": 0.86, \"fight\": 0.09, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "bare",
+   "i": 66,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=3.243 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 67,
+   "ok": true,
+   "latency_ms": 1764.5,
+   "prompt_tokens": 288,
+   "completion_tokens": 127,
+   "cost_usd": 1.21e-05,
+   "spent_usd": 0.00050719,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.78, \"probs\": {\"flee\": 0.78, \"keep\": 0.22}}"
+  },
+  {
+   "arm": "bare",
+   "i": 68,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 69,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.182 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 70,
+   "ok": true,
+   "latency_ms": 2004.9,
+   "prompt_tokens": 282,
+   "completion_tokens": 77,
+   "cost_usd": 1.184e-05,
+   "spent_usd": 0.00051904,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"keep\": 0.18}}"
+  },
+  {
+   "arm": "bare",
+   "i": 71,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=1.999 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 72,
+   "ok": true,
+   "latency_ms": 1944.1,
+   "prompt_tokens": 280,
+   "completion_tokens": 119,
+   "cost_usd": 1.176e-05,
+   "spent_usd": 0.0005308,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.86, \"probs\": {\"flee\": 0.86, \"keep\": 0.14}}"
+  },
+  {
+   "arm": "bare",
+   "i": 73,
+   "ok": true,
+   "latency_ms": 3012.1,
+   "prompt_tokens": 298,
+   "completion_tokens": 617,
+   "cost_usd": 1.252e-05,
+   "spent_usd": 0.00054331,
+   "reply_head": ""
+  },
+  {
+   "arm": "bare",
+   "i": 74,
+   "ok": true,
+   "latency_ms": 1596.5,
+   "prompt_tokens": 288,
+   "completion_tokens": 117,
+   "cost_usd": 1.21e-05,
+   "spent_usd": 0.00055541,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "bare",
+   "i": 75,
+   "ok": true,
+   "latency_ms": 1998.1,
+   "prompt_tokens": 281,
+   "completion_tokens": 96,
+   "cost_usd": 1.18e-05,
+   "spent_usd": 0.00056721,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "bare",
+   "i": 76,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "bare",
+   "i": 77,
+   "ok": true,
+   "latency_ms": 2568.6,
+   "prompt_tokens": 260,
+   "completion_tokens": 81,
+   "cost_usd": 1.092e-05,
+   "spent_usd": 0.00057813,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"keep\": 0.18}}"
+  },
+  {
+   "arm": "bare",
+   "i": 78,
+   "ok": true,
+   "latency_ms": 2404.1,
+   "prompt_tokens": 262,
+   "completion_tokens": 166,
+   "cost_usd": 1.1e-05,
+   "spent_usd": 0.00058913,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "bare",
+   "i": 79,
+   "ok": true,
+   "latency_ms": 1357.9,
+   "prompt_tokens": 289,
+   "completion_tokens": 77,
+   "cost_usd": 1.214e-05,
+   "spent_usd": 0.00060127,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.85, \"probs\": {\"flee\": 0.85, \"fight\": 0.1, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "bare",
+   "i": 80,
+   "ok": true,
+   "latency_ms": 2062.4,
+   "prompt_tokens": 259,
+   "completion_tokens": 161,
+   "cost_usd": 1.088e-05,
+   "spent_usd": 0.00061215,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.85, \"probs\": {\"flee\": 0.85, \"keep\": 0.15}}"
+  },
+  {
+   "arm": "bare",
+   "i": 81,
+   "ok": true,
+   "latency_ms": 2921.4,
+   "prompt_tokens": 289,
+   "completion_tokens": 182,
+   "cost_usd": 1.214e-05,
+   "spent_usd": 0.00062429,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"fight\": 0.18, \"keep\": 0.1}}"
+  },
+  {
+   "arm": "bare",
+   "i": 82,
+   "ok": true,
+   "latency_ms": 1304.1,
+   "prompt_tokens": 283,
+   "completion_tokens": 97,
+   "cost_usd": 1.189e-05,
+   "spent_usd": 0.00063617,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.93, \"probs\": {\"flee\": 0.93, \"keep\": 0.07}}"
+  },
+  {
+   "arm": "bare",
+   "i": 83,
+   "ok": true,
+   "latency_ms": 1367.3,
+   "prompt_tokens": 267,
+   "completion_tokens": 75,
+   "cost_usd": 1.121e-05,
+   "spent_usd": 0.00064739,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.9, \"probs\": {\"flee\": 0.9, \"fight\": 0.05, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "bare",
+   "i": 84,
+   "ok": true,
+   "latency_ms": 1753.7,
+   "prompt_tokens": 281,
+   "completion_tokens": 116,
+   "cost_usd": 1.18e-05,
+   "spent_usd": 0.00065919,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.78, \"probs\": {\"flee\": 0.78, \"keep\": 0.22}}"
+  },
+  {
+   "arm": "bare",
+   "i": 85,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "bare",
+   "i": 86,
+   "ok": true,
+   "latency_ms": 2346.1,
+   "prompt_tokens": 260,
+   "completion_tokens": 60,
+   "cost_usd": 1.092e-05,
+   "spent_usd": 0.00067011,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.85, \"probs\": {\"flee\": 0.85, \"keep\": 0.15}}"
+  },
+  {
+   "arm": "bare",
+   "i": 87,
+   "ok": true,
+   "latency_ms": 2155.5,
+   "prompt_tokens": 295,
+   "completion_tokens": 69,
+   "cost_usd": 1.239e-05,
+   "spent_usd": 0.0006825,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"fight\": 0.02, \"keep\": 0.01}}"
+  },
+  {
+   "arm": "bare",
+   "i": 88,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "bare",
+   "i": 89,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.187 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 90,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.182 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "bare",
+   "i": 91,
+   "ok": true,
+   "latency_ms": 1663.5,
+   "prompt_tokens": 290,
+   "completion_tokens": 91,
+   "cost_usd": 1.218e-05,
+   "spent_usd": 0.00069468,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"fight\": 0.1, \"keep\": 0.08}}"
+  },
+  {
+   "arm": "bare",
+   "i": 92,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "bare",
+   "i": 93,
+   "ok": true,
+   "latency_ms": 2468.9,
+   "prompt_tokens": 284,
+   "completion_tokens": 220,
+   "cost_usd": 1.193e-05,
+   "spent_usd": 0.00070661,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "bare",
+   "i": 94,
+   "ok": true,
+   "latency_ms": 2833.8,
+   "prompt_tokens": 260,
+   "completion_tokens": 63,
+   "cost_usd": 1.092e-05,
+   "spent_usd": 0.00071753,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.9, \"probs\": {\"flee\": 0.9, \"keep\": 0.1}}"
+  },
+  {
+   "arm": "bare",
+   "i": 95,
+   "ok": true,
+   "latency_ms": 2210.5,
+   "prompt_tokens": 291,
+   "completion_tokens": 88,
+   "cost_usd": 1.222e-05,
+   "spent_usd": 0.00072975,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"fight\": 0.1, \"keep\": 0.08}}"
+  },
+  {
+   "arm": "bare",
+   "i": 96,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "bare",
+   "i": 97,
+   "ok": true,
+   "latency_ms": 2047.7,
+   "prompt_tokens": 284,
+   "completion_tokens": 105,
+   "cost_usd": 1.193e-05,
+   "spent_usd": 0.00074168,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.85, \"probs\": {\"flee\": 0.85, \"keep\": 0.15}}"
+  },
+  {
+   "arm": "bare",
+   "i": 98,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "bare",
+   "i": 99,
+   "ok": true,
+   "latency_ms": 1700.7,
+   "prompt_tokens": 291,
+   "completion_tokens": 139,
+   "cost_usd": 1.222e-05,
+   "spent_usd": 0.0007539,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.72, \"probs\": {\"fight\": 0.72, \"flee\": 0.2, \"keep\": 0.08}}"
+  },
+  {
+   "arm": "policy",
+   "i": 0,
+   "ok": true,
+   "latency_ms": 1788.5,
+   "prompt_tokens": 433,
+   "completion_tokens": 215,
+   "cost_usd": 1.819e-05,
+   "spent_usd": 0.00077209,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "policy",
+   "i": 1,
+   "ok": true,
+   "latency_ms": 2893.8,
+   "prompt_tokens": 436,
+   "completion_tokens": 158,
+   "cost_usd": 1.831e-05,
+   "spent_usd": 0.0007904,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"fight\": 0.1, \"keep\": 0.08}}"
+  },
+  {
+   "arm": "policy",
+   "i": 2,
+   "ok": true,
+   "latency_ms": 1218.9,
+   "prompt_tokens": 416,
+   "completion_tokens": 76,
+   "cost_usd": 1.747e-05,
+   "spent_usd": 0.00080787,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"fight\": 0.03, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "policy",
+   "i": 3,
+   "ok": true,
+   "latency_ms": 1227.3,
+   "prompt_tokens": 428,
+   "completion_tokens": 128,
+   "cost_usd": 1.798e-05,
+   "spent_usd": 0.00082585,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 4,
+   "ok": true,
+   "latency_ms": 2410.4,
+   "prompt_tokens": 428,
+   "completion_tokens": 321,
+   "cost_usd": 1.798e-05,
+   "spent_usd": 0.00084382,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.86, \"probs\": {\"flee\": 0.86, \"keep\": 0.14}}"
+  },
+  {
+   "arm": "policy",
+   "i": 5,
+   "ok": true,
+   "latency_ms": 1362.4,
+   "prompt_tokens": 435,
+   "completion_tokens": 108,
+   "cost_usd": 1.827e-05,
+   "spent_usd": 0.00086209,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.82, \"probs\": {\"fight\": 0.82, \"flee\": 0.13, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 6,
+   "ok": true,
+   "latency_ms": 1645.3,
+   "prompt_tokens": 435,
+   "completion_tokens": 82,
+   "cost_usd": 1.827e-05,
+   "spent_usd": 0.00088036,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.93, \"probs\": {\"flee\": 0.93, \"keep\": 0.07}}"
+  },
+  {
+   "arm": "policy",
+   "i": 7,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "policy",
+   "i": 8,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.191 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 9,
+   "ok": true,
+   "latency_ms": 2270.7,
+   "prompt_tokens": 442,
+   "completion_tokens": 69,
+   "cost_usd": 1.856e-05,
+   "spent_usd": 0.00089893,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.9, \"probs\": {\"fight\": 0.9, \"flee\": 0.05, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 10,
+   "ok": true,
+   "latency_ms": 1149.3,
+   "prompt_tokens": 429,
+   "completion_tokens": 68,
+   "cost_usd": 1.802e-05,
+   "spent_usd": 0.00091694,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.9, \"probs\": {\"flee\": 0.9, \"keep\": 0.1}}"
+  },
+  {
+   "arm": "policy",
+   "i": 11,
+   "ok": true,
+   "latency_ms": 1926.3,
+   "prompt_tokens": 406,
+   "completion_tokens": 95,
+   "cost_usd": 1.705e-05,
+   "spent_usd": 0.000934,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.99, \"probs\": {\"flee\": 0.99, \"keep\": 0.01}}"
+  },
+  {
+   "arm": "policy",
+   "i": 12,
+   "ok": true,
+   "latency_ms": 2556.4,
+   "prompt_tokens": 427,
+   "completion_tokens": 311,
+   "cost_usd": 1.793e-05,
+   "spent_usd": 0.00095193,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "policy",
+   "i": 13,
+   "ok": true,
+   "latency_ms": 2133.9,
+   "prompt_tokens": 415,
+   "completion_tokens": 62,
+   "cost_usd": 1.743e-05,
+   "spent_usd": 0.00096936,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"fight\": 0.02, \"keep\": 0.01}}"
+  },
+  {
+   "arm": "policy",
+   "i": 14,
+   "ok": true,
+   "latency_ms": 2238.7,
+   "prompt_tokens": 437,
+   "completion_tokens": 60,
+   "cost_usd": 1.835e-05,
+   "spent_usd": 0.00098771,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"fight\": 0.02, \"keep\": 0.01}}"
+  },
+  {
+   "arm": "policy",
+   "i": 15,
+   "ok": true,
+   "latency_ms": 1285.4,
+   "prompt_tokens": 427,
+   "completion_tokens": 98,
+   "cost_usd": 1.793e-05,
+   "spent_usd": 0.00100565,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 16,
+   "ok": true,
+   "latency_ms": 2130.7,
+   "prompt_tokens": 430,
+   "completion_tokens": 56,
+   "cost_usd": 1.806e-05,
+   "spent_usd": 0.00102371,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 17,
+   "ok": true,
+   "latency_ms": 1357.8,
+   "prompt_tokens": 435,
+   "completion_tokens": 71,
+   "cost_usd": 1.827e-05,
+   "spent_usd": 0.00104198,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"fight\": 0.03, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "policy",
+   "i": 18,
+   "ok": true,
+   "latency_ms": 1646.2,
+   "prompt_tokens": 407,
+   "completion_tokens": 148,
+   "cost_usd": 1.709e-05,
+   "spent_usd": 0.00105907,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"keep\": 0.18}}"
+  },
+  {
+   "arm": "policy",
+   "i": 19,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 20,
+   "ok": true,
+   "latency_ms": 1325.5,
+   "prompt_tokens": 434,
+   "completion_tokens": 52,
+   "cost_usd": 1.823e-05,
+   "spent_usd": 0.0010773,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 21,
+   "ok": true,
+   "latency_ms": 2552.7,
+   "prompt_tokens": 433,
+   "completion_tokens": 58,
+   "cost_usd": 1.819e-05,
+   "spent_usd": 0.00109549,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 22,
+   "ok": true,
+   "latency_ms": 1305.1,
+   "prompt_tokens": 435,
+   "completion_tokens": 63,
+   "cost_usd": 1.827e-05,
+   "spent_usd": 0.00111376,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"fight\": 0.01, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "policy",
+   "i": 23,
+   "ok": true,
+   "latency_ms": 971.9,
+   "prompt_tokens": 408,
+   "completion_tokens": 54,
+   "cost_usd": 1.714e-05,
+   "spent_usd": 0.00113089,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 24,
+   "ok": true,
+   "latency_ms": 1300.1,
+   "prompt_tokens": 430,
+   "completion_tokens": 58,
+   "cost_usd": 1.806e-05,
+   "spent_usd": 0.00114895,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 25,
+   "ok": true,
+   "latency_ms": 1415.3,
+   "prompt_tokens": 437,
+   "completion_tokens": 78,
+   "cost_usd": 1.835e-05,
+   "spent_usd": 0.00116731,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.85, \"probs\": {\"fight\": 0.85, \"flee\": 0.1, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 26,
+   "ok": true,
+   "latency_ms": 2115.2,
+   "prompt_tokens": 432,
+   "completion_tokens": 50,
+   "cost_usd": 1.814e-05,
+   "spent_usd": 0.00118545,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 27,
+   "ok": true,
+   "latency_ms": 1762.6,
+   "prompt_tokens": 408,
+   "completion_tokens": 74,
+   "cost_usd": 1.714e-05,
+   "spent_usd": 0.00120259,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 28,
+   "ok": true,
+   "latency_ms": 3013.8,
+   "prompt_tokens": 430,
+   "completion_tokens": 317,
+   "cost_usd": 1.806e-05,
+   "spent_usd": 0.00122065,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "policy",
+   "i": 29,
+   "ok": true,
+   "latency_ms": 2238.9,
+   "prompt_tokens": 416,
+   "completion_tokens": 94,
+   "cost_usd": 1.747e-05,
+   "spent_usd": 0.00123812,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.9, \"probs\": {\"flee\": 0.9, \"fight\": 0.05, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 30,
+   "ok": true,
+   "latency_ms": 1569.1,
+   "prompt_tokens": 439,
+   "completion_tokens": 80,
+   "cost_usd": 1.844e-05,
+   "spent_usd": 0.00125656,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"fight\": 0.03, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "policy",
+   "i": 31,
+   "ok": true,
+   "latency_ms": 2211.0,
+   "prompt_tokens": 441,
+   "completion_tokens": 618,
+   "cost_usd": 1.852e-05,
+   "spent_usd": 0.00127508,
+   "reply_head": ""
+  },
+  {
+   "arm": "policy",
+   "i": 32,
+   "ok": true,
+   "latency_ms": 1652.9,
+   "prompt_tokens": 435,
+   "completion_tokens": 56,
+   "cost_usd": 1.827e-05,
+   "spent_usd": 0.00129335,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 33,
+   "ok": true,
+   "latency_ms": 1782.1,
+   "prompt_tokens": 408,
+   "completion_tokens": 49,
+   "cost_usd": 1.714e-05,
+   "spent_usd": 0.00131048,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 34,
+   "ok": true,
+   "latency_ms": 1273.3,
+   "prompt_tokens": 428,
+   "completion_tokens": 113,
+   "cost_usd": 1.798e-05,
+   "spent_usd": 0.00132846,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.96, \"probs\": {\"flee\": 0.96, \"keep\": 0.04}}"
+  },
+  {
+   "arm": "policy",
+   "i": 35,
+   "ok": true,
+   "latency_ms": 1457.0,
+   "prompt_tokens": 429,
+   "completion_tokens": 120,
+   "cost_usd": 1.802e-05,
+   "spent_usd": 0.00134648,
+   "reply_head": "{\"option_id\": \"keep\", \"confidence\": 0.72, \"probs\": {\"keep\": 0.72, \"flee\": 0.28}}"
+  },
+  {
+   "arm": "policy",
+   "i": 36,
+   "ok": true,
+   "latency_ms": 3083.8,
+   "prompt_tokens": 451,
+   "completion_tokens": 600,
+   "cost_usd": 1.894e-05,
+   "spent_usd": 0.00136542,
+   "reply_head": ""
+  },
+  {
+   "arm": "policy",
+   "i": 37,
+   "ok": true,
+   "latency_ms": 1938.9,
+   "prompt_tokens": 409,
+   "completion_tokens": 176,
+   "cost_usd": 1.718e-05,
+   "spent_usd": 0.0013826,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "policy",
+   "i": 38,
+   "ok": true,
+   "latency_ms": 1600.5,
+   "prompt_tokens": 438,
+   "completion_tokens": 69,
+   "cost_usd": 1.84e-05,
+   "spent_usd": 0.00140099,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"fight\": 0.03, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "policy",
+   "i": 39,
+   "ok": true,
+   "latency_ms": 1215.6,
+   "prompt_tokens": 429,
+   "completion_tokens": 82,
+   "cost_usd": 1.802e-05,
+   "spent_usd": 0.00141901,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.9, \"probs\": {\"flee\": 0.9, \"keep\": 0.1}}"
+  },
+  {
+   "arm": "policy",
+   "i": 40,
+   "ok": true,
+   "latency_ms": 1365.8,
+   "prompt_tokens": 430,
+   "completion_tokens": 50,
+   "cost_usd": 1.806e-05,
+   "spent_usd": 0.00143707,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 41,
+   "ok": true,
+   "latency_ms": 1231.9,
+   "prompt_tokens": 442,
+   "completion_tokens": 73,
+   "cost_usd": 1.856e-05,
+   "spent_usd": 0.00145564,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.9, \"probs\": {\"fight\": 0.9, \"flee\": 0.07, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 42,
+   "ok": true,
+   "latency_ms": 2509.0,
+   "prompt_tokens": 407,
+   "completion_tokens": 171,
+   "cost_usd": 1.709e-05,
+   "spent_usd": 0.00147273,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.85, \"probs\": {\"flee\": 0.85, \"keep\": 0.15}}"
+  },
+  {
+   "arm": "policy",
+   "i": 43,
+   "ok": true,
+   "latency_ms": 2450.9,
+   "prompt_tokens": 434,
+   "completion_tokens": 69,
+   "cost_usd": 1.823e-05,
+   "spent_usd": 0.00149096,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.9, \"probs\": {\"flee\": 0.9, \"fight\": 0.06, \"keep\": 0.04}}"
+  },
+  {
+   "arm": "policy",
+   "i": 44,
+   "ok": true,
+   "latency_ms": 2114.3,
+   "prompt_tokens": 434,
+   "completion_tokens": 52,
+   "cost_usd": 1.823e-05,
+   "spent_usd": 0.00150919,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 45,
+   "ok": true,
+   "latency_ms": 1210.8,
+   "prompt_tokens": 431,
+   "completion_tokens": 68,
+   "cost_usd": 1.81e-05,
+   "spent_usd": 0.00152729,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 46,
+   "ok": true,
+   "latency_ms": 1700.3,
+   "prompt_tokens": 406,
+   "completion_tokens": 215,
+   "cost_usd": 1.705e-05,
+   "spent_usd": 0.00154434,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.78, \"probs\": {\"flee\": 0.78, \"keep\": 0.22}}"
+  },
+  {
+   "arm": "policy",
+   "i": 47,
+   "ok": true,
+   "latency_ms": 1168.8,
+   "prompt_tokens": 430,
+   "completion_tokens": 66,
+   "cost_usd": 1.806e-05,
+   "spent_usd": 0.0015624,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 48,
+   "ok": true,
+   "latency_ms": 1104.5,
+   "prompt_tokens": 440,
+   "completion_tokens": 85,
+   "cost_usd": 1.848e-05,
+   "spent_usd": 0.00158088,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.72, \"probs\": {\"fight\": 0.72, \"flee\": 0.2, \"keep\": 0.08}}"
+  },
+  {
+   "arm": "policy",
+   "i": 49,
+   "ok": true,
+   "latency_ms": 996.4,
+   "prompt_tokens": 435,
+   "completion_tokens": 75,
+   "cost_usd": 1.827e-05,
+   "spent_usd": 0.00159915,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.93, \"probs\": {\"flee\": 0.93, \"fight\": 0.05, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "policy",
+   "i": 50,
+   "ok": true,
+   "latency_ms": 1179.3,
+   "prompt_tokens": 441,
+   "completion_tokens": 69,
+   "cost_usd": 1.852e-05,
+   "spent_usd": 0.00161767,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"fight\": 0.01, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "policy",
+   "i": 51,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=1.999 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 52,
+   "ok": true,
+   "latency_ms": 1729.8,
+   "prompt_tokens": 443,
+   "completion_tokens": 62,
+   "cost_usd": 1.861e-05,
+   "spent_usd": 0.00163628,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"fight\": 0.02, \"keep\": 0.01}}"
+  },
+  {
+   "arm": "policy",
+   "i": 53,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 54,
+   "ok": true,
+   "latency_ms": 1989.1,
+   "prompt_tokens": 430,
+   "completion_tokens": 103,
+   "cost_usd": 1.806e-05,
+   "spent_usd": 0.00165434,
+   "reply_head": "{\"option_id\": \"keep\", \"confidence\": 0.72, \"probs\": {\"keep\": 0.72, \"flee\": 0.28}}"
+  },
+  {
+   "arm": "policy",
+   "i": 55,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 56,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.189 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 57,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.19 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback"
+  },
+  {
+   "arm": "policy",
+   "i": 58,
+   "ok": true,
+   "latency_ms": 2559.8,
+   "prompt_tokens": 434,
+   "completion_tokens": 86,
+   "cost_usd": 1.823e-05,
+   "spent_usd": 0.00167257,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 59,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "policy",
+   "i": 60,
+   "ok": true,
+   "latency_ms": 3267.8,
+   "prompt_tokens": 429,
+   "completion_tokens": 255,
+   "cost_usd": 1.802e-05,
+   "spent_usd": 0.00169058,
+   "reply_head": "{\"option_id\": \"keep\", \"confidence\": 0.62, \"probs\": {\"keep\": 0.62, \"flee\": 0.38}}"
+  },
+  {
+   "arm": "policy",
+   "i": 61,
+   "ok": true,
+   "latency_ms": 2677.5,
+   "prompt_tokens": 430,
+   "completion_tokens": 249,
+   "cost_usd": 1.806e-05,
+   "spent_usd": 0.00170864,
+   "reply_head": "{\"option_id\": \"keep\", \"confidence\": 0.62, \"probs\": {\"keep\": 0.62, \"flee\": 0.38}}"
+  },
+  {
+   "arm": "policy",
+   "i": 62,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 63,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.188 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 64,
+   "ok": true,
+   "latency_ms": 1733.9,
+   "prompt_tokens": 436,
+   "completion_tokens": 52,
+   "cost_usd": 1.831e-05,
+   "spent_usd": 0.00172696,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 65,
+   "ok": true,
+   "latency_ms": 1636.3,
+   "prompt_tokens": 409,
+   "completion_tokens": 85,
+   "cost_usd": 1.718e-05,
+   "spent_usd": 0.00174413,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 66,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.0 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback "
+  },
+  {
+   "arm": "policy",
+   "i": 67,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.181 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 68,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.185 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 69,
+   "ok": true,
+   "latency_ms": 2962.1,
+   "prompt_tokens": 429,
+   "completion_tokens": 157,
+   "cost_usd": 1.802e-05,
+   "spent_usd": 0.00176215,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "policy",
+   "i": 70,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.002 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 71,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.19 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback"
+  },
+  {
+   "arm": "policy",
+   "i": 72,
+   "ok": true,
+   "latency_ms": 3294.8,
+   "prompt_tokens": 452,
+   "completion_tokens": 69,
+   "cost_usd": 1.898e-05,
+   "spent_usd": 0.00178114,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 73,
+   "ok": true,
+   "latency_ms": 1810.9,
+   "prompt_tokens": 428,
+   "completion_tokens": 172,
+   "cost_usd": 1.798e-05,
+   "spent_usd": 0.00179911,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.72, \"probs\": {\"flee\": 0.72, \"keep\": 0.28}}"
+  },
+  {
+   "arm": "policy",
+   "i": 74,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 75,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.185 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 76,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.181 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 77,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.181 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 78,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.196 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 79,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.18 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallback"
+  },
+  {
+   "arm": "policy",
+   "i": 80,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.185 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 81,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.197 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 82,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.187 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 83,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.181 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 84,
+   "ok": true,
+   "latency_ms": 1719.0,
+   "prompt_tokens": 407,
+   "completion_tokens": 68,
+   "cost_usd": 1.709e-05,
+   "spent_usd": 0.00181621,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 85,
+   "ok": true,
+   "latency_ms": 1909.0,
+   "prompt_tokens": 429,
+   "completion_tokens": 94,
+   "cost_usd": 1.802e-05,
+   "spent_usd": 0.00183422,
+   "reply_head": "{\"option_id\": \"keep\", \"confidence\": 0.78, \"probs\": {\"keep\": 0.78, \"flee\": 0.22}}"
+  },
+  {
+   "arm": "policy",
+   "i": 86,
+   "ok": true,
+   "latency_ms": 3240.8,
+   "prompt_tokens": 435,
+   "completion_tokens": 134,
+   "cost_usd": 1.827e-05,
+   "spent_usd": 0.00185249,
+   "reply_head": "{\"option_id\": \"keep\", \"confidence\": 0.72, \"probs\": {\"keep\": 0.72, \"flee\": 0.28}}"
+  },
+  {
+   "arm": "policy",
+   "i": 87,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.002 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 88,
+   "ok": true,
+   "latency_ms": 2970.4,
+   "prompt_tokens": 431,
+   "completion_tokens": 336,
+   "cost_usd": 1.81e-05,
+   "spent_usd": 0.0018706,
+   "reply_head": "{\"option_id\": \"keep\", \"confidence\": 0.62, \"probs\": {\"keep\": 0.62, \"flee\": 0.38}}"
+  },
+  {
+   "arm": "policy",
+   "i": 89,
+   "ok": true,
+   "latency_ms": 2083.1,
+   "prompt_tokens": 428,
+   "completion_tokens": 68,
+   "cost_usd": 1.798e-05,
+   "spent_usd": 0.00188857,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 90,
+   "ok": false,
+   "status": 408,
+   "error": "{\"error\":{\"message\":\"litellm.Timeout: Timeout Error: OpenrouterException - litellm.Timeout: Connection timed out. Timeout passed=2.0, time taken=2.001 seconds\\n\\nDeployment Info: request_timeout: None\\ntimeout: 2.0\\n\\nLiteLLM: model group 'typesafe/jev-router' failed with the error above. No fallbac"
+  },
+  {
+   "arm": "policy",
+   "i": 91,
+   "ok": true,
+   "latency_ms": 2707.2,
+   "prompt_tokens": 451,
+   "completion_tokens": 52,
+   "cost_usd": 1.894e-05,
+   "spent_usd": 0.00190751,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"keep\": 0.03}}"
+  },
+  {
+   "arm": "policy",
+   "i": 92,
+   "ok": true,
+   "latency_ms": 2757.9,
+   "prompt_tokens": 420,
+   "completion_tokens": 600,
+   "cost_usd": 1.764e-05,
+   "spent_usd": 0.00192515,
+   "reply_head": ""
+  },
+  {
+   "arm": "policy",
+   "i": 93,
+   "ok": true,
+   "latency_ms": 2001.7,
+   "prompt_tokens": 433,
+   "completion_tokens": 71,
+   "cost_usd": 1.819e-05,
+   "spent_usd": 0.00194334,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.93, \"probs\": {\"flee\": 0.93, \"keep\": 0.07}}"
+  },
+  {
+   "arm": "policy",
+   "i": 94,
+   "ok": true,
+   "latency_ms": 1584.2,
+   "prompt_tokens": 438,
+   "completion_tokens": 124,
+   "cost_usd": 1.84e-05,
+   "spent_usd": 0.00196174,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.82, \"probs\": {\"flee\": 0.82, \"fight\": 0.1, \"keep\": 0.08}}"
+  },
+  {
+   "arm": "policy",
+   "i": 95,
+   "ok": true,
+   "latency_ms": 2940.0,
+   "prompt_tokens": 436,
+   "completion_tokens": 88,
+   "cost_usd": 1.831e-05,
+   "spent_usd": 0.00198005,
+   "reply_head": "{\"option_id\": \"fight\", \"confidence\": 0.9, \"probs\": {\"fight\": 0.9, \"flee\": 0.08, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "policy",
+   "i": 96,
+   "ok": true,
+   "latency_ms": 1752.5,
+   "prompt_tokens": 441,
+   "completion_tokens": 68,
+   "cost_usd": 1.852e-05,
+   "spent_usd": 0.00199857,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.97, \"probs\": {\"flee\": 0.97, \"fight\": 0.01, \"keep\": 0.02}}"
+  },
+  {
+   "arm": "policy",
+   "i": 97,
+   "ok": true,
+   "latency_ms": 1313.7,
+   "prompt_tokens": 433,
+   "completion_tokens": 68,
+   "cost_usd": 1.819e-05,
+   "spent_usd": 0.00201676,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 98,
+   "ok": true,
+   "latency_ms": 1148.9,
+   "prompt_tokens": 429,
+   "completion_tokens": 68,
+   "cost_usd": 1.802e-05,
+   "spent_usd": 0.00203477,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.95, \"probs\": {\"flee\": 0.95, \"keep\": 0.05}}"
+  },
+  {
+   "arm": "policy",
+   "i": 99,
+   "ok": true,
+   "latency_ms": 1761.8,
+   "prompt_tokens": 430,
+   "completion_tokens": 90,
+   "cost_usd": 1.806e-05,
+   "spent_usd": 0.00205283,
+   "reply_head": "{\"option_id\": \"flee\", \"confidence\": 0.93, \"probs\": {\"flee\": 0.93, \"keep\": 0.07}}"
+  }
+ ]
+}

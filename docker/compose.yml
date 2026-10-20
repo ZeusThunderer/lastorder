@@ -71,14 +71,27 @@ services:
       MIND_IDLE_S: "${MIND_IDLE_S:-120}"
       MIND_FLEE_HP: "${MIND_FLEE_HP:-6}"
       # LLM through the gateway (T-026, ADR-033): the mind's own virtual key covers its cloud
-      # Jev calls (ADR-027; no tier model is picked yet — when T-031 wires it, for_tier reads
-      # these). No provider key ever enters this container. Deliberately no depends_on health
-      # gate on llm-gateway: callers retry a down gateway by design (NETWORK.md section 9),
-      # the mind makes no LLM calls before T-031, and a service_healthy gate would wedge the
-      # spike overlay's clean-env `up -d mc-server body-1 mind-1` (the fail-closed gateway
-      # refuses to start without GATEWAY_MASTER_KEY).
+      # Jev calls (ADR-027, wired in T-031: the JEV_* block below). No provider key ever
+      # enters this container. Deliberately no depends_on health gate on llm-gateway:
+      # callers retry a down gateway by design (NETWORK.md section 9), Jev timeouts fall
+      # back to the C1 rules, and a service_healthy gate would wedge the spike overlay's
+      # clean-env `up -d mc-server body-1 mind-1` (the fail-closed gateway refuses to
+      # start without GATEWAY_MASTER_KEY).
       LLM_API_BASE: http://llm-gateway:4000
       LLM_API_KEY: "${GATEWAY_KEY_MIND_1:-}"
+      # Jev, the threat-tactics decider of C1 (T-031, ADR-027). `rules` keeps C1 on the
+      # no-LLM fallback until a live run shows a win; `cloud` is the TypeSafe Jev model
+      # through the gateway under the mind's virtual key above (the tier `jev` deployments
+      # in docker/gateway/config.yaml carry their own timeout and zero retries); `local`
+      # is the FastJev profile service (jev:8000, reachable through body-1's network).
+      # The policy file is the node's workplace file: the workplace mount itself is
+      # T-027's to wire — until then the path holds no file and C1 runs without a policy.
+      JEV_BACKEND: "${JEV_BACKEND:-rules}"
+      JEV_MODEL: "${JEV_MODEL:-openrouter/typesafe/jev-router}"
+      JEV_TIMEOUT_S: "${JEV_TIMEOUT_S:-1.5}"
+      JEV_MIN_INTERVAL_S: "${JEV_MIN_INTERVAL_S:-3}"
+      JEV_POLICY_PATH: "${JEV_POLICY_PATH:-/mind-run/policy/threat.md}"
+      JEV_POLICY_MAX_CHARS: "${JEV_POLICY_MAX_CHARS:-1500}"
     command: ["python", "-m", "runtime.mind"]
     volumes:
       - mind-1-run:/mind-run

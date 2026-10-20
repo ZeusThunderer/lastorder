@@ -33,6 +33,31 @@ model_list:
     litellm_params:
       model: openrouter/z-ai/glm-5.3-flash
       api_key: os.environ/OPENROUTER_API_KEY
+  # tier `jev`: the cloud tactical decider of C1 (T-031, ADR-027). typesafe/jev-router is the
+  # current OpenRouter id of the System One Jev model (was typesafe/jev-1.13 in ADR-004).
+  # C1 waits for no one: per-deployment `timeout` and `num_retries: 0` override the global
+  # num_retries (verified in the running image, litellm 1.106.0: Router.
+  # _set_deployment_num_retries_on_exception reads litellm_params.num_retries), so a timed-out
+  # Jev call is not retried by the proxy after C1 already fell back to the rules (plan review
+  # P1-2); `max_retries: 0` disables the SDK's own client retries (default 2) for the same
+  # reason. The deployment timeout sits just above the client's 1.5 s ceiling
+  # (JEV_TIMEOUT_S, runtime/mind/jev.py): the client aborts first, and a provider slower
+  # than this is aborted once — never retried. The T-031 probe numbers live in
+  # docs/agents/jev.md.
+  - model_name: openrouter/typesafe/jev-router
+    litellm_params:
+      model: openrouter/typesafe/jev-router
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 2
+      num_retries: 0
+      max_retries: 0
+  - model_name: typesafe/jev-router
+    litellm_params:
+      model: openrouter/typesafe/jev-router
+      api_key: os.environ/OPENROUTER_API_KEY
+      timeout: 2
+      num_retries: 0
+      max_retries: 0
 
 litellm_settings:
   # consumers send tier-specific extras (reasoning off); anything the provider does not know
