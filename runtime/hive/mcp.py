@@ -26,7 +26,9 @@ inside it.
 `X-Runner-Session: will` after the death, AND hive must already know the body is dead
 (`Lifecycle.mark_dead` — the death signal mind-N/the runner owes hive; the wiring is
 T-027). The will itself is staged in the run volume for the runner's `retire`; the store
-stays the only writer of `nodes/<serial>/will.md`.
+stays the only writer of `nodes/<serial>/will.md`. With runner keys configured
+(`HIVE_RUNNER_KEYS`, T-027 plan review P1-1) the session mark must also carry the slot's
+runner key (`X-Runner-Key`): the node's will-session proxy adds it, a sister's bash cannot.
 """
 
 from __future__ import annotations
@@ -63,6 +65,7 @@ from runtime.ports import NodeMessage, Vote
 NODE_KEY_HEADER = "x-node-key"  # the virtual key: a sister's or Last Order's
 RUNNER_NODE_HEADER = "x-runner-node"  # cross-check only, never identity (review P1-2)
 RUNNER_SESSION_HEADER = "x-runner-session"  # "will": the will session the runner opened
+RUNNER_KEY_HEADER = "x-runner-key"  # the node runner's own key (T-027): gates the will-session mark
 WILL_SESSION = "will"
 ALL_ADDRESSEE = "all"  # broadcast of Misaka-net: every living node except the sender
 
@@ -77,10 +80,11 @@ def _err(message: str) -> None:
     raise ToolError(message)
 
 
-def parse_node_keys(text: str) -> dict[str, str]:
+def parse_node_keys(text: str, env_name: str = "HIVE_MCP_NODE_KEYS") -> dict[str, str]:
     """`LastOrder01=sk-a;LastOrder02=sk-b` -> {key: slot}. A malformed or duplicated entry
     is a startup error: an identity map that silently ignores half of itself is worse
-    than a container that refuses to boot."""
+    than a container that refuses to boot. The same format carries the runner keys of
+    T-027 (`HIVE_RUNNER_KEYS`, `env_name` below)."""
 
     keys: dict[str, str] = {}
     for chunk in (text or "").split(";"):
@@ -90,9 +94,9 @@ def parse_node_keys(text: str) -> dict[str, str]:
         slot, sep, key = chunk.partition("=")
         slot, key = slot.strip(), key.strip()
         if not sep or not slot or not key:
-            raise ValueError(f"HIVE_MCP_NODE_KEYS: bad entry {chunk!r} (want slot=key)")
+            raise ValueError(f"{env_name}: bad entry {chunk!r} (want slot=key)")
         if key in keys:
-            raise ValueError(f"HIVE_MCP_NODE_KEYS: key of slot {keys[key]} reused for {slot}")
+            raise ValueError(f"{env_name}: key of slot {keys[key]} reused for {slot}")
         keys[key] = slot
     return keys
 
@@ -119,6 +123,7 @@ class HiveMcp:
         run_dir: Path,
         log: HiveLog | None = None,
         now: Callable[[], str] | None = None,
+        runner_keys: Mapping[str, str] | None = None,
     ):
         self._store = store
         self._lifecycle = lifecycle
@@ -127,6 +132,11 @@ class HiveMcp:
         self._layers = layers
         self._node_keys = dict(node_keys)
         self._lo_key = lo_key or ""
+        # The runner boundary of T-027 (plan review P1-1): when configured, the
+        # X-Runner-Session mark is worthless without the slot's runner key, so a sister
+        # cannot forge her own will session from bash. Empty map (dev/tests) keeps the
+        # header check of T-028 alone.
+        self._runner_keys = dict(runner_keys) if runner_keys else {}
         self._wills_dir = Path(run_dir) / "pending_wills"
         self._log = log
         self._now = now or (lambda: datetime.now(timezone.utc).isoformat())
@@ -274,7 +284,14 @@ class HiveMcp:
         headers = self._headers(ctx)
         if headers.get(RUNNER_SESSION_HEADER, "").strip().lower() != WILL_SESSION:
             _err("submit_will: only in the will session (X-Runner-Session: will)")
-        self._lifecycle.require_node(serial)  # born, not retired, not lost
+        node = self._lifecycle.require_node(serial)  # born, not retired, not lost
+        if self._runner_keys:
+            # T-027 (plan review P1-1): the session mark alone must not be forgeable
+            # from bash — it travels with the runner's own key, which the will-session
+            # proxy of the node injects next to the node key.
+            runner_key = headers.get(RUNNER_KEY_HEADER, "").strip()
+            if self._runner_keys.get(runner_key) != node.slot:
+                _err("submit_will: X-Runner-Session needs the slot's runner key (X-Runner-Key)")
         if not self._lifecycle.body_dead(serial):
             _err("submit_will: the node is not dead")
         if not isinstance(text, str) or not text.strip():

@@ -411,8 +411,12 @@ def build_server(
     impl: BodyMcp,
     *,
     start_c1: bool = True,
+    runner_key: str = "",
 ) -> tuple[MCPServer, BodyMcp]:
-    """Wire the tools and the runner endpoints; returns (server, impl)."""
+    """Wire the tools and the runner endpoints; returns (server, impl).
+
+    `runner_key` (env MIND_RUNNER_KEY) gates /runner/respawn and /runner/birth
+    (T-027 plan review P1-4); empty keeps the endpoints open for dev/tests."""
     executor = impl.executor
     server = MCPServer(
         name="body",
@@ -471,6 +475,13 @@ def build_server(
     server.add_tool(retire_stuck, name="retire_stuck")
 
     # --- the runner's endpoints (review P1-1, P1-7); same port, same body network ------
+    # The commands are the node runner's alone (T-027 plan review P1-4): with a runner key
+    # configured they need X-Runner-Key, so a sister with bash cannot respawn her dead
+    # body under the runner's will session or arm the life clock of another serial.
+    # /runner/status stays open: the death cause is the dying agent's own data.
+
+    def _runner_key_ok(request: Request) -> bool:
+        return not runner_key or request.headers.get("x-runner-key", "").strip() == runner_key
 
     @server.custom_route("/runner/status", methods=["GET"])
     async def runner_status(request: Request) -> Response:
@@ -478,6 +489,8 @@ def build_server(
 
     @server.custom_route("/runner/respawn", methods=["POST"])
     async def runner_respawn(request: Request) -> Response:
+        if not _runner_key_ok(request):
+            return JSONResponse({"error": "missing or wrong X-Runner-Key"}, status_code=401)
         if not executor.dead():
             return JSONResponse({"error": "the body is not dead"}, status_code=409)
         try:
@@ -488,6 +501,8 @@ def build_server(
 
     @server.custom_route("/runner/birth", methods=["POST"])
     async def runner_birth(request: Request) -> Response:
+        if not _runner_key_ok(request):
+            return JSONResponse({"error": "missing or wrong X-Runner-Key"}, status_code=401)
         try:
             payload = await request.json()
             serial, born_at, ttl_min = (
@@ -518,6 +533,8 @@ def build_mind(
     **executor_kwargs: Any,
 ) -> tuple[MCPServer, BodyMcp, Executor]:
     """Assemble the whole mind of one slot; tests use the impl and executor directly."""
+    # runner_key is build_server's, not the Executor's: lift it out before wiring C1.
+    runner_key = str(executor_kwargs.pop("runner_key", ""))
     executor = Executor(
         body,
         username=username,
@@ -527,7 +544,7 @@ def build_mind(
         **executor_kwargs,
     )
     impl = BodyMcp(executor, perception=perception, clock=clock)
-    server, impl = build_server(impl, start_c1=start_c1)
+    server, impl = build_server(impl, start_c1=start_c1, runner_key=runner_key)
     return server, impl, executor
 
 
@@ -589,6 +606,7 @@ def main() -> None:
         threat_calm_s=_env_float("MIND_THREAT_CALM_S", 6.0),
         evade_m=_env_float("MIND_EVADE_M", 12.0),
         idle_s=_env_float("MIND_IDLE_S", 120.0),
+        runner_key=env("MIND_RUNNER_KEY", default="") or "",
     )
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the harness
     # reaches the port by service name (body-1:8700) inside the docker network, not via localhost.

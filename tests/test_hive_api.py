@@ -73,13 +73,16 @@ def will_text(serial: int, born_at: str, *, slot: str = "LastOrder01") -> str:
     return "\n".join(lines)
 
 
-def make_app_stack(tmp_path: Path):
+def make_app_stack(tmp_path: Path, runner_keys: dict[str, str] | None = None):
     """A full hive over a tmp store: used here and by tests/test_hive_client.py."""
     clock = FakeClock()
     rcon = FakeRcon()
     store = KnowledgeStore(tmp_path / "kb", git=False, now=lambda: clock().isoformat())
     log = HiveLog(tmp_path / "run" / "events.jsonl")
-    app = create_app(store=store, rcon=rcon, log=log, run_dir=tmp_path / "run", clock=clock)
+    app = create_app(
+        store=store, rcon=rcon, log=log, run_dir=tmp_path / "run", clock=clock,
+        runner_keys=runner_keys,
+    )
     return types.SimpleNamespace(
         app=app, client=TestClient(app), store=store, log=log, clock=clock, rcon=rcon
     )
@@ -382,3 +385,56 @@ def test_error_unknown_route_uses_the_envelope(stack) -> None:
     response = stack.client.get("/nope")
     assert response.status_code == 404
     assert error_of(response)["kind"] == "http"
+
+
+# --- the runner key of the registry writes (T-027 plan review P1-1) -----------------------------
+
+RUNNER_KEY = "rk-runner-one"
+
+
+@pytest.fixture()
+def keyed_stack(tmp_path: Path):
+    return make_app_stack(tmp_path, {RUNNER_KEY: "LastOrder01"})
+
+
+def test_registry_writes_refuse_without_runner_key(keyed_stack) -> None:
+    stack = keyed_stack
+    # birth: the slot's key is missing
+    response = stack.client.post(
+        "/registry/birth", json={"slot": "LastOrder01", "traits": traits().as_dict()}
+    )
+    assert response.status_code == 401
+    assert error_of(response)["kind"] == "runner_key"
+    # a key of another slot does not open this one either
+    response = stack.client.post(
+        "/registry/birth",
+        json={"slot": "LastOrder01", "traits": traits().as_dict()},
+        headers={"X-Runner-Key": "rk-somewhere-else"},
+    )
+    assert response.status_code == 401
+    # the right key passes: the node is born, the serial endpoints now answer 401 to a
+    # keyless caller instead of performing the write
+    born = stack.client.post(
+        "/registry/birth",
+        json={"slot": "LastOrder01", "traits": traits().as_dict()},
+        headers={"X-Runner-Key": RUNNER_KEY},
+    )
+    assert born.status_code == 200, born.text
+    serial = born.json()["serial"]
+    for path, body in (
+        ("/registry/request_death", {"serial": serial, "cause": "game"}),
+        ("/registry/mark_dead", {"serial": serial}),
+        ("/registry/retire", {"serial": serial, "cause": "game", "will_text": will_text(serial, T0.isoformat())}),
+    ):
+        bare = stack.client.post(path, json=body)
+        assert bare.status_code == 401, (path, bare.text)
+        assert error_of(bare)["kind"] == "runner_key"
+    # reads stay open: the registry membership is public inside the network
+    assert stack.client.get("/registry/alive").status_code == 200
+
+
+def test_registry_writes_open_without_configured_keys(stack) -> None:
+    # no HIVE_RUNNER_KEYS: dev/test default, the endpoints answer as before (T-022 contract)
+    record = born(stack)
+    response = stack.client.post("/registry/mark_dead", json={"serial": record["serial"]})
+    assert response.status_code == 200

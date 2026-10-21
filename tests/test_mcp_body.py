@@ -131,7 +131,9 @@ class SimpleState:
 class Stack:
     """The whole mind in-process: fake body, C1, server, uvicorn, client call helpers."""
 
-    def __init__(self, body: FakeBody | None = None, idle_s: float = 10_000.0):
+    def __init__(
+        self, body: FakeBody | None = None, idle_s: float = 10_000.0, runner_key: str = ""
+    ):
         self.body = body or FakeBody()
         self._tmp = f".mcp-body-test-{time.monotonic_ns()}.jsonl"
         self.calls_file = JsonlLog(self._tmp)
@@ -141,6 +143,7 @@ class Stack:
             call_log=self.calls_file,
             tick_interval=0.25,
             idle_s=idle_s,  # the watchdog has its own tests; keep it quiet here
+            runner_key=runner_key,
         )
         app = server.streamable_http_app(stateless_http=True, streamable_http_path="/mcp")
         config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
@@ -163,8 +166,14 @@ class Stack:
         async with Client(streamable_http_client(self.url())) as client:
             return await coro_fn(client)
 
-    def runner(self, method: str, path: str, json_body: dict | None = None) -> httpx.Response:
-        return httpx.request(method, f"http://127.0.0.1:{self.port}{path}", json=json_body, timeout=30.0)
+    def runner(
+        self, method: str, path: str, json_body: dict | None = None, key: str | None = None
+    ) -> httpx.Response:
+        headers = {"X-Runner-Key": key} if key is not None else {}
+        return httpx.request(
+            method, f"http://127.0.0.1:{self.port}{path}", json=json_body,
+            headers=headers, timeout=30.0,
+        )
 
     def log_lines(self) -> list[dict]:
         with self.calls_file._lock:
@@ -497,3 +506,37 @@ def test_call_log_records_calls_and_rejections(stack: Stack) -> None:
     assert "said" in ok_entry or ok_entry["tool"] == "say"
     # JSONL: every line parses (checked by json.loads above)
     assert all({"ts", "kind"} <= set(e) for e in entries)
+
+
+# --- the runner key of /runner/* (T-027 plan review P1-4) ---------------------------------------
+
+
+def test_runner_commands_need_the_runner_key() -> None:
+    """With MIND_RUNNER_KEY set, respawn and birth answer 401 to a keyless caller
+    (a sister with bash must not respawn her dead body under the runner's will
+    session), and the status stays open: the death cause is the agent's own data."""
+    s = Stack(runner_key="rk-mind-one")
+    try:
+        s.body.set_state(hp=0.0)
+        s.body.chat = ["LastOrder01 was killed"]
+        s.wait_until(lambda: s.executor.dead())
+        assert s.runner("GET", "/runner/status").status_code == 200
+        assert s.runner("POST", "/runner/respawn").status_code == 401
+        assert s.runner("POST", "/runner/respawn", key="rk-wrong").status_code == 401
+        assert s.body.respawn_calls == 0
+        assert (
+            s.runner("POST", "/runner/birth", {"serial": 8, "born_at": "2026-10-21T00:00:00+00:00", "ttl_min": 45}).status_code
+            == 401
+        )
+        assert s.runner("POST", "/runner/birth", {"serial": "x"}, key="rk-mind-one").status_code == 400
+        # the right key opens both commands
+        assert s.runner("POST", "/runner/respawn", key="rk-mind-one").status_code == 200
+        s.wait_until(lambda: s.body.respawn_calls == 1)
+        assert (
+            s.runner(
+                "POST", "/runner/birth", {"serial": 8, "born_at": "2026-10-21T00:00:00+00:00", "ttl_min": 45}, key="rk-mind-one"
+            ).status_code
+            == 200
+        )
+    finally:
+        s.close()

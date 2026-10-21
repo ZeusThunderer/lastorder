@@ -40,7 +40,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -239,6 +239,7 @@ def create_app(
     scan_s: float | None = None,
     node_keys: dict[str, str] | None = None,
     lo_key: str | None = None,
+    runner_keys: dict[str, str] | None = None,
 ) -> FastAPI:
     clock = clock or (lambda: datetime.now(timezone.utc))
     run_dir = Path(run_dir if run_dir is not None else (env("RUN_DIR") or "run"))
@@ -259,6 +260,8 @@ def create_app(
         if node_keys is not None
         else parse_node_keys(env("HIVE_MCP_NODE_KEYS") or "")
     )
+    if runner_keys is None:
+        runner_keys = parse_node_keys(env("HIVE_RUNNER_KEYS") or "", env_name="HIVE_RUNNER_KEYS")
     last_order_key = lo_key if lo_key is not None else (env("HIVE_MCP_LO_KEY") or "")
     now = lambda: clock().isoformat()  # noqa: E731 - one clock for every layer write
     proposals = ProposalBook(store, now=now)
@@ -275,6 +278,7 @@ def create_app(
             run_dir=run_dir,
             log=log,
             now=now,
+            runner_keys=runner_keys,
         )
     )
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the
@@ -435,24 +439,46 @@ def create_app(
         service.submit_vote(serial, vote)
 
     # --- NodeRegistry ----------------------------------------------------------------------
+    # The writes of this section belong to the node runner alone (T-027 plan review P1-1):
+    # with HIVE_RUNNER_KEYS configured, every mutating call must carry the slot's runner
+    # key in X-Runner-Key. The registry lives on the same port as the sisters' MCP, and a
+    # sister with bash could otherwise retire a neighbour or mark herself dead. An empty
+    # map (no env) keeps the endpoints open — the dev/test default; production compose
+    # always sets the keys.
+
+    def _require_runner_key(request: Request, slot: str) -> None:
+        if not runner_keys:
+            return
+        key = request.headers.get("x-runner-key", "").strip()
+        if runner_keys.get(key) != slot:
+            raise ApiError(401, "runner_key", f"X-Runner-Key does not open slot {slot}")
 
     @app.post("/registry/birth")
-    def registry_birth(body: dict) -> dict:
+    def registry_birth(request: Request, body: dict) -> dict:
         slot = _text(body, "slot")
+        _require_runner_key(request, slot)
         traits = _decode(traits_from_json, _obj(body, "traits"), "traits")
         return birth_record_to_json(service.birth(slot, traits))
 
     @app.post("/registry/request_death")
-    def registry_request_death(body: dict) -> None:
-        service.request_death(_serial(body), _text(body, "cause"))
+    def registry_request_death(request: Request, body: dict) -> None:
+        serial = _serial(body)
+        _require_runner_key(request, lifecycle.require_node(serial).slot)
+        service.request_death(serial, _text(body, "cause"))
 
     @app.post("/registry/mark_dead")
-    def registry_mark_dead(body: dict) -> None:
-        service.mark_dead(_serial(body))
+    def registry_mark_dead(request: Request, body: dict) -> None:
+        serial = _serial(body)
+        _require_runner_key(request, lifecycle.require_node(serial).slot)
+        service.mark_dead(serial)
 
     @app.post("/registry/retire")
-    def registry_retire(body: dict) -> None:
+    def registry_retire(request: Request, body: dict) -> None:
         serial = _serial(body)
+        # The 404/409 of require_node stay ahead of the key check on purpose: they are
+        # the store's answers to a retrying runner, not information a keyless caller
+        # gains (the registry's membership is public inside the network).
+        _require_runner_key(request, lifecycle.require_node(serial).slot)
         will_text = _text(body, "will_text")
         service.retire(serial, _text(body, "cause"), will_text)
 
