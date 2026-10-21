@@ -20,11 +20,15 @@ QUOTA_ACTIONS = ("wait", "switch")
 
 
 def _from_file(path_value: str | None, *, env_name: str) -> str:
-    """Read a secret file (docker secret mount); empty when absent."""
+    """Read a secret file the entrypoint materialized; a MISSING file is simply an
+    unset secret (the entrypoint writes only what it got) — a present but unreadable
+    one is a startup error, not a silent empty key."""
     if not path_value:
         return ""
     try:
         return Path(path_value).read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
     except OSError as exc:
         raise ValueError(f"{env_name}: cannot read {path_value}: {exc}") from None
 
@@ -56,7 +60,7 @@ class NodeConfig:
     zcode_model: str
     opencode_model: str
     naming: str
-    will_timeout_s: float
+    will_timeout_s: float  # a COLD will session (fresh context, files, submit_will) is slower than the spike's warm 2.5 min
     poll_s: float  # /runner/status poll while a session runs
     restart_pause_s: float
     restart_pause_max_s: float

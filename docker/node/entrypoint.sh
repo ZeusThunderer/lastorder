@@ -20,9 +20,9 @@ log() { printf '[node-entrypoint] %s\n' "$*" >&2; }
 
 # 1. Secrets -> root-only files on the tmpfs (/run/node is mode 700, root-owned).
 mkdir -p "$SECRET_DIR" && chmod 700 "$SECRET_DIR" && chown root:root "$SECRET_DIR"
-materialize() { # materialize <file> <value>
+materialize() { # materialize <file> <value>: written 0400 root; no umask games — a
+  # leaked 0177 umask once cost every later directory its execute bit
   [ -n "$2" ] || return 0
-  umask 177
   printf '%s' "$2" > "$SECRET_DIR/$1"
   chown root:root "$SECRET_DIR/$1"
   chmod 0400 "$SECRET_DIR/$1"
@@ -30,7 +30,7 @@ materialize() { # materialize <file> <value>
 materialize runner_key "${HIVE_RUNNER_KEY:-}"
 materialize node_mcp_key "${HIVE_NODE_KEY:-}"
 materialize gateway_node_key "${GATEWAY_NODE_KEY:-}"
-materialize zai_key "${ZAI_API_KEY:-}"
+materialize zai_api_key "${ZAI_API_KEY:-}"
 
 # 2. The sister's home (tmpfs): zcode provider + opencode auth, rendered from secrets.
 mkdir -p "$SISTER_HOME/.zcode/v2" "$SISTER_HOME/.local/share/opencode"

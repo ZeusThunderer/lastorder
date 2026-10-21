@@ -47,6 +47,12 @@ from runtime.node.willproxy import WillProxy
 LIFE_PREFIX = "Life session."
 WILL_PREFIX = "Will session (you have just died)."
 
+
+def _tail(text: str, limit: int) -> str:
+    """The last `limit` characters, whitespace-squeezed: telemetry of what a harness
+    said when it died — enough to debug, never a full log dump."""
+    return " ".join(text[-limit:].split())
+
 DELIVERED = "hive"
 SUPERSEDED = "superseded"  # 409 already_retired: hive closed the node itself
 REJECTED = "rejected"  # a permanent non-409 4xx: parked for the operator
@@ -195,6 +201,7 @@ class NodeRunner:
                 os.setgroups([])
                 os.setgid(gid)
                 os.setuid(uid)
+                os.umask(0o022)
             preexec = _drop
         popen = subprocess.Popen(
             argv,
@@ -391,7 +398,12 @@ class NodeRunner:
             ran_for = time.monotonic() - started
             self._log(
                 "session.ended",
-                {"harness": adapter_name, "code": process.returncode(), "ran_s": round(ran_for, 1)},
+                {
+                    "harness": adapter_name,
+                    "code": process.returncode(),
+                    "ran_s": round(ran_for, 1),
+                    "tail": _tail(output, 300),
+                },
             )
             if quota_exhausted(output):
                 switched = self._quota_switch(adapter_name)
@@ -625,8 +637,12 @@ class NodeRunner:
                 if process.poll() is None:
                     process.wait(self.cfg.kill_grace_s)
                 process.kill()
-                self._log("will.session_timeout", {"serial": state.serial, "timeout_s": self.cfg.will_timeout_s})
+                self._log(
+                    "will.session_timeout",
+                    {"serial": state.serial, "timeout_s": self.cfg.will_timeout_s, "tail": _tail(process.output(), 300)},
+                )
             process.wait()
             output = process.output()
+            self._log("will.session_done", {"serial": state.serial, "tail": _tail(output, 300)})
         proxy.stop()
         return output

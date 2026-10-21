@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Bring the node sandboxes up with their secrets lifted from the repo root .env.
 #
-# The runner refuses env-borne secrets (plan review P1-1: /proc/environ), so its keys are
-# written as 0600 files under docker/node/secrets/ (gitignored) and mounted as compose
-# secrets. The hive-side key maps (HIVE_MCP_NODE_KEYS, HIVE_RUNNER_KEYS) ride the same
-# lift as plain env, like docker/gateway/up.sh does for its consumers.
+# Secrets reach the containers as single env variables (never an env_file over the whole
+# .env, like docker/gateway/up.sh); the node entrypoint materializes them as 0400
+# root-only files on tmpfs and scrubs its environment before exec'ing the runner (plan
+# review P1-1; compose file-secrets bind as 0777 on Docker Desktop). The hive-side key
+# maps (HIVE_MCP_NODE_KEYS, HIVE_RUNNER_KEYS) are assembled here as plain env too.
 #
 #   bash docker/node/up.sh                 # the whole stack (mc-server..node-3)
 #   bash docker/node/up.sh node-1          # args pass through to compose

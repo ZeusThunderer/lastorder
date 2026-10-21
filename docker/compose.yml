@@ -84,7 +84,7 @@ x-node: &node
     GATEWAY_URL: http://llm-gateway:4000
     ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"
     OPENCODE_MODEL: "${OPENCODE_MODEL:-openrouter/qwen/qwen3.7-flash}"
-    WILL_TIMEOUT_S: "${WILL_TIMEOUT_S:-600}"
+    WILL_TIMEOUT_S: "${WILL_TIMEOUT_S:-900}"
     HIVE_PENDING_WILLS: /hive-run/pending_wills
     SISTER_UID: "1001"
     SISTER_GID: "1001"
