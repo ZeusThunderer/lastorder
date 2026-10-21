@@ -89,6 +89,9 @@ class NodeConfig:
             raise ValueError("NODE_SLOT is required (the slot name, e.g. LastOrder01)")
         pending = env("HIVE_PENDING_WILLS", default="") or ""
         runner_key = _from_file(env("RUNNER_KEY_FILE", default=""), env_name="RUNNER_KEY_FILE")
+        node_key = _from_file(env("HIVE_NODE_KEY_FILE", default=""), env_name="HIVE_NODE_KEY_FILE") or (
+            env("HIVE_NODE_KEY", default="") or ""
+        )
         zai_key = _from_file(env("ZAI_KEY_FILE", default=""), env_name="ZAI_KEY_FILE")
         gateway_key = _from_file(env("GATEWAY_KEY_FILE", default=""), env_name="GATEWAY_KEY_FILE")
         posix_uid = env("SISTER_UID", default="") or ""
@@ -104,7 +107,7 @@ class NodeConfig:
             harness=harness,
             failover=failover,
             quota_action=quota_action,
-            node_key=env("HIVE_NODE_KEY", default="") or "",
+            node_key=node_key,
             runner_key=runner_key,
             zai_key=zai_key,
             gateway_url=env("GATEWAY_URL", default="http://llm-gateway:4000") or "",
