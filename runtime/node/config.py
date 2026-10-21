@@ -88,12 +88,17 @@ class NodeConfig:
         if not slot:
             raise ValueError("NODE_SLOT is required (the slot name, e.g. LastOrder01)")
         pending = env("HIVE_PENDING_WILLS", default="") or ""
-        runner_key = _from_file(env("RUNNER_KEY_FILE", default=""), env_name="RUNNER_KEY_FILE")
-        node_key = _from_file(env("HIVE_NODE_KEY_FILE", default=""), env_name="HIVE_NODE_KEY_FILE") or (
-            env("HIVE_NODE_KEY", default="") or ""
-        )
-        zai_key = _from_file(env("ZAI_KEY_FILE", default=""), env_name="ZAI_KEY_FILE")
-        gateway_key = _from_file(env("GATEWAY_KEY_FILE", default=""), env_name="GATEWAY_KEY_FILE")
+        def _secret(file_env: str, plain_env: str) -> str:
+            # the entrypoint materializes secrets as 0400 root-only files; the plain env
+            # names stay as dev/test fallbacks
+            return _from_file(env(file_env, default=""), env_name=file_env) or (
+                env(plain_env, default="") or ""
+            )
+
+        runner_key = _secret("RUNNER_KEY_FILE", "HIVE_RUNNER_KEY")
+        node_key = _secret("HIVE_NODE_KEY_FILE", "HIVE_NODE_KEY")
+        zai_key = _secret("ZAI_KEY_FILE", "ZAI_API_KEY")
+        gateway_key = _secret("GATEWAY_KEY_FILE", "GATEWAY_NODE_KEY")
         posix_uid = env("SISTER_UID", default="") or ""
         uid = int(posix_uid) if posix_uid.isdigit() else None
         gid = int(env("SISTER_GID", default=posix_uid) or 0) if uid is not None else None

@@ -14,35 +14,27 @@ HERE="$(cd "$(dirname "$0")/../.." && pwd)"
 ROOT="$(git -C "$HERE" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
 [ -n "${ROOT:-}" ] || ROOT="$HERE"
 
-# values are never echoed; quotes are stripped like gateway/up.sh does
-lift() { # lift <var>
-  local key="$1" val=""
-  [ -n "${!key:-}" ] && return 0
-  [ -f "$ROOT/.env" ] || return 0
-  val="$(sed -n "s/^${key}=//p" "$ROOT/.env" | head -1 | tr -d '\r')"
-  val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
-  [ -n "$val" ] && export "$key=$val"
+# values are never echoed; quotes are stripped like gateway/up.sh does. lift ends 0 even
+# when the value is absent: a missing key is a wait case, not a script abort.
+lift() { # lift <var> [file key]: env wins, then the root .env
+  local key="$1" file_key="${2:-$1}" val=""
+  if [ -z "${!key:-}" ] && [ -f "$ROOT/.env" ]; then
+    val="$(sed -n "s/^${file_key}=//p" "$ROOT/.env" | head -1 | tr -d '\r')"
+    val="${val%\"}"; val="${val#\"}"; val="${val%\'}"; val="${val#\'}"
+    [ -n "$val" ] && export "$key=$val"
+  fi
+  return 0
 }
-for key in ZCODE_API_KEY GATEWAY_KEY_NODE_1 GATEWAY_KEY_NODE_2 GATEWAY_KEY_NODE_3 \
+# the Z.ai token sits under ZAI_API_KEY in the root .env (T-024 naming); ZCODE_API_KEY
+# stays the canonical env override, like the spike overlay used it
+lift ZCODE_API_KEY ZAI_API_KEY
+for key in GATEWAY_KEY_NODE_1 GATEWAY_KEY_NODE_2 GATEWAY_KEY_NODE_3 \
            HIVE_NODE_KEY_1 HIVE_NODE_KEY_2 HIVE_NODE_KEY_3 \
            HIVE_RUNNER_KEY_1 HIVE_RUNNER_KEY_2 HIVE_RUNNER_KEY_3 \
            GATEWAY_MASTER_KEY OPENROUTER_API_KEY GATEWAY_DB_PASSWORD \
            GATEWAY_KEY_MIND_1 GATEWAY_KEY_MIND_2 GATEWAY_KEY_MIND_3 GATEWAY_KEY_HIVE \
            RCON_PASSWORD; do
   lift "$key"
-done
-
-SECRETS="$HERE/docker/node/secrets"
-mkdir -p "$SECRETS" && chmod 700 "$SECRETS"
-secret() { # secret <file> <value>
-  umask 177
-  printf '%s' "${2:-}" > "$SECRETS/$1"
-}
-secret zai_api_key "${ZCODE_API_KEY:-}"
-for n in 1 2 3; do
-  eval "secret runner_key_$n \"\${HIVE_RUNNER_KEY_$n:-}\""
-  eval "secret node_mcp_key_$n \"\${HIVE_NODE_KEY_$n:-}\""
-  eval "secret gateway_node_key_$n \"\${GATEWAY_KEY_NODE_$n:-}\""
 done
 
 # the hive and the minds read their identity maps from env (compose interpolates from

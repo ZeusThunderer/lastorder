@@ -300,13 +300,27 @@ class NodeRunner:
         )
         serial, born_at, ttl_min = int(record["serial"]), str(record["born_at"]), int(record["ttl_min"])
         # Arm BEFORE any session starts (T-025 note): the clock belongs to this serial.
-        try:
-            self._mind.arm(serial, born_at, ttl_min)
-        except HiveRejected:
-            status = self._wait_for_mind()
-            if status.get("serial") != serial:
-                raise
-            self._log("birth.already_armed", {"serial": serial})
+        # A lost reply may still have armed it: re-read the status before retrying, the
+        # same idempotence the retire retry owes (section 9).
+        attempt = 0
+        while True:
+            try:
+                self._mind.arm(serial, born_at, ttl_min)
+                break
+            except HiveRejected:
+                status = self._wait_for_mind()
+                if status.get("serial") != serial:
+                    raise
+                self._log("birth.already_armed", {"serial": serial})
+                break
+            except HiveUnavailable as exc:
+                status = self._quiet_status()
+                if status is not None and status.get("serial") == serial:
+                    self._log("birth.already_armed", {"serial": serial, "via": "lost_reply"})
+                    break
+                self._log("birth.arm_retry", {"serial": serial, "attempt": attempt + 1, "error": str(exc)})
+                self._sleep(self._hive_pause(attempt))
+                attempt += 1
         self._log("life.birth", {"serial": serial, "slot": self.cfg.slot, "seed": seed})
         workplace.create_workplace(
             workplaces=self.cfg.workplaces,
@@ -437,6 +451,12 @@ class NodeRunner:
                     return death
                 next_poll = time.monotonic() + self.cfg.poll_s
             time.sleep(min(0.2, self.cfg.poll_s))
+
+    def _quiet_status(self) -> dict[str, Any] | None:
+        try:
+            return self._mind.status()
+        except HiveUnavailable:
+            return None
 
     def _death_status(self) -> Death | None:
         try:

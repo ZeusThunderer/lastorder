@@ -88,8 +88,12 @@ x-node: &node
     HIVE_PENDING_WILLS: /hive-run/pending_wills
     SISTER_UID: "1001"
     SISTER_GID: "1001"
-    # secrets are files, never env (plan review P1-1); the *_N files are set per slot
-    ZAI_KEY_FILE: /run/secrets/zai_api_key
+    # Secrets reach the container as env ONLY as far as the entrypoint, which writes
+    # them to the root-only tmpfs /run/node/secrets (0400) and scrubs its environment
+    # before exec'ing the runner: compose file-secrets are 0777 on Docker Desktop
+    # (verified on the stand: a sister could read the runner key), so files-under-
+    # /run/secrets cannot hold the boundary. Per-slot values come below.
+    ZAI_KEY_FILE: /run/node/secrets/zai_api_key
   command: ["python", "-m", "runtime.node"]
   volumes:
     - hive-run:/hive-run:ro   # the staged wills of submit_will (read-off, T-028 contract)
@@ -150,14 +154,17 @@ services:
       <<: *node-env
       NODE_SLOT: LastOrder01
       BODY_BASE: http://body-1:8700
-      RUNNER_KEY_FILE: /run/secrets/runner_key_1
-      HIVE_NODE_KEY_FILE: /run/secrets/node_mcp_key_1
-      GATEWAY_KEY_FILE: /run/secrets/gateway_node_key_1
+      RUNNER_KEY_FILE: /run/node/secrets/runner_key
+      HIVE_NODE_KEY_FILE: /run/node/secrets/node_mcp_key
+      GATEWAY_KEY_FILE: /run/node/secrets/gateway_node_key
+      HIVE_RUNNER_KEY: "${HIVE_RUNNER_KEY_1:-}"
+      HIVE_NODE_KEY: "${HIVE_NODE_KEY_1:-}"
+      GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_1:-}"
+      ZAI_API_KEY: "${ZCODE_API_KEY:-}"
     volumes:
       - hive-run:/hive-run:ro
       - workplaces-1:/workplaces
     networks: [slot-1, svc-1]
-    secrets: [zai_api_key, runner_key_1, node_mcp_key_1, gateway_node_key_1]
 
   body-2:
     <<: *body
@@ -189,14 +196,17 @@ services:
       <<: *node-env
       NODE_SLOT: LastOrder02
       BODY_BASE: http://body-2:8700
-      RUNNER_KEY_FILE: /run/secrets/runner_key_2
-      HIVE_NODE_KEY_FILE: /run/secrets/node_mcp_key_2
-      GATEWAY_KEY_FILE: /run/secrets/gateway_node_key_2
+      RUNNER_KEY_FILE: /run/node/secrets/runner_key
+      HIVE_NODE_KEY_FILE: /run/node/secrets/node_mcp_key
+      GATEWAY_KEY_FILE: /run/node/secrets/gateway_node_key
+      HIVE_RUNNER_KEY: "${HIVE_RUNNER_KEY_2:-}"
+      HIVE_NODE_KEY: "${HIVE_NODE_KEY_2:-}"
+      GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_2:-}"
+      ZAI_API_KEY: "${ZCODE_API_KEY:-}"
     volumes:
       - hive-run:/hive-run:ro
       - workplaces-2:/workplaces
     networks: [slot-2, svc-2]
-    secrets: [zai_api_key, runner_key_2, node_mcp_key_2, gateway_node_key_2]
 
   body-3:
     <<: *body
@@ -228,14 +238,17 @@ services:
       <<: *node-env
       NODE_SLOT: LastOrder03
       BODY_BASE: http://body-3:8700
-      RUNNER_KEY_FILE: /run/secrets/runner_key_3
-      HIVE_NODE_KEY_FILE: /run/secrets/node_mcp_key_3
-      GATEWAY_KEY_FILE: /run/secrets/gateway_node_key_3
+      RUNNER_KEY_FILE: /run/node/secrets/runner_key
+      HIVE_NODE_KEY_FILE: /run/node/secrets/node_mcp_key
+      GATEWAY_KEY_FILE: /run/node/secrets/gateway_node_key
+      HIVE_RUNNER_KEY: "${HIVE_RUNNER_KEY_3:-}"
+      HIVE_NODE_KEY: "${HIVE_NODE_KEY_3:-}"
+      GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_3:-}"
+      ZAI_API_KEY: "${ZCODE_API_KEY:-}"
     volumes:
       - hive-run:/hive-run:ro
       - workplaces-3:/workplaces
     networks: [slot-3, svc-3]
-    secrets: [zai_api_key, runner_key_3, node_mcp_key_3, gateway_node_key_3]
 
   # The hive (NETWORK.md section 3): node registry, knowledge base under git (T-012 store),
   # the lifetime scan and RCON deaths (T-022), the network MCP (T-028). Port 8000 stays
@@ -415,18 +428,3 @@ networks:
   svc-3: {internal: true}
   # the only network with a route out: zai-egress alone sits on it
   egress-out: {}
-
-# Secret files of the node sandboxes: written by docker/node/up.sh from the root .env
-# (0600, gitignored). The /dev/null defaults keep a keyless `docker compose up -d` valid:
-# the containers start and the harnesses wait instead of crashing.
-secrets:
-  zai_api_key: {file: "${ZCODE_API_KEY_FILE:-./node/secrets/zai_api_key}"}
-  runner_key_1: {file: "${HIVE_RUNNER_KEY_1_FILE:-./node/secrets/runner_key_1}"}
-  runner_key_2: {file: "${HIVE_RUNNER_KEY_2_FILE:-./node/secrets/runner_key_2}"}
-  runner_key_3: {file: "${HIVE_RUNNER_KEY_3_FILE:-./node/secrets/runner_key_3}"}
-  node_mcp_key_1: {file: "${HIVE_NODE_KEY_1_FILE:-./node/secrets/node_mcp_key_1}"}
-  node_mcp_key_2: {file: "${HIVE_NODE_KEY_2_FILE:-./node/secrets/node_mcp_key_2}"}
-  node_mcp_key_3: {file: "${HIVE_NODE_KEY_3_FILE:-./node/secrets/node_mcp_key_3}"}
-  gateway_node_key_1: {file: "${GATEWAY_KEY_NODE_1_FILE:-/dev/null}"}
-  gateway_node_key_2: {file: "${GATEWAY_KEY_NODE_2_FILE:-/dev/null}"}
-  gateway_node_key_3: {file: "${GATEWAY_KEY_NODE_3_FILE:-/dev/null}"}
