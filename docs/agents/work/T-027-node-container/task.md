@@ -30,6 +30,11 @@ after: [T-025, T-026, T-028, T-029]
   сети, volume `workplaces`, лимиты CPU и RAM
 - `tests/test_node_runner.py` (новый)
 - файлы задачи
+- 2026-10-21 · надзор (план 1, P1-1/P1-4): граница агент/раннер внутри `node-N` — правки
+  `runtime/hive/app.py`, `runtime/hive/mcp.py`, `runtime/mind/mcp_body.py` и их тестов
+  (`tests/test_hive_api.py`, `tests/test_hive_mcp.py`, `tests/test_mcp_body.py`): ключ раннера
+  на `/registry/*` (запись) и на заголовок `X-Runner-Session`, ключ раннера на `/runner/*` у mind.
+  Только эта граница, остальное в этих модулях не менять.
 
 Нельзя трогать:
 - `unionclef/`, `NetTyan/`, `task1.md`, `.env`
