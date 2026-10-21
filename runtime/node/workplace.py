@@ -68,6 +68,20 @@ def _copy_tree_readonly(src: Path, dst: Path) -> None:
         _chmod(item, READ_ONLY_DIR if item.is_dir() else READ_ONLY_FILE)
 
 
+def _force_rmtree(path: Path) -> None:
+    """Remove a read-only tree (the shared refresh of the next birth): give the modes
+    back first — POSIX refuses rmdir on 0555 dirs, Windows unlink on 0444 files."""
+
+    def _loosen(func, target, _exc) -> None:
+        try:
+            os.chmod(target, 0o700 if os.path.isdir(target) else 0o600)
+            func(target)
+        except OSError:
+            pass
+
+    shutil.rmtree(path, onexc=_loosen)
+
+
 def _make_sister_writable(root: Path, uid: int | None, gid: int | None) -> None:
     for name in SISTER_WRITABLE_DIRS:
         path = root / name
@@ -216,7 +230,7 @@ def create_workplace(
     # The shared rules travel with every workplace: network instructions, read-only.
     shared_dst = workplaces / "shared"
     if shared_dst.exists():
-        shutil.rmtree(shared_dst)
+        _force_rmtree(shared_dst)
     if shared_dir.is_dir():
         _copy_tree_readonly(shared_dir, shared_dst)
 
@@ -249,16 +263,22 @@ def set_will_mode(root: Path, harness: str, proxy_url: str) -> None:
     _chmod(path, READ_ONLY_FILE)
 
 
-def link_current(workplaces: Path, serial: int) -> None:
+def link_current(workplaces: Path, serial: int) -> bool:
     """`current` → this serial's workplace: mind-N reads the Jev policy through it
-    (JEV_POLICY_PATH of compose), re-read on every call, so the link moves at birth."""
+    (JEV_POLICY_PATH of compose), re-read on every call, so the link moves at birth.
+    False when the host refuses symlinks (a Windows dev run): the policy path just
+    stays empty and C1 runs without a policy, same as before this link existed."""
     link = workplaces / "current"
     target = Path("agent") / serial_dir(serial)
     tmp = workplaces / "current.runner-tmp"
     if tmp.is_symlink() or tmp.exists():
         tmp.unlink()
-    tmp.symlink_to(target)
-    tmp.replace(link)
+    try:
+        tmp.symlink_to(target)
+        tmp.replace(link)
+    except OSError:
+        return False
+    return True
 
 
 def archive_workplace(workplaces: Path, serial: int) -> Path:
@@ -271,7 +291,7 @@ def archive_workplace(workplaces: Path, serial: int) -> Path:
     _chmod(root, 0o755)  # undo the sticky+writable mode to move it
     dst = archive / serial_dir(serial)
     if dst.exists():
-        shutil.rmtree(dst)
+        _force_rmtree(dst)
     root.replace(dst)
     for item in [dst, *dst.rglob("*")]:
         _chmod(item, READ_ONLY_DIR if item.is_dir() else READ_ONLY_FILE)

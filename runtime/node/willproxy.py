@@ -81,15 +81,22 @@ class WillProxy:
                     with client.stream(
                         self.command, proxy._target, headers=headers, content=body
                     ) as response:
+                        # one request per connection: the body ends at the close, no
+                        # Content-Length bookkeeping for SSE streams
+                        self.close_connection = True
                         self.send_response(response.status_code)
                         for key, value in response.headers.items():
-                            if key.lower() not in _HOP_HEADERS:
+                            if key.lower() not in _HOP_HEADERS and key.lower() != "connection":
                                 self.send_header(key, value)
+                        self.send_header("Connection", "close")
                         self.end_headers()
-                        for chunk in response.iter_raw():
-                            if chunk:
-                                self.wfile.write(chunk)
-                                self.wfile.flush()
+                        if response.is_closed:  # an in-memory response (tests): not a stream
+                            self.wfile.write(response.content)
+                        else:
+                            for chunk in response.iter_raw():
+                                if chunk:
+                                    self.wfile.write(chunk)
+                                    self.wfile.flush()
                 except (httpx.HTTPError, OSError):
                     try:
                         self.send_error(502, "hive unreachable through the will proxy")

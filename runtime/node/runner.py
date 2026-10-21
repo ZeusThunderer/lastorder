@@ -252,7 +252,12 @@ class NodeRunner:
                 born = status.get("dead_since") or self._now().isoformat()
                 state = LifeState(serial=serial, born_at=born, ttl_min=0, traits={})
                 self._log("death.state_reconstructed", {"serial": serial})
-            self._death_path(state, str(status.get("cause") or "game"), str(status.get("death_text") or ""))
+            self._death_path(
+                state,
+                str(status.get("cause") or "game"),
+                str(status.get("death_text") or ""),
+                self.cfg.harness,
+            )
             return
         armed = status.get("serial")
         if not armed:
@@ -319,7 +324,8 @@ class NodeRunner:
             sister_uid=self.cfg.sister_uid,
             sister_gid=self.cfg.sister_gid,
         )
-        workplace.link_current(self.cfg.workplaces, serial)
+        if not workplace.link_current(self.cfg.workplaces, serial):
+            self._log("current.link_failed", {"serial": serial})
         state = LifeState(
             serial=serial, born_at=born_at, ttl_min=ttl_min, traits=traits.as_dict()
         )
@@ -383,12 +389,12 @@ class NodeRunner:
                 self._sleep(pause)
                 pause = self._capped_pause(pause)
                 continue
+            self._sleep(pause)
             pause = (
                 self.cfg.restart_pause_s
                 if ran_for >= self.cfg.restart_reset_after_s
                 else self._capped_pause(pause)
             )
-            self._sleep(pause)
 
     def _quota_switch(self, adapter_name: str) -> tuple[str, Any] | None:
         if self.cfg.quota_action != "switch" or not self.cfg.failover:
