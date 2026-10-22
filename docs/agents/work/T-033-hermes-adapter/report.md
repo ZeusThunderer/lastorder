@@ -218,3 +218,66 @@ $ docker build -f docker/node/Dockerfile -t ai-char-node:hermes .   # сам, 3 
 - C-4 · оставлено: merge-коммит 1ba9120 — шаг 3 lo-take (`git merge main`), префикс/трейлер
   туда git не вставляет; историю ветки после ревью не переписываю. Все прочие коммиты раунда
   несут префикс T-033 и `Agent: zcode`, дальше — тоже.
+
+## Раунд 3 · 2026-10-22
+Коммиты: b17127e (+ коммит сдачи)
+
+### Сделано
+- R2-1: все записи в HERMES_HOME (config.yaml, SOUL.md, .env) идут через новый
+  `_write_file_no_links` (runtime/node/workplace.py): старые имена (включая
+  `config.yaml.runner-tmp`) сначала `os.unlink` — unlink не следует ссылке; временный файл
+  рождается `open(O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW, mode)`; `fchown`/`fchmod` по тому же
+  дескриптору; `os.replace`; chmod по пути после replace нет. Ссылка
+  `config.yaml -> /run/node/secrets/runner_key` теряет имя, секрет не перекодируется и не
+  перезаписывается; гонка за tmp-имя ловится O_EXCL (3 попытки, затем raise — сессия падает
+  закрыто, записи по ссылке нет). `_write_readonly` рабочего места не тронут: каталог sticky
+  01777, сестра не владеет файлами раннера и подменить имена не может — вектор существует
+  только в HERMES_HOME, где она владелец каталога (отклонение R1-2, принятое ревью).
+- R2-2: `_set_hermes_will_mode` больше не читает config.yaml сестры — рендерит конфиг заново
+  через `drop_hermes_config(…, hive_mcp_override=proxy)` из параметров последнего drop
+  (`_HERMES_RENDER`, кэш на модуль; адаптер обновляет его каждым life-ходом). runner.py не
+  тронут — он вне «Можно трогать», прокси-URL попадает в рендер через override. Подменённый
+  конфиг (memory_enabled: true, лишний MCP-сервер, другая модель) замещается целиком:
+  hive = прокси, body прямой, модель раннера, root 0444.
+- Осознанная деградация
+  (test_hermes_will_mode_without_a_prior_render_leaves_the_config_alone): рестарт раннера до
+  первого life-хода оставляет кэш пустым — will-режим тогда ничего не пишет, сессия идёт без
+  отметки: submit_will без X-Runner-Session отклоняется реальным hive, аварийное завещание
+  покрывает. Рендер по устаревшим догадкам хуже отсутствия рендера: можно вписать прокси в
+  подменённый конфиг или «лечить» файл вслепую.
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 684 passed, 3 skipped in 43.87s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+$ python -m pytest tests/test_node_runner.py -q    # внутри python:3.12-slim (POSIX, root)
+35 passed, 2 failed — оба (core_files_are_read_only…, death_with_the_agents_will) падают и на
+коде раунда 2 в том же контейнере: root пишет в 0444 без PermissionError, артефакт прогона под
+root, не регрессия. Тесты этого раунда: 6 passed (planted_symlinks, will_mode ×3, drop_hermes ×2).
+$ docker build -f docker/node/Dockerfile -t ai-char-node:hermes .
+# не прогонял: Dockerfile/entrypoint.sh в раунде не менялись — действует сборка раунда 2
+# (DONE на a51c375); надзор прогоняет сборку сам в раунде 3 (просьба ревьюера).
+```
+Секретов в диффе раунда нет (только workplace.py и test_node_runner.py); квота Z.ai — 0
+вызовов, новых прогонов модели не было.
+
+### Отклонения от задачи
+- Нет.
+
+### Вне задачи
+- Ничего нового (merge main 7759530 — шаг 3 lo-take).
+
+### Ответ на ревью (раунд 2)
+- R2-1 · fixed b17127e: link-safe запись в HERMES_HOME (unlink до записи,
+  O_EXCL|O_NOFOLLOW, fchown/fchmod по дескриптору, без chmod по пути) + POSIX-тест с
+  симлинками на «секрет» 0600, реально прогнанный в Linux-контейнере.
+- R2-2 · fixed b17127e: will-режим свежим рендером из параметров последнего drop с
+  hive_mcp_override=proxy; чтение и правка файла сестры убраны; тесты на подменённый
+  конфиг и на деградацию без кэша.
+
+### Вызовы надзора
+- 2026-10-22 · result · 3dacf76 · VERDICT: changes · cost_usd: 0.7137526.
+
+### Самопроверка
+Раундов `lo-checker`: 3 · итог **CHECK: clean**. Находок не было.
