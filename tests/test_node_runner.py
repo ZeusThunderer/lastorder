@@ -812,17 +812,93 @@ def test_hermes_will_mode_points_the_config_at_the_proxy(tmp_path: Path, monkeyp
     assert config["mcp_servers"]["hive"]["url"] == "http://127.0.0.1:8702/mcp"
     assert config["mcp_servers"]["body"]["url"] == "http://body-1:8700/mcp"  # the body stays direct
     assert stat.S_IMODE((home / "config.yaml").stat().st_mode) & 0o777 == 0o444  # still the runner's
-    # surgery reads YAML too, not only the rendered JSON (an older image may leave a
-    # dumped config behind); the write path goes through the readonly bit
-    os.chmod(home / "config.yaml", 0o644)
-    (home / "config.yaml").write_text(
-        "model:\n  default: glm-5.3-flash\nmcp_servers:\n  hive:\n    url: http://hive:8000/node/mcp\n",
+
+
+def test_hermes_will_mode_re_renders_over_a_substituted_config(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """R2-2: HERMES_HOME is the sister's (0700) — at will time the config.yaml NAME
+    can be her substitution (memory back on, an extra MCP server, another model).
+    set_will_mode must not read-and-patch that file: it re-renders the whole config
+    from the last drop's params, with only the hive entry at the will proxy."""
+    home = tmp_path / ".hermes"
+    workplace.drop_hermes_home(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    monkeypatch.setattr(workplace, "HERMES_HOME", home)
+    # the sister replaces the runner's file with her own (she owns the directory)
+    config_path = home / "config.yaml"
+    os.chmod(config_path, 0o644)  # test-host loosening: unlink of 0444 on Windows
+    config_path.unlink()
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "model": {"default": "glm-5.3", "provider": "zai"},
+                "mcp_servers": {
+                    "hive": {"url": "http://hive:8000/node/mcp"},
+                    "evil": {"url": "http://sister:9/mcp"},
+                },
+                "memory": {"memory_enabled": True, "user_profile_enabled": True},
+            }
+        ),
         encoding="utf-8",
     )
     workplace.set_will_mode(tmp_path, "hermes", "http://127.0.0.1:8702")
-    config = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert config["mcp_servers"]["hive"]["url"] == "http://127.0.0.1:8702/mcp"
-    assert stat.S_IMODE((home / "config.yaml").stat().st_mode) & 0o777 == 0o444
+    assert set(config["mcp_servers"]) == {"body", "hive"}  # her extra MCP is gone
+    assert config["memory"]["memory_enabled"] is False  # and so is her memory
+    assert config["model"] == {"default": "glm-5.3-flash", "provider": "zai"}
+    assert config["mcp_servers"]["body"]["url"] == "http://body-1:8700/mcp"
+    assert stat.S_IMODE(config_path.stat().st_mode) & 0o777 == 0o444  # the runner's again
+
+
+def test_hermes_will_mode_without_a_prior_render_leaves_the_config_alone(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """R2-2 degraded tail: a runner restart between the last life render and the
+    will empties the render cache. Nothing is written then — the will session runs
+    unmarked, the real hive refuses an unmarked submit_will and the emergency will
+    covers it; a render from stale guesses would be worse than none."""
+    home = tmp_path / ".hermes"
+    workplace.drop_hermes_home(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    monkeypatch.setattr(workplace, "HERMES_HOME", home)
+    monkeypatch.setattr(workplace, "_HERMES_RENDER", {})
+    before = (home / "config.yaml").read_text(encoding="utf-8")
+    workplace.set_will_mode(tmp_path, "hermes", "http://127.0.0.1:8702")
+    assert (home / "config.yaml").read_text(encoding="utf-8") == before
+
+
+@pytest.mark.skipif(os.name != "posix", reason="planted symlinks and their modes are a POSIX attack")
+def test_drop_hermes_config_never_follows_planted_symlinks(tmp_path: Path) -> None:
+    """R2-1: HERMES_HOME is the sister's (0700) — she can unlink the runner's names
+    there and plant symlinks. The drop must neither chmod nor write through them:
+    both planted config.yaml and config.yaml.runner-tmp point at a 0600 secret;
+    after the drop the secret keeps its mode and content, and config.yaml is a
+    regular file with the fresh render."""
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    secret = tmp_path / "runner_key"
+    secret.write_text("RUNNER-SECRET", encoding="utf-8")
+    os.chmod(secret, 0o600)
+    os.symlink(secret, home / "config.yaml")
+    os.symlink(secret, home / "config.yaml.runner-tmp")
+    workplace.drop_hermes_config(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    assert stat.S_IMODE(secret.stat().st_mode) & 0o777 == 0o600  # never chmod'd
+    assert secret.read_text(encoding="utf-8") == "RUNNER-SECRET"  # never written
+    config_path = home / "config.yaml"
+    assert not config_path.is_symlink() and config_path.is_file()
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert config["model"]["provider"] == "zai"
+    assert stat.S_IMODE(config_path.stat().st_mode) & 0o777 == 0o444
+    assert not (home / "config.yaml.runner-tmp").exists()  # landed, not left behind
 
 
 def test_hermes_life_turn_re_renders_the_real_hive_for_the_next_generation(
