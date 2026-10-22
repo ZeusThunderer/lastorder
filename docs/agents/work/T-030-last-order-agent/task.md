@@ -28,6 +28,8 @@ after: [T-028, T-029]
 - `runtime/hive/admin.py` (новый: будильник по событиям, запуск коротких сессий через адаптер раннера)
 - `docker/compose.yml` — env и volume для hive
 - `tests/test_admin_wake.py` (новый)
+- `tests/test_gateway_config.py` — только дополнение: сервис `last-order` в списке сетей шлюза
+  (checker C-3: расширяю «Можно трогать» задним числом, файл уже тронут в 8d93b79)
 - файлы задачи
 
 Нельзя трогать:
