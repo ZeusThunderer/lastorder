@@ -199,3 +199,63 @@
 
 ### Вопросы
 - нет.
+
+
+## Раунд 2 · 2026-10-22
+
+Сдача на ревью после чистой самопроверки. Код не менялся с d883484 (фиксы C-1…C-4).
+
+### Проверки
+```
+$ bash <корень>/dev/check.sh
+pytest: ok · 643 passed in 39.72s
+check.py: FAIL · "Python was not found" — алиас Windows Store на этой машине, не ветка
+$ uv run python tools/check.py
+Every workplace is intact: files present, links resolve, boxes parse.
+$ docker compose -f docker/compose.yml config   # валиден
+$ git diff main...HEAD --name-only              # только «Можно трогать» (с санкциями в task.md)
+$ git diff main...HEAD | grep -iE "sk-|rk-"     # пусто (секретов в diff нет)
+$ git diff main...HEAD -- docker/compose.yml | grep -c c1899de   # 0 — пин fastjev не отличается от main
+```
+Стенд: оставлен поднятым (mc-server, body/mind 1–3, hive, zai-egress, llm-gateway);
+node-1..3 остановлены после прогона, чтобы не жечь квоту подписки.
+
+### Критерии приёмки — чем закрыт каждый
+1. Сеть — живые пробы из node-1 (вывод в рауне 1) + compose config.
+2. Рождение — `test_birth_arms_clock_before_the_session_and_builds_workplace` + живое
+   рождение 00029/00030/00036.
+3. Падение харнесса — `test_harness_crash_restarts_same_workplace_with_growing_pause`
+   (+ сброс паузы: `test_a_stable_session_resets_the_restart_pause`).
+4. Смерть — `test_death_with_the_agents_will`, `test_death_without_a_will_gets_the_emergency_one`,
+   `test_will_session_timeout_falls_back_to_emergency` + живьём: завещание агента 00031,
+   аварийные 00029/00032/00033/00034, TTL-смерть 00033.
+5. Адаптер по конфигу / квота — `test_quota_wait_and_switch`, `test_config_validation`,
+   `test_zcode_adapter_commands_and_session_id`.
+6. Лимиты — 542–634 MiB / 1 GiB на трёх узлах живьём (T-024: 537–602 MiB).
+7. Стенд — раунд 1: смена 41 мин одной сессией, смерть по сроку, архивы, реплика
+   наследницы о предшественнице; 3 слота одновременно (окно 00:24–00:39, утопление
+   00034 на 13.5-й минуте — слот жил, наследница через секунды).
+
+### Отклонения от задачи
+- Живой прогон сделан на peaceful после четырёх смертей подряд от рейндж-мобов у спавна
+  (28–70 с жизни): иначе сёстры не успевали пройти первый ход. Мир — состояние стенда,
+  не код; оговорено здесь.
+
+### Вне задачи
+- rcon-cli itzg не принимает `gamerule` (префикс «command» в аргументе) — обошёл
+  `difficulty peaceful`; владельцам mc-server не мешает.
+
+### Вопросы
+- нет.
+
+### Вызовы надзора
+- 2026-10-21 · plan · 46a6395 · VERDICT: revise (P1-1…P1-6, учтены в плане 2 и работе) ·
+  cost_usd: потерян при обрезке вывода (финальный парсер скрипта упал на алиасе Windows
+  Store «python»; сам вызов прошёл, раунд — review.md @ 0feb9c7)
+
+### Самопроверка
+- lo-checker: раундов 1, CHECK: clean
+- C-1 · fixed d883484 — пин ревизии fastjev восстановлен из main дословно
+- C-2 · fixed d883484 — санкция на два пина compose-тестов внесена в task.md
+- C-3 · fixed d883484 — выводы проб секрета приведены в раунде 1
+- C-4 · fixed d883484 — мёртвый импорт POLICY_PATH_DEFAULT убран
