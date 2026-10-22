@@ -147,3 +147,36 @@ T-030 (hive) в статусе `ready`, в работе пересечений �
 Пробы критерия 1 плюс `curl -X POST hive:8000/memory/store_core_memory` из node-1 → 401.
 Проба R2-1 (симлинк в архиве). Проба R2-4 (`setsid sleep`). `--profile jev config`.
 Одна смерть с завещанием агента после правок.
+
+## Раунд 3 · 2026-10-22 · вердикт: accept · headless
+Проверено @ 8103183: `git diff 07aeb71..HEAD` построчно (compose, up.sh, hive/app.py, hive/client.py,
+mind/mcp_body.py, node/{adapters,config,runner,workplace}.py и тесты). Прогнано самим:
+`uv run pytest` — 653 passed, 2 skipped (симлинк-тесты, WinError 1314 на хосте);
+`uv run python tools/check.py` — intact; `docker compose -f docker/compose.yml --profile jev config -q` — exit 0.
+Стенд, проба из одноразового контейнера `node-1` (`compose run --no-deps --entrypoint sh`, харнесс не
+запускался): `hive:8000/health` 200, `body-1:8700/runner/status` 200, `POST /memory/store_core_memory`
+и `/registry/mark_dead` без ключа → 401 `runner_key`, `example.com` 000, RCON 000, `api.z.ai` 401
+(дошёл до API), `ls /hive-run` → только `pending_wills`. С отчётом совпадает. Пробы R2-1 (симлинк
+в архиве), R2-4 (`setsid sleep`) и смерть с завещанием агента 00036 сам не повторял: для этого нужна живая
+сессия харнесса и квота. Беру их из отчёта, он согласуется с кодом.
+
+R2-1…R2-9 закрыты:
+- R2-1: обход `os.walk(followlinks=False)` с пропуском симлинков в архиве, `_make_sister_writable`
+  и `_loosen`. Архив идёт после sweep, процессов сестры нет, так что гонки «проверка → chmod» нет.
+- R2-2: `/memory/*` и `/comms/*` под ключом слота serial. Вызовов этих маршрутов по HTTP
+  из mind и node нет, сёстры ходят через MCP in-process. Значит, гейт ничего не ломает.
+- R2-3, R2-6: fail-closed на всех трёх сторонах, `NODE_DEV_OPEN=1` — единственное исключение.
+- R2-4: sweep из-под uid сестры после остановки сессии жизни и после сессии завещания.
+- R2-5, R2-7, R2-8, R2-9 — по находкам.
+Отклонения «Пустая карта у hive/mind — отказ старта» и «up.sh: отказ при обоих пустых»
+принимаются: гейт на стороне hive и так закрывает одиночный пропуск.
+
+Чек-лист критичной зоны: сырых id в выводе агенту не добавлено. Смерть без завещания исключена:
+есть аварийное завещание, 401 на retire ретраится, а не паркуется. Базу пишет только hive. Уровни LLM
+не менялись. Объём — в «Можно трогать» с санкциями.
+
+### Находки
+- R3-1 · minor · follow-up · R2-10 (`runtime/mind/jev.py`: realpath под `/workplaces/current`, отказ на
+  симлинки) — надзор заводит задачу после merge.
+- R3-2 · minor · follow-up · `dev/death_scenario.py` без `X-Runner-Key` после гейтов — поправить в той же
+  или отдельной мелкой задаче.
