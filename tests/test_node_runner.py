@@ -866,9 +866,11 @@ def test_hermes_life_turn_re_renders_the_real_hive_for_the_next_generation(
 
 def test_hermes_home_config_is_runner_owned(tmp_path: Path) -> None:
     """R1-2: config.yaml and SOUL.md are the runner's, not the sister's — 0444 with
-    no write bit anywhere, in a root-owned sticky home (the WORKPLACE_DIR_MODE plan,
-    exercised on the stand; here the mode side). She grows her state.db/sessions in
-    the home but cannot rewrite the harness config; her .env stays her own 0600."""
+    no write bit anywhere, so she cannot edit them in place. The DIRECTORY is hers
+    0700: the detached gateway refuses any other owner ("unsafe_control_path",
+    verified in the container round 2) — the workplace's sticky-root plan cannot
+    apply, and a delete/replace is instead healed by the adapter's per-life
+    re-render (R1-1). Her .env stays her own 0600."""
     home = tmp_path / ".hermes"
     workplace.drop_hermes_home(
         home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
@@ -877,10 +879,10 @@ def test_hermes_home_config_is_runner_owned(tmp_path: Path) -> None:
     )
     for name in ("config.yaml", "SOUL.md"):
         assert stat.S_IMODE((home / name).stat().st_mode) & 0o777 == 0o444
-    if os.name == "posix":  # the sticky bit and the uid side need a POSIX host
-        assert stat.S_IMODE(home.stat().st_mode) & 0o7000 == stat.S_ISVTX
+    if os.name == "posix":  # the uid side needs a POSIX host
+        assert stat.S_IMODE(home.stat().st_mode) & 0o7777 == 0o700  # the gateway's demand
         if hasattr(os, "geteuid") and os.geteuid() == 0:  # full plan: root renders, sister uses
-            assert home.stat().st_uid == 0
+            assert home.stat().st_uid == 1001
             assert (home / "config.yaml").stat().st_uid == 0
             assert (home / "SOUL.md").stat().st_uid == 0
             assert (home / ".env").stat().st_uid == 1001

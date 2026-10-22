@@ -290,12 +290,15 @@ def drop_hermes_home(
     uid: int | None = None,
     gid: int | None = None,
 ) -> None:
-    """Lay out HERMES_HOME (review R1-2): the directory itself and config.yaml /
-    SOUL.md are the runner's — root-owned, the dir sticky like the workplace
-    (WORKPLACE_DIR_MODE), so the sister grows her state.db/sessions/memories in it
-    but cannot delete, replace or chmod the harness config. The .env with the Z.ai
-    key is her own (0600, same boundary as the zcode provider config, ADR-033).
-    Everything else Hermes creates itself on first run."""
+    """Lay out HERMES_HOME (review R1-2). config.yaml and SOUL.md are the runner's:
+    root-owned 0444, so the sister cannot edit them in place. The DIRECTORY has to
+    stay hers (0700): the detached gateway refuses any other owner or a group/world
+    -writable home ("unsafe_control_path … chown it to the gateway user", verified
+    in the container) — a sticky root-owned dir, the workplace plan, cannot apply
+    here. The price is bounded by the adapter's per-life re-render (R1-1): a
+    deleted/replaced config survives at most until the next life turn. The .env
+    with the Z.ai key is her own (0600, same boundary as the zcode provider
+    config, ADR-033). Everything else Hermes creates itself on first run."""
     drop_hermes_config(
         home, model=model, body_base=body_base, hive_url=hive_url, node_key=node_key
     )
@@ -308,8 +311,8 @@ def drop_hermes_home(
         )
         _own(env_file, uid, gid)
         _chmod(env_file, 0o600)
-    _own(home, 0, 0)
-    _chmod(home, WORKPLACE_DIR_MODE)
+    _own(home, uid, gid)
+    _chmod(home, 0o700)
 
 
 def _drop_harness_configs(

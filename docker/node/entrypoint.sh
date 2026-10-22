@@ -57,9 +57,10 @@ chown -R "${SISTER_UID}:${SISTER_GID}" "$SISTER_HOME"
 # 2b. HERMES_HOME (tmpfs): config.yaml + the neutral SOUL.md via
 #     workplace.drop_hermes_home, plus .env with the Z.ai coding key + base URL —
 #     exactly the two env names Hermes's zai provider reads. drop_hermes_home
-#     stamps the final ownership itself: root-owned sticky home with root 0444
-#     config.yaml/SOUL.md (the harness config is the runner's, R1-2 — the sister
-#     grows her state in the home but cannot rewrite the config), only .env is
+#     stamps the final ownership itself: the dir is the sister's 0700 (the gateway
+#     refuses a root-owned or writable-by-others home — verified in the container),
+#     while config.yaml/SOUL.md stay root 0444 (the harness config is the runner's,
+#     R1-2; a swap is healed by the adapter's per-life re-render), only .env is
 #     hers at 0600. The key rides the helper's environment, never argv:
 #     /proc/<pid>/cmdline is world-readable, /proc/<pid>/environ is not. Rendered
 #     even without the key (config-only), so the harness still fails cleanly

@@ -214,16 +214,18 @@ roll(seed). Полный вывод сводки — `summary.json` в ката�
 
 ### Конфиг и секреты (entrypoint рендерит, `workplace.drop_hermes_home`)
 
-- `HERMES_HOME=/home/sister/.hermes` (tmpfs): каталог root-owned sticky 1777 (план P1-2,
-  ревью R1-2), `config.yaml` и `SOUL.md` — root 0444 (конфиг харнесса принадлежит раннеру:
-  сестра растит в каталоге свой state.db/sessions, но переписать конфиг не может), `.env`
-  (0600, sister) с `GLM_API_KEY` и
-  `GLM_BASE_URL=https://api.z.ai/api/coding/paas/v4`. Ключ идёт только в `.env`, в config.yaml
-  его нет; env раннера чист: `/proc/1/environ` после entrypoint не содержит ключей.
-  Entry кладёт дом один раз на контейнер, адаптер перерендеривает `config.yaml` перед
-  КАЖДОЙ life-сессией (R1-1: дом один на все поколения
-  узла слота, а завещание оставляет в конфиге URL остановленного will-прокси); will-сессия
-  конфиг не трогает — его только что переставил на прокси `set_will_mode`.
+- `HERMES_HOME=/home/sister/.hermes` (tmpfs, 0700, sister): сам каталог обязан принадлежать
+  сестре — detached-gateway апстрима отказывается от чужого владельца и от записи для других
+  («unsafe_control_path: … is owned by uid 0, expected uid 1001 (gateway user)», проверено в
+  контейнере; sticky-root-план рабочего места здесь неприменим). Файлы раннера внутри:
+  `config.yaml` и `SOUL.md` — root 0444 (сестра не может править их на месте; удалить/подменить
+  может — любую подмену лечит перерендер перед следующей life-сессией), `.env` (0600, sister) с
+  `GLM_API_KEY` и `GLM_BASE_URL=https://api.z.ai/api/coding/paas/v4`. Ключ идёт только в
+  `.env`, в config.yaml его нет; env раннера чист: `/proc/1/environ` после entrypoint не
+  содержит ключей. Entry кладёт дом один раз на контейнер, адаптер перерендеривает
+  `config.yaml` перед КАЖДОЙ life-сессией (R1-1: дом один на все поколения узла слота, а
+  завещание оставляет в конфиге URL остановленного will-прокси); will-сессия конфиг не
+  трогает — его только что переставил на прокси `set_will_mode`.
 - Провайдер `zai` берёт base URL именно из `GLM_BASE_URL` (env/.env), `model.base_url` конфига
   для zai не читается; без переменной Hermes сам перебирает endpoint'ы (в т.ч. платный
   balance-путь) — нам нужен явный coding-endpoint. Модель передаётся нижним регистром
