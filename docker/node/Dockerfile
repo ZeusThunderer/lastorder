@@ -28,15 +28,22 @@ RUN npm install -g --no-fund --no-audit \
     && opencode --version && zcode --version
 
 # Hermes Agent (ADR-032 third harness), pinned to the upstream git tag: PyPI lags
-# behind (0.19.0 at build time). Its own venv in /opt/hermes — the pinned deps of
-# the runner's /app/.venv stay untouched; the image's python 3.12 is inside the
-# >=3.11,<3.15 window upstream declares. No curl|bash installer, no runtime
-# updates: updates.check is false in the rendered config.yaml, and `hermes update`
-# needs a git checkout that a pip/git install into a venv is not.
+# behind (0.19.0 at build time) and upstream blocks wheel builds outright — the
+# supported install is a source checkout + `uv sync --frozen` (editable), which is
+# what their own setup script does through pm. The checkout stays at /opt/hermes-src
+# (runtime assets — locales, skills, plugin manifests — resolve from it); deps land
+# in the upstream uv.lock, hash-verified. Upstream pins its every dependency to
+# Python 3.14 (uv.lock environments: python_version >= '3.14'), so Hermes runs on a
+# uv-managed CPython 3.14 in its own venv /opt/hermes — the runner's /app/.venv
+# (python 3.12) stays untouched. No curl|bash installer, no runtime updates:
+# updates.check is false in the rendered config.yaml and `hermes update` only
+# touches a live checkout the operator runs, not this container.
 COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /usr/local/bin/uv
-RUN uv venv /opt/hermes \
-    && uv pip install --python /opt/hermes/bin/python \
-         "hermes-agent @ git+https://github.com/NousResearch/hermes-agent@${HERMES_AGENT_VERSION}" \
+RUN uv python install 3.14 \
+    && git clone --depth 1 --branch "${HERMES_AGENT_VERSION}" \
+      https://github.com/NousResearch/hermes-agent.git /opt/hermes-src \
+    && cd /opt/hermes-src \
+    && UV_PROJECT_ENVIRONMENT=/opt/hermes uv sync --frozen --no-dev --python 3.14 \
     && ln -s /opt/hermes/bin/hermes /usr/local/bin/hermes \
     && HERMES_HOME=/tmp/hermes-build-home /opt/hermes/bin/hermes --version \
     && rm -rf /tmp/hermes-build-home

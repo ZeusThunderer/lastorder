@@ -219,11 +219,15 @@ def render_hermes_config(model: str, body_base: str, hive_url: str, node_key: st
         "mcp_servers": {
             "body": {
                 "url": f"{body_base.rstrip('/')}/mcp",
+                # fail fast: body/hive restarts (the death path) must not stall a
+                # session start for the upstream default connect timeout of 60 s
+                "connect_timeout": 10,
                 "sampling": {"enabled": False},
             },
             "hive": {
                 "url": hive_mcp_url(hive_url),
                 "headers": {"X-Node-Key": node_key},
+                "connect_timeout": 10,
                 "sampling": {"enabled": False},
             },
         },
