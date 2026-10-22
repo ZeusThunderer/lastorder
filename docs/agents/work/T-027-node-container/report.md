@@ -158,11 +158,30 @@
   00036 прошло без 401. Узлы node-1..3 остановлены после прогона (квота подписки
   общая с воркером разработки, ADR-019/033).
 
+### Ответ на самопроверку (раунд 1)
+- C-1 · fixed · пин ревизии fastjev в compose восстановлен дословно из main
+  (`c1899de289a04d12100db370d81485cdf75e47ca`, T-005 098ce94) — опечатка при пересборке
+  файла, в отчёте не была объявлена, теперь пин не отличается от main.
+- C-2 · fixed · санкция надзора внесена в task.md («Можно трогать», строка от
+  2026-10-22): два пина compose-тестов (test_gateway_config.py:76, test_jev_policy.py:529).
+- C-3 · fixed · вывод проб секрета приведён выше в разделе стенда (env exec-d процесса:
+  0 секретов; файл 0400 root; /proc сестре закрыт).
+- C-4 · fixed · мёртвый импорт POLICY_PATH_DEFAULT убран из tests/test_jev_policy.py.
+
 ### Отклонения от плана
 - Секреты: compose file-secrets на Docker Desktop монтируются 0777 (проверено на стенде:
   sister читала ключ раннера) — доставка через env до entrypoint, который кладёт их в
-  0400 root tmpfs и чистит своё окружение до exec; у раннера и у сестры секретов в env
-  и в /proc нет (проверено probe).
+  0400 root tmpfs и чистит своё окружение до exec. Проба (одноразовый контейнер,
+  docker run --rm -e HIVE_RUNNER_KEY=rk-probe-123 -e ZAI_API_KEY=… image sh -c '…'):
+  `ls -l /run/node/secrets/` → `--------- 1 root root … runner_key` (0400 root);
+  `cat /run/node/secrets/runner_key` от root → `rk-probe-123`; от sister →
+  `Permission denied`; `su sister -c "tr … < /proc/1/environ"` →
+  `cannot open /proc/1/environ: Permission denied` (чужой uid); и главный процесс после
+  exec: `docker run --rm -e HIVE_RUNNER_KEY=… image python -c "import os;
+  print(sum(k in os.environ for k in ('HIVE_RUNNER_KEY','ZAI_API_KEY',…)))"` →
+  `secrets left in the exec-d process env: 0` (execve пересобирает environ, scrub
+  работает). environ tini (PID 1) остаётся с секретами docker-env, но читается только
+  root — раннером самим; сестра проверена выше.
 - Пины чужих тестов (test_gateway_config, test_jev_policy) обновлены под новый compose:
   JEV_POLICY_PATH был оставлен T-031 на T-027 сознательно; сети шлюза — след sanctioned
   правки compose.

@@ -27,7 +27,6 @@ from runtime.mind.jev import (
     BACKEND_DEFAULT,
     MODEL_DEFAULT,
     POLICY_MAX_CHARS_DEFAULT,
-    POLICY_PATH_DEFAULT,
     TIMEOUT_S_DEFAULT,
     CloudJevBackend,
     JevError,

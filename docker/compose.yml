@@ -307,7 +307,7 @@ services:
       - --model
       - ${JEV_MODEL:-Qwen/Qwen3-0.6B}
       - --revision
-      - ${JEV_REVISION:-c1899de28a9a04d12100db370d81485cdf75a47ca}
+      - ${JEV_REVISION:-c1899de289a04d12100db370d81485cdf75e47ca}
       - --served-model
       - fastjev-2070
       - --served-model-description

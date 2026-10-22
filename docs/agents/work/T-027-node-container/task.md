@@ -35,6 +35,10 @@ after: [T-025, T-026, T-028, T-029]
   (`tests/test_hive_api.py`, `tests/test_hive_mcp.py`, `tests/test_mcp_body.py`): ключ раннера
   на `/registry/*` (запись) и на заголовок `X-Runner-Session`, ключ раннера на `/runner/*` у mind.
   Только эта граница, остальное в этих модулях не менять.
+- 2026-10-22 · надзор (самопроверка C-2): санкционированы минимальные правки пинов compose в
+  `tests/test_gateway_config.py` (сети llm-gateway: +svc-1..3) и `tests/test_jev_policy.py`
+  (JEV_POLICY_PATH → /workplaces/current/policy/threat.md, оставлен T-031 на T-027) —
+  следствие разрешённых правок compose; только эти два ассерта, ничего больше.
 
 Нельзя трогать:
 - `unionclef/`, `NetTyan/`, `task1.md`, `.env`
