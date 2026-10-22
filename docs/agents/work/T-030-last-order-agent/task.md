@@ -2,7 +2,7 @@
 id: T-030
 title: Last Order — агент-администратор сети по событиям
 stage: E3
-status: in_progress
+status: review
 criticality: critical
 branch: z/T-030-last-order-agent
 created: 2026-10-17
