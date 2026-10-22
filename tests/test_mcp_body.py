@@ -131,7 +131,9 @@ class SimpleState:
 class Stack:
     """The whole mind in-process: fake body, C1, server, uvicorn, client call helpers."""
 
-    def __init__(self, body: FakeBody | None = None, idle_s: float = 10_000.0):
+    def __init__(
+        self, body: FakeBody | None = None, idle_s: float = 10_000.0, runner_key: str = ""
+    ):
         self.body = body or FakeBody()
         self._tmp = f".mcp-body-test-{time.monotonic_ns()}.jsonl"
         self.calls_file = JsonlLog(self._tmp)
@@ -141,6 +143,7 @@ class Stack:
             call_log=self.calls_file,
             tick_interval=0.25,
             idle_s=idle_s,  # the watchdog has its own tests; keep it quiet here
+            runner_key=runner_key,
         )
         app = server.streamable_http_app(stateless_http=True, streamable_http_path="/mcp")
         config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
@@ -163,8 +166,14 @@ class Stack:
         async with Client(streamable_http_client(self.url())) as client:
             return await coro_fn(client)
 
-    def runner(self, method: str, path: str, json_body: dict | None = None) -> httpx.Response:
-        return httpx.request(method, f"http://127.0.0.1:{self.port}{path}", json=json_body, timeout=30.0)
+    def runner(
+        self, method: str, path: str, json_body: dict | None = None, key: str | None = None
+    ) -> httpx.Response:
+        headers = {"X-Runner-Key": key} if key is not None else {}
+        return httpx.request(
+            method, f"http://127.0.0.1:{self.port}{path}", json=json_body,
+            headers=headers, timeout=30.0,
+        )
 
     def log_lines(self) -> list[dict]:
         with self.calls_file._lock:
@@ -482,6 +491,84 @@ def test_retire_stuck_requests_death_after_watchdog(stack: Stack) -> None:
     assert hive.requests == [(7, "stuck")]
 
 
+def test_retire_stuck_reaches_the_gated_hive_with_the_runner_key(tmp_path) -> None:
+    """R2-3: with the clock armed through /runner/birth (no NODE_SERIAL in compose),
+    retire_stuck still has a hive client — and it carries X-Runner-Key of the slot, so
+    the gated /registry/request_death (R2-2) accepts it."""
+    from pathlib import Path
+
+    from runtime.hive.client import HiveClient
+    from test_hive_api import make_app_stack, traits
+
+    runner_key = "rk-mind-one"
+    keyed = make_app_stack(tmp_path, {runner_key: "LastOrder01"})
+    record = keyed.client.post(
+        "/registry/birth",
+        json={"slot": "LastOrder01", "traits": traits().as_dict()},
+        headers={"X-Runner-Key": runner_key},
+    )
+    assert record.status_code == 200, record.text
+    serial = record.json()["serial"]
+
+    stack = Stack()
+    try:
+        stack.runner("POST", "/runner/birth", {"serial": serial, "born_at": datetime.now().isoformat(), "ttl_min": 45})
+        stack.executor._idle_s = 0.5
+        stack.wait_until(lambda: stack.executor.retire_allowed)
+        # without the key the gated hive refuses: the tool reports it, no silent no-op
+        stack.executor._hive = HiveClient(
+            transport=keyed.client, run_dir=Path(tmp_path) / "run-keyless", retries=0
+        )
+        result = stack.call(lambda c: c.call_tool("retire_stuck", {}))
+        assert "rejected" in error_text(result)
+        # with the slot's runner key the same call lands in the real hive
+        stack.executor._hive = HiveClient(
+            transport=keyed.client,
+            run_dir=Path(tmp_path) / "run-keyed",
+            retries=0,
+            runner_key=runner_key,
+        )
+        result = stack.call(lambda c: c.call_tool("retire_stuck", {}))
+        assert parse(result) == {"requested": True, "serial": serial, "cause": "stuck"}
+        assert keyed.rcon.kills == ["LastOrder01"]  # request_death killed in the hive
+    finally:
+        stack.close()
+
+
+def test_main_refuses_an_empty_mind_runner_key(monkeypatch, tmp_path) -> None:
+    """R2-6, mind side: an empty MIND_RUNNER_KEY would serve /runner/respawn and
+    /runner/birth ungated — main() refuses to start instead (NODE_DEV_OPEN=1 excepts)."""
+    import os
+    import subprocess
+    import sys
+
+    from runtime.config import REPO_ROOT
+
+    env = dict(os.environ)
+    # set explicitly empty (not popped): runtime.config loads the repo .env into
+    # os.environ for absent keys only, and must not resurrect a key over this test
+    env["MIND_RUNNER_KEY"] = ""
+    env.pop("NODE_DEV_OPEN", None)
+    env.pop("NODE_SERIAL", None)
+    # an invalid Jev backend is the deterministic stop AFTER the key check: the dev
+    # exception must get that far instead of refusing on the empty key
+    env["JEV_BACKEND"] = "no-such-backend"
+    code = "import sys; sys.path.insert(0, '.'); from runtime.mind.mcp_body import main; main()"
+    refused = subprocess.run(
+        [sys.executable, "-c", code], env=env, cwd=str(REPO_ROOT),
+        capture_output=True, text=True, timeout=120,
+    )
+    assert refused.returncode != 0
+    assert "MIND_RUNNER_KEY is empty" in refused.stderr
+    dev_open = subprocess.run(
+        [sys.executable, "-c", code], env={**env, "NODE_DEV_OPEN": "1"},
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=120,
+    )
+    assert dev_open.returncode != 0
+    assert "MIND_RUNNER_KEY is empty" not in dev_open.stderr
+    assert "Jev" in dev_open.stderr or "backend" in dev_open.stderr  # past the key check
+
+
 # --- the call log ------------------------------------------------------------------------
 
 
@@ -497,3 +584,37 @@ def test_call_log_records_calls_and_rejections(stack: Stack) -> None:
     assert "said" in ok_entry or ok_entry["tool"] == "say"
     # JSONL: every line parses (checked by json.loads above)
     assert all({"ts", "kind"} <= set(e) for e in entries)
+
+
+# --- the runner key of /runner/* (T-027 plan review P1-4) ---------------------------------------
+
+
+def test_runner_commands_need_the_runner_key() -> None:
+    """With MIND_RUNNER_KEY set, respawn and birth answer 401 to a keyless caller
+    (a sister with bash must not respawn her dead body under the runner's will
+    session), and the status stays open: the death cause is the agent's own data."""
+    s = Stack(runner_key="rk-mind-one")
+    try:
+        s.body.set_state(hp=0.0)
+        s.body.chat = ["LastOrder01 was killed"]
+        s.wait_until(lambda: s.executor.dead())
+        assert s.runner("GET", "/runner/status").status_code == 200
+        assert s.runner("POST", "/runner/respawn").status_code == 401
+        assert s.runner("POST", "/runner/respawn", key="rk-wrong").status_code == 401
+        assert s.body.respawn_calls == 0
+        assert (
+            s.runner("POST", "/runner/birth", {"serial": 8, "born_at": "2026-10-21T00:00:00+00:00", "ttl_min": 45}).status_code
+            == 401
+        )
+        assert s.runner("POST", "/runner/birth", {"serial": "x"}, key="rk-mind-one").status_code == 400
+        # the right key opens both commands
+        assert s.runner("POST", "/runner/respawn", key="rk-mind-one").status_code == 200
+        s.wait_until(lambda: s.body.respawn_calls == 1)
+        assert (
+            s.runner(
+                "POST", "/runner/birth", {"serial": 8, "born_at": "2026-10-21T00:00:00+00:00", "ttl_min": 45}, key="rk-mind-one"
+            ).status_code
+            == 200
+        )
+    finally:
+        s.close()

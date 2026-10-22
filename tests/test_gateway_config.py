@@ -73,7 +73,11 @@ class TestComposeWiring:
 
     def test_db_is_private_to_the_gateway(self):
         assert SERVICES["gateway-db"]["networks"] == ["gateway-internal"]
-        assert set(SERVICES["llm-gateway"]["networks"]) == {"default", "gateway-internal"}
+        # T-027: the node sandboxes reach the gateway through their per-slot svc-N
+        # networks; gateway-db itself stays private to the gateway
+        assert set(SERVICES["llm-gateway"]["networks"]) == {
+            "default", "gateway-internal", "svc-1", "svc-2", "svc-3",
+        }
         for name, service in SERVICES.items():
             if name not in ("gateway-db", "llm-gateway"):
                 assert "gateway-internal" not in (service.get("networks") or [])

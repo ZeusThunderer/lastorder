@@ -302,10 +302,15 @@ class HiveClient:
         retries: int = 2,
         backoff_s: float = 0.5,
         sleep: Callable[[float], None] = time.sleep,
+        runner_key: str = "",
     ):
         self._http = transport if transport is not None else httpx.Client(
             base_url=base_url, timeout=timeout_s
         )
+        # With the runner-key gates configured on the hive (T-027), the mind's writes
+        # (retire_stuck's request_death) must carry the slot's runner key too; empty
+        # leaves the client as it was (review R2-3).
+        self._runner_key = runner_key
         self._run_dir = Path(run_dir if run_dir is not None else (env("RUN_DIR") or "run"))
         self._outbox_path = self._run_dir / "hive_outbox.jsonl"
         self._events_path = self._run_dir / "hive_client_events.jsonl"
@@ -325,12 +330,13 @@ class HiveClient:
 
     def _request(self, method: str, path: str, payload: Any) -> httpx.Response:
         last = "hive unreachable"
+        headers = {"X-Runner-Key": self._runner_key} if self._runner_key else None
         for attempt in range(self._retries + 1):
             try:
                 response = (
-                    self._http.post(path, json=payload)
+                    self._http.post(path, json=payload, headers=headers)
                     if method == "post"
-                    else self._http.get(path)
+                    else self._http.get(path, headers=headers)
                 )
             except HiveClient._CONNECT_ERRORS as exc:  # certainly not delivered: retry
                 last = f"{type(exc).__name__}: {exc}"

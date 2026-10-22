@@ -2,7 +2,7 @@
 id: T-027
 title: Контейнер узла node-N — песочница, раннер с адаптерами харнесса, архив
 stage: E2
-status: ready
+status: accepted
 criticality: critical
 branch: z/T-027-node-container
 created: 2026-10-17
@@ -30,6 +30,18 @@ after: [T-025, T-026, T-028, T-029]
   сети, volume `workplaces`, лимиты CPU и RAM
 - `tests/test_node_runner.py` (новый)
 - файлы задачи
+- 2026-10-21 · надзор (план 1, P1-1/P1-4): граница агент/раннер внутри `node-N` — правки
+  `runtime/hive/app.py`, `runtime/hive/mcp.py`, `runtime/mind/mcp_body.py` и их тестов
+  (`tests/test_hive_api.py`, `tests/test_hive_mcp.py`, `tests/test_mcp_body.py`): ключ раннера
+  на `/registry/*` (запись) и на заголовок `X-Runner-Session`, ключ раннера на `/runner/*` у mind.
+  Только эта граница, остальное в этих модулях не менять.
+- 2026-10-22 · надзор (самопроверка C-2): санкционированы минимальные правки пинов compose в
+  `tests/test_gateway_config.py` (сети llm-gateway: +svc-1..3) и `tests/test_jev_policy.py`
+  (JEV_POLICY_PATH → /workplaces/current/policy/threat.md, оставлен T-031 на T-027) —
+  следствие разрешённых правок compose; только эти два ассерта, ничего больше.
+- 2026-10-22 · надзор (review раунд 2, R2-2/R2-3): `runtime/hive/app.py` — гейт ключом раннера на
+  `/memory/*` и `/comms/*`; `runtime/hive/client.py` — необязательный заголовок `X-Runner-Key`;
+  `runtime/mind/mcp_body.py` — `main` всегда создаёт `HiveClient` с `MIND_RUNNER_KEY`; тесты этих модулей.
 
 Нельзя трогать:
 - `unionclef/`, `NetTyan/`, `task1.md`, `.env`

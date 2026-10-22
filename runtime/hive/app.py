@@ -40,7 +40,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -239,6 +239,7 @@ def create_app(
     scan_s: float | None = None,
     node_keys: dict[str, str] | None = None,
     lo_key: str | None = None,
+    runner_keys: dict[str, str] | None = None,
 ) -> FastAPI:
     clock = clock or (lambda: datetime.now(timezone.utc))
     run_dir = Path(run_dir if run_dir is not None else (env("RUN_DIR") or "run"))
@@ -259,6 +260,16 @@ def create_app(
         if node_keys is not None
         else parse_node_keys(env("HIVE_MCP_NODE_KEYS") or "")
     )
+    if runner_keys is None:
+        runner_keys = parse_node_keys(env("HIVE_RUNNER_KEYS") or "", env_name="HIVE_RUNNER_KEYS")
+        if not runner_keys and (env("NODE_DEV_OPEN") or "") != "1":
+            # Fail-closed (review R2-6): an empty map silently opens every gate below,
+            # and the sisters' sandbox is on this very port. Tests pass an explicit map
+            # ({} = open); a dev run that really wants no keys sets NODE_DEV_OPEN=1.
+            raise ValueError(
+                "HIVE_RUNNER_KEYS is empty: the registry, memory and comms gates would"
+                " be open. Configure the slot keys or set NODE_DEV_OPEN=1 for a dev run."
+            )
     last_order_key = lo_key if lo_key is not None else (env("HIVE_MCP_LO_KEY") or "")
     now = lambda: clock().isoformat()  # noqa: E731 - one clock for every layer write
     proposals = ProposalBook(store, now=now)
@@ -275,6 +286,7 @@ def create_app(
             run_dir=run_dir,
             log=log,
             now=now,
+            runner_keys=runner_keys,
         )
     )
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the
@@ -397,62 +409,101 @@ def create_app(
             raise ApiError(422, "validation", f"{what}: {exc}") from exc
 
     # --- health and Memory ---------------------------------------------------------------
+    # The /memory and /comms routes are gated exactly like /registry when HIVE_RUNNER_KEYS
+    # is configured (review R2-2): the sisters' sandbox shares this port, and without the
+    # gate a bash call could rewrite another node's core memory, vote or inbox. The key
+    # must be the slot's that owns the request's serial; the sisters themselves speak
+    # through the MCP mounts (/node, X-Node-Key). /health and /registry/alive stay open.
+
+    def _require_runner_key(request: Request, slot: str) -> None:
+        if not runner_keys:
+            return
+        key = request.headers.get("x-runner-key", "").strip()
+        if runner_keys.get(key) != slot:
+            raise ApiError(401, "runner_key", f"X-Runner-Key does not open slot {slot}")
+
+    def _require_runner_key_of(request: Request, serial: int) -> None:
+        # the 404 of an unknown serial stays ahead of the key check, same trade as
+        # /registry/retire: registry membership is public inside the network
+        _require_runner_key(request, lifecycle.require_node(serial).slot)
 
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok"}
 
     @app.post("/memory/inheritance")
-    def memory_inheritance(body: dict) -> dict:
+    def memory_inheritance(request: Request, body: dict) -> dict:
+        _require_runner_key_of(request, _serial(body))
         return inheritance_to_json(service.inheritance(_serial(body)))
 
     @app.post("/memory/knowledge")
-    def memory_knowledge(body: dict) -> dict:
+    def memory_knowledge(request: Request, body: dict) -> dict:
         serial = _serial(body)
+        _require_runner_key_of(request, serial)
         handles = body.get("handles", [])
         if not isinstance(handles, list) or any(not isinstance(h, str) for h in handles):
             raise ApiError(422, "validation", "handles must be a list of strings")
         return slice_to_json(service.knowledge(serial, handles))
 
     @app.post("/memory/core_memory")
-    def memory_core_memory(body: dict) -> str:
+    def memory_core_memory(request: Request, body: dict) -> str:
+        _require_runner_key_of(request, _serial(body))
         return service.core_memory(_serial(body))
 
     @app.post("/memory/store_core_memory")
-    def memory_store_core_memory(body: dict) -> None:
-        service.store_core_memory(_serial(body), _text(body, "text"))
+    def memory_store_core_memory(request: Request, body: dict) -> None:
+        serial = _serial(body)
+        _require_runner_key_of(request, serial)
+        service.store_core_memory(serial, _text(body, "text"))
 
     @app.post("/memory/submit_candidate")
-    def memory_submit_candidate(body: dict) -> None:
+    def memory_submit_candidate(request: Request, body: dict) -> None:
         serial = _serial(body)
+        _require_runner_key_of(request, serial)
         candidate = _decode(candidate_from_json, _obj(body, "candidate"), "candidate")
         service.submit_candidate(serial, candidate)
 
     @app.post("/memory/submit_vote")
-    def memory_submit_vote(body: dict) -> None:
+    def memory_submit_vote(request: Request, body: dict) -> None:
         serial = _serial(body)
+        _require_runner_key_of(request, serial)
         vote = _decode(vote_from_json, _obj(body, "vote"), "vote")
         service.submit_vote(serial, vote)
 
     # --- NodeRegistry ----------------------------------------------------------------------
+    # The writes of this section belong to the node runner alone (T-027 plan review P1-1):
+    # with HIVE_RUNNER_KEYS configured, every mutating call must carry the slot's runner
+    # key in X-Runner-Key (the helpers live with the Memory section above). The registry
+    # lives on the same port as the sisters' MCP, and a sister with bash could otherwise
+    # retire a neighbour or mark herself dead. An explicitly passed empty map (tests)
+    # keeps the endpoints open; an empty env is a startup refusal (R2-6).
 
     @app.post("/registry/birth")
-    def registry_birth(body: dict) -> dict:
+    def registry_birth(request: Request, body: dict) -> dict:
         slot = _text(body, "slot")
+        _require_runner_key(request, slot)
         traits = _decode(traits_from_json, _obj(body, "traits"), "traits")
         return birth_record_to_json(service.birth(slot, traits))
 
     @app.post("/registry/request_death")
-    def registry_request_death(body: dict) -> None:
-        service.request_death(_serial(body), _text(body, "cause"))
+    def registry_request_death(request: Request, body: dict) -> None:
+        serial = _serial(body)
+        _require_runner_key(request, lifecycle.require_node(serial).slot)
+        service.request_death(serial, _text(body, "cause"))
 
     @app.post("/registry/mark_dead")
-    def registry_mark_dead(body: dict) -> None:
-        service.mark_dead(_serial(body))
+    def registry_mark_dead(request: Request, body: dict) -> None:
+        serial = _serial(body)
+        _require_runner_key(request, lifecycle.require_node(serial).slot)
+        service.mark_dead(serial)
 
     @app.post("/registry/retire")
-    def registry_retire(body: dict) -> None:
+    def registry_retire(request: Request, body: dict) -> None:
         serial = _serial(body)
+        # The 404/409 of require_node stay ahead of the key check on purpose: they are
+        # the store's answers to a retrying runner, not information a keyless caller
+        # gains (the registry's membership is public inside the network).
+        _require_runner_key(request, lifecycle.require_node(serial).slot)
         will_text = _text(body, "will_text")
         service.retire(serial, _text(body, "cause"), will_text)
 
@@ -461,18 +512,26 @@ def create_app(
         return [node_brief_to_json(brief) for brief in service.alive()]
 
     # --- NodeComms ---------------------------------------------------------------------------
+    # Same gate as Memory (R2-2): /comms/send speaks for its from_serial, the reads for
+    # their serial — the sender's slot key, not a bare POST from the sisters' sandbox.
 
     @app.post("/comms/inbox")
-    def comms_inbox(body: dict) -> list:
-        return [message_to_json(m) for m in service.inbox(_serial(body))]
+    def comms_inbox(request: Request, body: dict) -> list:
+        serial = _serial(body)
+        _require_runner_key_of(request, serial)
+        return [message_to_json(m) for m in service.inbox(serial)]
 
     @app.post("/comms/send")
-    def comms_send(body: dict) -> None:
-        service.send(_decode(message_from_json, _obj(body, "message"), "message"))
+    def comms_send(request: Request, body: dict) -> None:
+        message = _decode(message_from_json, _obj(body, "message"), "message")
+        _require_runner_key_of(request, message.from_serial)
+        service.send(message)
 
     @app.post("/comms/chatter_turn")
-    def comms_chatter_turn(body: dict) -> dict | None:
-        return chatter_turn_to_json(service.chatter_turn(_serial(body)))
+    def comms_chatter_turn(request: Request, body: dict) -> dict | None:
+        serial = _serial(body)
+        _require_runner_key_of(request, serial)
+        return chatter_turn_to_json(service.chatter_turn(serial))
 
     # --- the network MCP mounts (T-028) ---------------------------------------------------
 

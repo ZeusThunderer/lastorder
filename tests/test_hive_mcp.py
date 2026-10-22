@@ -34,6 +34,7 @@ T0 = datetime(2026, 10, 17, 12, 0, 0, tzinfo=timezone.utc)
 KEY1 = "sk-node-one"  # slot LastOrder01
 KEY2 = "sk-node-two"  # slot LastOrder02
 KEY_LO = "sk-last-order"
+RKEY1 = "rk-runner-one"  # the node runner of slot LastOrder01 (T-027)
 
 SISTER_TOOLS = {"knowledge", "inheritance", "propose", "vote", "send", "inbox", "submit_will"}
 LO_TOOLS = {"proposals", "decide", "set_goals", "chronicle"}
@@ -92,12 +93,13 @@ def will_markdown(serial: int, slot: str = "LastOrder01") -> str:
 class Stack:
     """The whole hive in-process: store, lifecycle, app with both MCP servers, uvicorn."""
 
-    def __init__(self, tmp_path: Path):
+    def __init__(self, tmp_path: Path, runner_keys: dict[str, str] | None = None):
         self.clock = FakeClock()
         self.rcon = FakeRcon()
         self.store = KnowledgeStore(tmp_path / "kb", git=False, now=lambda: self.clock().isoformat())
         self.log = HiveLog(tmp_path / "run" / "events.jsonl")
         self.run_dir = tmp_path / "run"
+        self.runner_key = (runner_keys or {}).get("rk-slot") or next(iter(runner_keys or {}), "")
         self.lifecycle = Lifecycle(
             self.store, self.rcon, log=self.log, run_dir=self.run_dir, clock=self.clock
         )
@@ -110,6 +112,9 @@ class Stack:
             clock=self.clock,
             node_keys={KEY1: "LastOrder01", KEY2: "LastOrder02"},
             lo_key=KEY_LO,
+            # explicit map (empty default = the open test mode of review R2-6); None
+            # would read the env and refuse to start on an empty HIVE_RUNNER_KEYS
+            runner_keys=runner_keys if runner_keys is not None else {},
         )
         config = uvicorn.Config(self.app, host="127.0.0.1", port=0, log_level="error")
         self.uvicorn = uvicorn.Server(config)
@@ -124,8 +129,13 @@ class Stack:
     # -- plumbing --------------------------------------------------------------------------
 
     def http(self, method: str, path: str, json_body: dict | None = None) -> httpx.Response:
+        # the registry writes carry the runner key of the slot when one is configured (T-027)
+        headers = {}
+        if path.startswith("/registry/") and self.runner_key:
+            headers["X-Runner-Key"] = self.runner_key
         return httpx.request(
-            method, f"http://127.0.0.1:{self.port}{path}", json=json_body, timeout=30.0
+            method, f"http://127.0.0.1:{self.port}{path}", json=json_body,
+            headers=headers, timeout=30.0,
         )
 
     def birth(self, slot: str) -> int:
@@ -484,3 +494,34 @@ def test_two_clients_proposal_decision_slice(stack: Stack) -> None:
     out = node_call(stack, KEY2, "knowledge", {"about": ["ent:zombie"], "query": "стонущих"})
     matched = [e for e in out["matched"] if e["id"] == proposal["record_id"]]
     assert matched and matched[0]["status"] == "confirmed"
+
+
+# --- the runner key behind the will-session mark (T-027 plan review P1-1) ------------------------
+
+
+def test_submit_will_session_mark_needs_the_runner_key(tmp_path: Path) -> None:
+    """With HIVE_RUNNER_KEYS configured, X-Runner-Session: will is worthless without the
+    slot's runner key: a sister with bash cannot forge her own will session."""
+    stack = Stack(tmp_path, runner_keys={RKEY1: "LastOrder01"})
+    try:
+        serial = stack.birth("LastOrder01")
+        stack.lifecycle.mark_dead(serial)
+        will = will_markdown(serial)
+        # the session mark alone no longer opens the gate
+        assert "runner key" in node_error(
+            stack, KEY1, "submit_will", {"text": will}, extra={"X-Runner-Session": "will"}
+        )
+        # a runner key of another slot does not either
+        assert "runner key" in node_error(
+            stack, KEY1, "submit_will", {"text": will},
+            extra={"X-Runner-Session": "will", "X-Runner-Key": "rk-someone-else"},
+        )
+        # the node key still identifies, the runner key opens: the will stages once
+        out = node_call(
+            stack, KEY1, "submit_will", {"text": will},
+            extra={"X-Runner-Session": "will", "X-Runner-Key": RKEY1},
+        )
+        assert out == {"staged": True, "serial": serial}
+    finally:
+        stack.uvicorn.should_exit = True
+        stack.thread.join(timeout=10)
