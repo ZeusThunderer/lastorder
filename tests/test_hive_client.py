@@ -137,18 +137,23 @@ def test_comms_over_the_wire(frontends) -> None:
 
 
 class SwitchableTransport:
-    """Wraps the TestClient: `down` mimics an unreachable hive, `flaky` fails N times."""
+    """Wraps the TestClient: `down` mimics an unreachable hive, `flaky` fails N times.
+    `headers` records what HiveClient sends (None without a runner key, the
+    X-Runner-Key map with one — review R2-3)."""
 
     def __init__(self, inner):
         self.inner = inner
         self.down = False
         self.flaky = 0
+        self.headers: list = []
 
-    def post(self, path, json=None):
-        return self._send(lambda: self.inner.post(path, json=json))
+    def post(self, path, json=None, headers=None):
+        self.headers.append(headers)
+        return self._send(lambda: self.inner.post(path, json=json, headers=headers))
 
-    def get(self, path):
-        return self._send(lambda: self.inner.get(path))
+    def get(self, path, headers=None):
+        self.headers.append(headers)
+        return self._send(lambda: self.inner.get(path, headers=headers))
 
     def _send(self, fn):
         if self.down:
@@ -277,12 +282,12 @@ class ChatterServer:
     def __init__(self):
         self.down = False
 
-    def post(self, path, json=None):
+    def post(self, path, json=None, headers=None):
         if self.down:
             raise httpx.ConnectError("hive is down")
         return _Response(200, {"topic": "страховка у воды", "max_lines": 1})
 
-    def get(self, path):
+    def get(self, path, headers=None):
         return _Response(200, [])
 
 
@@ -481,11 +486,11 @@ class TimeoutOnce:
         self.inner = inner
         self.timed_out = False
 
-    def post(self, path, json=None):
+    def post(self, path, json=None, headers=None):
         if not self.timed_out and path == "/memory/submit_candidate":
             self.timed_out = True
             raise httpx.ReadTimeout("read timed out")
-        return self.inner.post(path, json=json)
+        return self.inner.post(path, json=json, headers=headers)
 
     def get(self, path):
         return self.inner.get(path)
@@ -516,3 +521,20 @@ def test_rejected_direct_call_raises(tmp_path: Path) -> None:
     with pytest.raises(HiveRejected) as info:
         client.core_memory(99)
     assert info.value.status == 404 and info.value.kind == "unknown_node"
+
+
+def test_runner_key_header_rides_every_call(offline) -> None:
+    """R2-3: a HiveClient built with a runner key sends X-Runner-Key on every call —
+    the gated /registry, /memory and /comms routes (R2-2) accept the mind's writes."""
+    offline.switch.headers.clear()
+    keyed = HiveClient(
+        transport=offline.switch,
+        run_dir=offline.run_dir,
+        backoff_s=0.01,
+        retries=0,
+        runner_key="rk-mind-one",
+    )
+    born_via_client(keyed)
+    keyed.core_memory(1)
+    assert offline.switch.headers
+    assert all(h == {"X-Runner-Key": "rk-mind-one"} for h in offline.switch.headers)
