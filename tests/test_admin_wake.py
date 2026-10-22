@@ -76,6 +76,23 @@ class FakeProcess:
         return ""
 
 
+class ImmortalProcess(FakeProcess):
+    """SIGKILL delivered, but the child sits in uninterruptible IO and never reaps
+    (a D-state on a stalled host volume — seen on the stand): poll() stays None."""
+
+    def __init__(self):
+        super().__init__(hang=True)
+
+    def poll(self) -> int | None:
+        if self._on_spawn is not None and self.calls == 0:
+            self.calls += 1
+            self._on_spawn()
+        return None
+
+    def returncode(self) -> int:
+        return -9
+
+
 class Recorder:
     """The injected spawn: records argv/cwd/env, hands back scripted processes."""
 
@@ -328,6 +345,21 @@ def test_spawn_env_is_fresh_and_cwd_is_the_workplace(tmp_path: Path) -> None:
     assert recorder.argv[0][recorder.argv[0].index("--model") + 1] == (
         "llm-gateway/z-ai/glm-5.3-flash"
     )
+
+
+def test_unkillable_child_does_not_freeze_the_desk(tmp_path: Path) -> None:
+    """The stand case: SIGKILL delivered, the child stuck in D-state. The alarm logs
+    the abandon and keeps its rhythm — the next wake still runs a session."""
+    cfg, clock, recorder, alarm = boot(tmp_path)
+    recorder.factory = lambda: ImmortalProcess()
+    add_will(tmp_path / "knowledge", 21)
+    assert alarm.run_once() != []  # returns despite the child never reaping
+    events = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    assert "session.timeout" in events and "session.abandoned" in events
+    assert "session.done" not in events
+    clock.advance(seconds=60)
+    add_will(tmp_path / "knowledge", 22)
+    assert [r.kind for r in alarm.run_once()] == ["death"]
 
 
 def test_core_restored_memory_kept(tmp_path: Path) -> None:

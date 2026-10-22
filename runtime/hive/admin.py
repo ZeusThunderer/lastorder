@@ -584,6 +584,15 @@ class AdminAlarm:
                     "session.timeout",
                     {"timeout_s": self.cfg.session_timeout_s},
                 )
+                if process.poll() is None:
+                    # SIGKILL is delivered but the child sits in UNINTERRUPTIBLE IO
+                    # (a D-state on a stalled host volume, seen on the stand): waiting
+                    # for it would freeze the alarm forever. It is condemned — it dies
+                    # the moment the IO returns — so the desk moves on without it.
+                    process.wait(self.cfg.kill_grace_s)
+                    if process.poll() is None:
+                        self._log.event("session.abandoned", {})
+                        return
             process.wait()
             output = process.output()
             self._log.event(
