@@ -2,7 +2,7 @@
 id: T-033
 title: Адаптер Hermes Agent в раннере узла — Z.ai, сухой прогон
 stage: E2
-status: accepted
+status: done
 criticality: critical
 branch: z/T-033-hermes-adapter
 created: 2026-10-22
