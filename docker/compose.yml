@@ -299,8 +299,57 @@ services:
     volumes:
       - knowledge:/knowledge
       - hive-run:/hive-run   # not over the image's system /run (review R1-6)
-    networks: [default, svc-1, svc-2, svc-3]
+    networks: [default, svc-1, svc-2, svc-3, svc-lo]
     restart: unless-stopped
+
+  # Last Order's own sandbox (T-030, ADR-036): the admin alarm plus the short harness
+  # sessions of the network's administrator. The node image carries both harnesses (the
+  # mind image of the hive does not); the sandbox reaches ONLY hive and llm-gateway over
+  # the internal svc-lo network (plan review P1-1): no mc-server and its RCON, no node
+  # slots, no way out. The knowledge volume is read-only here — the base is written only
+  # by the hive (ADR-017), through the MCP tools the session gets. The node entrypoint
+  # renders the gateway key into the opencode auth store of the agent uid and scrubs it
+  # from the environment; no provider key ever enters this container.
+  last-order:
+    build:
+      context: ..
+      dockerfile: docker/node/Dockerfile
+    image: lastorder-node:dev
+    restart: unless-stopped
+    depends_on: [hive, llm-gateway]
+    mem_limit: 1g
+    cpus: "0.5"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+      - /home/sister:size=768m,mode=700
+      - /run/node:size=64m,mode=700
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["SETUID", "SETGID", "CHOWN", "FOWNER", "DAC_OVERRIDE", "KILL"]
+    pids_limit: 512
+    environment:
+      ADMIN_WORKPLACE: /workplace
+      ADMIN_TEMPLATE_DIR: /app/agent/network
+      ADMIN_KNOWLEDGE_DIR: /knowledge
+      HIVE_URL: http://hive:8000
+      GATEWAY_URL: http://llm-gateway:4000
+      HIVE_MCP_LO_KEY: "${HIVE_MCP_LO_KEY:-}"
+      ADMIN_MODEL: "${LO_MODEL:-z-ai/glm-5.3-flash}"   # the smart tier through the gateway
+      ADMIN_EVERY_MIN: "${ADMIN_EVERY_MIN:-10}"
+      ADMIN_PROPOSALS_BATCH: "${ADMIN_PROPOSALS_BATCH:-3}"
+      ADMIN_POLL_S: "${ADMIN_POLL_S:-5}"
+      ADMIN_SESSION_TIMEOUT_S: "${ADMIN_SESSION_TIMEOUT_S:-600}"
+      ADMIN_SESSION_MIN_GAP_S: "${ADMIN_SESSION_MIN_GAP_S:-30}"
+      NAME_PRESET: "${NAME_PRESET:-lab}"
+      GATEWAY_NODE_KEY: "${GATEWAY_KEY_LO:-}"   # the node entrypoint renders it into opencode auth
+      SISTER_UID: "1001"
+      SISTER_GID: "1001"
+    command: ["python", "-m", "runtime.hive.admin"]
+    volumes:
+      - hive-work:/workplace
+      - knowledge:/knowledge:ro
+    networks: [svc-lo]
 
   # FastJev decision server for C1 (T-005, ADR-004/023). Raises only under --profile jev.
   # GPU 0 is the RTX 2070 (5070 Ti stays free); model checkpoints live in the named volume,
@@ -365,7 +414,7 @@ services:
       DATABASE_URL: postgresql://litellm:${GATEWAY_DB_PASSWORD:-lastorder}@gateway-db:5432/litellm
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"   # the only provider key in the stack
     command: ["--config", "/app/config.yaml", "--port", "4000"]
-    networks: [default, gateway-internal, svc-1, svc-2, svc-3]
+    networks: [default, gateway-internal, svc-1, svc-2, svc-3, svc-lo]
     volumes:
       - ./gateway/config.yaml:/app/config.yaml:ro
     healthcheck:
@@ -423,6 +472,7 @@ volumes:
   mind-3-run:
   knowledge:
   hive-run:
+  hive-work:
   gateway-db:
   jev-hf:
   workplaces-1:
@@ -439,5 +489,8 @@ networks:
   svc-1: {internal: true}
   svc-2: {internal: true}
   svc-3: {internal: true}
+  # last-order + hive + llm-gateway only (T-030 review P1-1): the administrator's
+  # bash has no route to mc-server/RCON, the node slots or the internet
+  svc-lo: {internal: true}
   # the only network with a route out: zai-egress alone sits on it
   egress-out: {}

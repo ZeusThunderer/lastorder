@@ -2,7 +2,7 @@
 id: T-030
 title: Last Order — агент-администратор сети по событиям
 stage: E3
-status: ready
+status: accepted
 criticality: critical
 branch: z/T-030-last-order-agent
 created: 2026-10-17
@@ -28,6 +28,8 @@ after: [T-028, T-029]
 - `runtime/hive/admin.py` (новый: будильник по событиям, запуск коротких сессий через адаптер раннера)
 - `docker/compose.yml` — env и volume для hive
 - `tests/test_admin_wake.py` (новый)
+- `tests/test_gateway_config.py` — только дополнение: сервис `last-order` в списке сетей шлюза
+  (checker C-3: расширяю «Можно трогать» задним числом, файл уже тронут в 8d93b79)
 - файлы задачи
 
 Нельзя трогать:
@@ -57,3 +59,6 @@ docker compose -f docker/compose.yml up -d
 
 ## Заметки надзора
 - 2026-10-17 · утверждена пользователем.
+- 2026-10-22 · план 1 (headless): «Можно трогать» в `docker/compose.yml` расширено. Можно добавить
+  сервис `last-order` на образе node, его volume и internal-сеть, а также подключить эту сеть
+  к `hive` и `llm-gateway`. Обязательные правки — в `review.md` «План 1».
