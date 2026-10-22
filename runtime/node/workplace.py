@@ -265,7 +265,10 @@ def drop_hermes_config(
     the sister's (review R1-2). The entrypoint calls it once per container; the
     hermes adapter calls it again before EVERY life session (review R1-1): the will
     session before this one pointed the hive MCP at the will proxy, and without this
-    render every later generation of the slot would sit on the stopped proxy."""
+    render every later generation of the slot would sit on the stopped proxy.
+    This heals a replaced or deleted config.yaml FILE only — a sister who removes
+    the whole home gets a root-owned mkdir here (the gateway then refuses it) and
+    loses her .env; that state needs a container restart, not a re-render."""
     home.mkdir(parents=True, exist_ok=True)
     path = home / "config.yaml"
     if path.exists():
@@ -295,9 +298,9 @@ def drop_hermes_home(
     stay hers (0700): the detached gateway refuses any other owner or a group/world
     -writable home ("unsafe_control_path … chown it to the gateway user", verified
     in the container) — a sticky root-owned dir, the workplace plan, cannot apply
-    here. The price is bounded by the adapter's per-life re-render (R1-1): a
-    deleted/replaced config survives at most until the next life turn. The .env
-    with the Z.ai key is her own (0600, same boundary as the zcode provider
+    here. A replaced/deleted config.yaml file is healed by the adapter's per-life
+    re-render (R1-1); a removed whole home is not (see drop_hermes_config). The
+    .env with the Z.ai key is her own (0600, same boundary as the zcode provider
     config, ADR-033). Everything else Hermes creates itself on first run."""
     drop_hermes_config(
         home, model=model, body_base=body_base, hive_url=hive_url, node_key=node_key

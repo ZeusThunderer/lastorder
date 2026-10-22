@@ -60,8 +60,9 @@ chown -R "${SISTER_UID}:${SISTER_GID}" "$SISTER_HOME"
 #     stamps the final ownership itself: the dir is the sister's 0700 (the gateway
 #     refuses a root-owned or writable-by-others home — verified in the container),
 #     while config.yaml/SOUL.md stay root 0444 (the harness config is the runner's,
-#     R1-2; a swap is healed by the adapter's per-life re-render), only .env is
-#     hers at 0600. The key rides the helper's environment, never argv:
+#     R1-2; a replaced config.yaml file is re-rendered before the next life
+#     session), only .env is hers at 0600. The key rides the helper's environment,
+#     never argv:
 #     /proc/<pid>/cmdline is world-readable, /proc/<pid>/environ is not. Rendered
 #     even without the key (config-only), so the harness still fails cleanly
 #     instead of scaffold-failing on a dead home.
