@@ -215,6 +215,9 @@ def render_hermes_config(model: str, body_base: str, hive_url: str, node_key: st
     messenger/cron/browser surfaces, update checks) off. No key material here:
     GLM_API_KEY/GLM_BASE_URL ride HERMES_HOME/.env (written by the entrypoint)."""
     return {
+        # the config-version stamp of the pinned release (doctor's "outdated v0 → v51"
+        # nudge in the dry run): a freshly rendered config IS current, no migration
+        "_config_version": 51,
         "model": {"default": _glm_model(model), "provider": "zai"},
         "mcp_servers": {
             "body": {

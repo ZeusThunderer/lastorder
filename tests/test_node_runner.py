@@ -664,12 +664,17 @@ def test_hermes_adapter_commands_and_session_id(tmp_path: Path) -> None:
 
 
 def test_hermes_quota_marks_on_the_sampled_stream() -> None:
-    """The 429 sample is the stream-json envelope hermes prints when the Z.ai plan
-    answers 429 (captured in the dry run, key material stripped) — tests/fixtures/."""
+    """The 429 sample is the stream-json envelope hermes prints when a provider call
+    fails (live-captured in the dry run against a 404 probe, the status/body swapped
+    for the documented Z.ai 429/1302 wording — a provoked 429 never fired: four
+    parallel sessions were all served). No key material inside."""
     sample = (REPO_ROOT / "tests" / "fixtures" / "hermes-stream-429.jsonl").read_text(encoding="utf-8")
     assert quota_exhausted(sample)
     # the same envelope with a neutral error is not a quota mark
-    ok_sample = sample.replace("429", "500").replace("rate limit exceeded", "internal error")
+    ok_sample = (
+        sample.replace("429", "503").replace("1302", "1310")
+        .replace("rate limit exceeded, quota exhausted", "try again much later")
+    )
     assert not quota_exhausted(ok_sample)
 
 
@@ -730,6 +735,7 @@ def test_config_accepts_hermes_and_derives_its_model(monkeypatch) -> None:
 
 def test_render_hermes_config() -> None:
     config = workplace.render_hermes_config("GLM-5.3-Flash", "http://body-1:8700/", "http://hive:8000", "sk-node-one")
+    assert config["_config_version"] == 51
     assert config["model"] == {"default": "glm-5.3-flash", "provider": "zai"}
     zcode = workplace.render_zcode_config("http://body-1:8700/", "http://hive:8000", "sk-node-one")
     assert config["mcp_servers"]["body"]["url"] == zcode["mcp"]["servers"]["body"]["url"]
