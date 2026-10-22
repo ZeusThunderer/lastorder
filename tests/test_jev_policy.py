@@ -526,7 +526,9 @@ class TestStatics:
         assert env_block["JEV_MODEL"] == "${JEV_MODEL:-openrouter/typesafe/jev-router}"
         assert env_block["JEV_TIMEOUT_S"] == "${JEV_TIMEOUT_S:-1.5}"
         assert env_block["JEV_MIN_INTERVAL_S"] == "${JEV_MIN_INTERVAL_S:-3}"
-        assert env_block["JEV_POLICY_PATH"] == "${JEV_POLICY_PATH:-" + POLICY_PATH_DEFAULT + "}"
+        # T-027 wires the workplace mount: the policy is the living sister's file,
+        # reached through the `current` symlink the node runner maintains
+        assert env_block["JEV_POLICY_PATH"] == "/workplaces/current/policy/threat.md"
         assert env_block["JEV_POLICY_MAX_CHARS"] == "${JEV_POLICY_MAX_CHARS:-1500}"
 
     def test_runtime_defaults_match_compose(self):
