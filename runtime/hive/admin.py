@@ -379,17 +379,16 @@ class AdminAlarm:
         os.chmod(root, WORKPLACE_DIR_MODE)
 
     def _rewrite_readonly(self, path: Path, text: str) -> None:
-        """The runner's `_write_readonly` with the set_will_mode move: a read-only
-        TARGET cannot be replaced on Windows, so the mode comes off for the instant of
-        the atomic replace (the alarm runs as root; the agent uid cannot do this)."""
+        """The runner's `_write_readonly`, ROOT-owned (P1-2, stand finding): a file
+        owned by the agent's uid is chmod-able by her — the read-only mode alone would
+        not hold. The mode comes off for the instant of the atomic replace (a read-only
+        TARGET cannot be replaced on Windows; the alarm runs as root, she cannot)."""
         if path.exists():
             try:
                 os.chmod(path, 0o644)
             except OSError:
                 pass
-        _write_readonly(
-            path, text, uid=self.cfg.sister_uid, gid=self.cfg.sister_gid
-        )
+        _write_readonly(path, text)
 
     def _own_tree(self, path: Path) -> None:
         """The agent's zone: her uid and her modes, nothing else changed."""
