@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Mapping
 
 
@@ -149,6 +151,72 @@ class ZCodeAdapter:
             except ValueError:
                 continue
             value = doc.get("sessionId")
+            if isinstance(value, str) and value:
+                found = value
+        return found
+
+
+# Hermes Agent (NousResearch, MIT) — the third node harness (ADR-032), on the Z.ai
+# GLM Coding Plan like zcode. Everything static lives in HERMES_HOME (rendered by the
+# entrypoint): config.yaml (provider `zai`, both MCP servers, toolsets), .env with
+# GLM_API_KEY/GLM_BASE_URL. The adapter only drives the headless CLI: one oneshot
+# `hermes chat` per session intent, the prompt as a file (never through a shell or
+# argv — the SESSION_PROMPT is kilobytes), stream-json on stdout for the session id
+# and the quota marks. Toolsets are pinned here AND in config.yaml: the CLI flag is
+# the per-run surface, the config is what any other Hermes entry would see.
+HERMES_TOOLSETS = ("file", "terminal")
+
+
+class HermesAdapter:
+    name = "hermes"
+
+    def __init__(self, model: str, home: str = "/home/sister/.hermes"):
+        self._model = model
+        self._home = home
+        # One scratch file, overwritten per turn: the runner never runs two sessions
+        # at once, and a crash-loop must not litter the tmpfs with prompts.
+        self._query_file = Path(tempfile.gettempdir()) / "lastorder-hermes-prompt.txt"
+
+    def _base(self) -> tuple[str, ...]:
+        return (
+            "--oneshot", "--format", "stream-json", "--yolo",
+            "--toolsets", ",".join(HERMES_TOOLSETS),
+        )
+
+    def _command(self, prompt: str, resume: str | None) -> Command:
+        self._query_file.write_text(prompt, encoding="utf-8")
+        argv: tuple[str, ...] = (
+            "hermes", "chat", "--query-file", str(self._query_file), *self._base()
+        )
+        if resume is not None:
+            argv += ("--resume", resume)
+        return Command(argv, env={"HERMES_HOME": self._home})
+
+    def life_turn(self, prompt: str, session_id: str | None) -> Command:
+        # A resume carries only the continuation nudge: the session history is in
+        # Hermes's state (HERMES_HOME/sessions), the context rebuilds from the
+        # workplace files on a fresh first prompt — same contract as zcode.
+        if session_id is None:
+            return self._command(prompt, None)
+        return self._command(CONTINUE_MESSAGE, session_id)
+
+    def will_session(self, prompt: str) -> Command:
+        return self._command(prompt, None)  # a fresh session, like the other two
+
+    def session_id(self, output: str) -> str | None:
+        """The last non-empty session_id of the stream-json events on stdout:
+        `system/init` may print an empty one before the gateway binds the real id,
+        the terminal `result` event always carries it."""
+        found: str | None = None
+        for line in output.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                doc = json.loads(line)
+            except ValueError:
+                continue
+            value = doc.get("session_id")
             if isinstance(value, str) and value:
                 found = value
         return found

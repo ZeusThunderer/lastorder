@@ -23,6 +23,8 @@ import stat
 from collections.abc import Iterator
 from pathlib import Path
 
+import yaml
+
 from runtime.knowledge.slice import format_serial
 from runtime.lastorder.persona import Node, PersonaProvider
 from runtime.lastorder.traits import Traits
@@ -178,6 +180,109 @@ def render_opencode_config(
     }
 
 
+# Hermes Agent (ADR-032 third harness) keeps its home on the sister's tmpfs, NOT in
+# the workplace: state.db, sessions and the .env with the Z.ai key are per-container
+# runtime state, while the workplace is the persona that gets archived read-only.
+# Rendered once per container start by the entrypoint (drop_hermes_home); the node
+# MCP key inside config.yaml is the agent's own identity, same rule as zcode.json
+# (ADR-033: keys are names inside the network).
+HERMES_HOME = Path("/home/sister/.hermes")
+# The coding endpoint of the GLM Coding Plan (harness-spike step 0): Hermes would
+# otherwise probe endpoints itself and could land on the billed-by-balance one.
+HERMES_GLM_BASE_URL = "https://api.z.ai/api/coding/paas/v4"
+# The identity slot SOUL.md has to be non-empty: an empty one makes Hermes inject
+# its own DEFAULT_AGENT_IDENTITY ("You are Hermes Agent, built by Nous Research…")
+# on top of the sister. This note occupies the slot and points identity back to
+# the workplace files; what Hermes still adds on its own is in harness-spike.md.
+HERMES_SOUL_MD = (
+    "# Identity\n\n"
+    "Your identity, duties and manner of speech are defined by this workspace's "
+    "AGENTS.md and PERSONA.md. Follow them. Do not invent or add another persona.\n"
+)
+# T-024 parity (supervisor note): the built-in memory, the user profile and skill
+# self-creation stay off — the sister's memory and skills live in the workplace.
+
+
+def _glm_model(model: str) -> str:
+    """Z.ai's OpenAI-compatible endpoint knows lowercase model ids (its own probe
+    list is glm-5.3/glm-5.3-flash/…), while ZCODE_MODEL habitually travels cased."""
+    return model.strip().lower()
+
+
+def render_hermes_config(model: str, body_base: str, hive_url: str, node_key: str) -> dict:
+    """Hermes config.yaml: the Z.ai coding provider, both MCP servers of the slot,
+    files+terminal toolsets and every Hermes extra (memory, skills, self-review,
+    messenger/cron/browser surfaces, update checks) off. No key material here:
+    GLM_API_KEY/GLM_BASE_URL ride HERMES_HOME/.env (written by the entrypoint)."""
+    return {
+        "model": {"default": _glm_model(model), "provider": "zai"},
+        "mcp_servers": {
+            "body": {
+                "url": f"{body_base.rstrip('/')}/mcp",
+                "sampling": {"enabled": False},
+            },
+            "hive": {
+                "url": hive_mcp_url(hive_url),
+                "headers": {"X-Node-Key": node_key},
+                "sampling": {"enabled": False},
+            },
+        },
+        # The CLI surface without any --toolsets flag: files, terminal, MCP. The
+        # messenger/browser/cron/delegation toolsets exist upstream but never load.
+        "platform_toolsets": {"cli": ["file", "terminal"]},
+        "memory": {"memory_enabled": False, "user_profile_enabled": False, "nudge_interval": 0},
+        "skills": {"creation_nudge_interval": 0},
+        "updates": {"check": False},
+        "auxiliary": {
+            # The post-turn "save memory / patch a skill" fork is a memory/skill
+            # feature dressed as an aux call — off for the T-024-parity spike.
+            "background_review": {"enabled": False},
+            # Titles stay the instant derived kind: no model call per session.
+            "title_generation": {"model_upgrade_enabled": False},
+        },
+    }
+
+
+def drop_hermes_home(
+    home: Path,
+    *,
+    model: str,
+    body_base: str,
+    hive_url: str,
+    node_key: str,
+    glm_key: str = "",
+    uid: int | None = None,
+    gid: int | None = None,
+) -> None:
+    """Lay out HERMES_HOME: config.yaml, the neutral SOUL.md and (when the
+    entrypoint passes the Z.ai key) the 0600 sister-owned .env. Everything else
+    (state.db, sessions, memories) Hermes creates itself on first run."""
+    home.mkdir(parents=True, exist_ok=True)
+    config = home / "config.yaml"
+    config.write_text(
+        json.dumps(render_hermes_config(model, body_base, hive_url, node_key), indent=2),
+        encoding="utf-8",
+    )
+    (home / "SOUL.md").write_text(HERMES_SOUL_MD, encoding="utf-8")
+    if glm_key:
+        env_file = home / ".env"
+        env_file.write_text(
+            f"GLM_API_KEY={glm_key}\nGLM_BASE_URL={HERMES_GLM_BASE_URL}\n",
+            encoding="utf-8",
+        )
+        _chmod(env_file, 0o600)
+    # The home is the sister's: she must read config/SOUL/.env and write her state.
+    if uid is not None and hasattr(os, "chown"):
+        for name in ("config.yaml", "SOUL.md", ".env"):
+            path = home / name
+            if path.exists():
+                try:
+                    os.chown(path, uid, gid if gid is not None else -1)
+                except OSError:
+                    pass  # non-POSIX or unprivileged: the mode plan still applies
+    _chmod(home, 0o700)
+
+
 def _drop_harness_configs(
     root: Path,
     template: Path,
@@ -271,6 +376,9 @@ def set_will_mode(root: Path, harness: str, proxy_url: str) -> None:
     """Point the hive MCP of the given adapter's config at the runner's will proxy for
     the will session: the proxy adds X-Runner-Session: will and the runner key, so the
     mark cannot be forged from the workplace (plan review P1-1)."""
+    if harness == "hermes":
+        _set_hermes_will_mode(proxy_url)
+        return
     name = "zcode.json" if harness == "zcode" else "opencode.json"
     path = root / name
     if not path.exists():
@@ -285,6 +393,27 @@ def set_will_mode(root: Path, harness: str, proxy_url: str) -> None:
     _chmod(path, 0o644)
     path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     _chmod(path, READ_ONLY_FILE)
+
+
+def _set_hermes_will_mode(proxy_url: str) -> None:
+    """The hermes twin of set_will_mode: the config lives in HERMES_HOME (YAML —
+    Hermes may have rewritten it with its own migrations after the first run, so
+    no JSON round-trip). A missing or unparsable config leaves the will session
+    on the real hive: submit_will without the runner mark is refused there and
+    the emergency will covers it — degraded, never unsafe."""
+    path = HERMES_HOME / "config.yaml"
+    try:
+        config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return
+    if not isinstance(config, dict):
+        return
+    entry = config.get("mcp_servers", {}).get("hive")
+    if not isinstance(entry, dict):
+        return
+    entry["url"] = f"{proxy_url.rstrip('/')}/mcp"
+    _chmod(HERMES_HOME, 0o700)
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
 
 def link_current(workplaces: Path, serial: int) -> bool:
