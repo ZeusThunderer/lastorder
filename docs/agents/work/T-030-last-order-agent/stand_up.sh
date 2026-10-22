@@ -19,8 +19,13 @@ lift_env() { # lift_env <container> <var>: export var from a running container
 }
 
 lift_env lastorder-llm-gateway-1 LITELLM_MASTER_KEY
-lift_env lastorder-llm-gateway-1 OPENROUTER_API_KEY
 lift_env lastorder-gateway-db-1 POSTGRES_PASSWORD
+# the provider key never rode the old stand (its sisters used the Z.ai subscription):
+# lift it from the repo root .env, the up.sh convention
+if [ -z "${OPENROUTER_API_KEY:-}" ] && [ -f /c/ai-char/.env ]; then
+  val="$(sed -n 's/^OPENROUTER_API_KEY=//p' /c/ai-char/.env | head -1 | tr -d '\r"')"
+  [ -n "$val" ] && export OPENROUTER_API_KEY="$val"
+fi
 lift_env lastorder-hive-1 HIVE_MCP_NODE_KEYS
 lift_env lastorder-hive-1 HIVE_RUNNER_KEYS
 lift_env lastorder-mc-server-1 RCON_PASSWORD
@@ -48,9 +53,11 @@ lo="$(docker exec lastorder-hive-1 printenv HIVE_MCP_LO_KEY 2>/dev/null || true)
 export HIVE_MCP_LO_KEY="$lo"
 
 # a dedicated gateway key for the LO sessions (review P1-4); printed once by the tool,
-# captured straight into the environment
+# captured straight into the environment. The alias is run-stamped: a re-run issues a
+# fresh key instead of colliding (the orphan of an aborted run is revoked by hand).
 if [ -n "${GATEWAY_MASTER_KEY:-}" ]; then
-  token="$(uv run python dev/gateway_keys.py issue --alias last-order --rpm 30 \
+  token="$(uv run python dev/gateway_keys.py issue \
+    --alias "last-order-$(date +%m%d%H%M)" --rpm 30 \
     --hourly-usd 0.15 --models z-ai/glm-5.3-flash,openrouter/z-ai/glm-5.3-flash \
     | sed -n 's/^token *: //p')"
   [ -n "$token" ] && export GATEWAY_KEY_LO="$token"

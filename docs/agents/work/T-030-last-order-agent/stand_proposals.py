@@ -16,6 +16,7 @@ import asyncio
 import sys
 from pathlib import Path
 
+import httpx
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
@@ -28,7 +29,7 @@ CLAIMS = [
         {
             "kind": "danger",
             "claim": "ночной стон бьёт насмерть с трёх ударов, если стоять вплотную",
-            "about": ["ночной стон"],
+            "about": ["ent:nochnoy_ston"],
             "evidence_event_ids": [],
         },
     ),
@@ -37,7 +38,7 @@ CLAIMS = [
         {
             "kind": "recipe",
             "claim": "жареную свинину можно готовить из сырой свинины и угля",
-            "about": ["свинина"],
+            "about": ["itm:svinina"],
             "evidence_event_ids": [],
         },
     ),
@@ -53,16 +54,23 @@ CLAIMS = [
 
 async def main() -> int:
     key = KEY_FILE.read_text(encoding="utf-8").strip()
-    headers = {"X-Node-Key": key}
-    async with Client(streamable_http_client(HIVE_MCP, headers=headers)) as client:
-        for kind, payload in CLAIMS:
-            result = await client.call_tool("propose", {"kind": kind, "payload": payload})
-            text = result.content[0].text if result.content else "{}"
-            print(f"{kind}: {text}")
-        sent = await client.call_tool(
-            "send", {"to": "all", "text": "отправила три предложения, ждём решения"}
-        )
-        print(f"send: {sent.content[0].text if sent.content else '{}'}")
+    http = httpx.AsyncClient(headers={"X-Node-Key": key}, timeout=30.0)
+    try:
+        async with Client(streamable_http_client(HIVE_MCP, http_client=http)) as client:
+            return await drive(client)
+    finally:
+        await http.aclose()
+
+
+async def drive(client: Client) -> int:
+    for kind, payload in CLAIMS:
+        result = await client.call_tool("propose", {"kind": kind, "payload": payload})
+        text = result.content[0].text if result.content else "{}"
+        print(f"{kind}: {text}")
+    sent = await client.call_tool(
+        "send", {"to": "all", "text": "отправила три предложения, ждём решения"}
+    )
+    print(f"send: {sent.content[0].text if sent.content else '{}'}")
     return 0
 
 

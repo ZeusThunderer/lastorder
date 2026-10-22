@@ -323,6 +323,11 @@ def test_spawn_env_is_fresh_and_cwd_is_the_workplace(tmp_path: Path) -> None:
                         "ZCODE_DISABLE_UPDATE_CHECK"}
     assert recorder.cwds[0] == cfg.workplace
     assert recorder.argv[0][0] == "opencode" and "--format" in recorder.argv[0]
+    # the provider prefix must ride --model: a bare "z-ai/..." would resolve to
+    # opencode's built-in z-ai provider, not the gateway (stand finding)
+    assert recorder.argv[0][recorder.argv[0].index("--model") + 1] == (
+        "llm-gateway/z-ai/glm-5.3-flash"
+    )
 
 
 def test_core_restored_memory_kept(tmp_path: Path) -> None:

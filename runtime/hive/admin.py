@@ -328,7 +328,12 @@ class AdminAlarm:
     ):
         self.cfg = cfg
         self._layout = layout or HiveLayout(cfg.knowledge)
-        self._adapters = dict(adapters or {cfg.harness: LastOrderAdapter(cfg.model)})
+        # `--model` must carry the provider prefix ("llm-gateway/<model>"): a bare
+        # "z-ai/glm-5.3-flash" resolves to opencode's BUILT-IN z-ai provider, which
+        # holds no key on this sandbox — proven on the stand (T-030 report).
+        self._adapters = dict(
+            adapters or {cfg.harness: LastOrderAdapter(f"llm-gateway/{cfg.model}")}
+        )
         self._spawn = spawn or self._spawn_child
         self._sleep = sleep
         self._clock = clock or (lambda: datetime.now(timezone.utc))
