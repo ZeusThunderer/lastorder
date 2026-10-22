@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Project checks in one agent call with short output (every agent call re-sends its whole context).
 # Run from the repo root or a task worktree; the root copy works for any worktree.
-#   bash <root>/dev/check.sh                    # uv run pytest -q + python tools/check.py
+#   bash <root>/dev/check.sh                    # uv run pytest -q + uv run python tools/check.py
 #   bash <root>/dev/check.sh tests/test_x.py …  # only these tests, without check.py
 # One line per check; on failure, the last 40 lines of its output. Exit 1 if anything failed.
 set -uo pipefail
@@ -29,6 +29,6 @@ if [ "$#" -gt 0 ]; then
   run pytest uv run pytest -q "$@"
 else
   run pytest uv run pytest -q
-  run check.py python tools/check.py
+  run check.py uv run python tools/check.py   # bare `python` is the Windows Store alias here
 fi
 exit "$rc"
