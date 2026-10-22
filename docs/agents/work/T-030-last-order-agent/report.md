@@ -51,3 +51,81 @@ T-029 (шаблон сестры agent/last_order/).
 
 ### Проверки
 uv run pytest; uv run python tools/check.py; docker compose up -d; 30-мин прогон.
+
+## Результат · 2026-10-22 · раунд 1 (закрытие C-1: стенд на HEAD после падения хоста)
+
+Утренний прогон (до падения хоста, ~09:00–11:00 UTC) дал 19 сессий, 4 записи летописи и цели сети,
+но оборвался на двух дефектах: 401 «No api key passed in» (префикс провайдера в `--model`, фикс
+9834699) и зависший в D-state ребёнок (фикс ec01fe8). Ниже — прогон на HEAD (образ пересобран
+`stand_up.sh` → `docker compose up -d --build`), 14:59–15:11 UTC, все выводы — с контейнеров.
+
+### Критерий 5: прогон с T-027
+Три подачи через MCP узла (`docker exec -i lastorder-node-1-1 python - < stand_proposals.py`,
+ключ узла из 0400-файла раннера): `p-0018` knowledge, `p-0019` knowledge, `p-0020` skill — все
+`"status": "pending"`. Будильник проснулся на пачке, агент решил все три (`decision.by: last_order`,
+15:10:03–04):
+- p-0018 accept=true — «ночной стон бьёт нас спасмерть с трёх ударов…» → k-0014;
+- p-0019 accept=true — «жареную свинину можно готовить из сырой свинины и угля» → k-0015;
+- p-0020 accept=false — «скрипт — заглушка: прогони проверку глубины на берегу и пришли то, что
+  реально сработало» (критерий decide: заглушка не принимается).
+Летопись: запись 15:10:35 описывает решения и счёт смертей (`tail -2 base/chronicle.md` приведён
+в репо-объёме). Цели: обновлены в первой сессии дня (10:00:38, «Цели обновлены: разведка
+восточного берега (оператор), осторожность у воды»); текущий `base/goals.md`:
+`- text: провести разведку берега к востоку от спавна / why: 'оператор: карта почти пуста'` и
+цель про воду; сессии продолжения цели не меняли (в летописи указана причина).
+Сессии за прогон на HEAD: 4, все `session.done code 0` — 14:59:42 (timer+death 00063),
+15:02:10 (deaths 00064-66), 15:06:11 (operator), 15:07:47 (death 00069; в ней же решены
+предложения). Итого в `events.jsonl` за день 23 `session.start` (включая утро); все 4 источника
+будильника живьём: death/operator/proposals/timer.
+Стоимость (P1-4, отдельный ключ): `dev/gateway_report.py --since 8h` →
+`last-order-10221646 $0.02060`; ключ выпущен в 14:46 UTC (`gateway_keys.py issue --alias
+last-order-$(date +%m%d%H%M) --rpm 30 --hourly-usd 0.15`), т.е. вся сумма — 4 сессии HEAD-прогона.
+По моделям за окно: `openrouter/z-ai/glm-5.3-flash $0.02846` (включая утренние сессии), всего
+`$0.03981`. Модель — smart-уровень через шлюз (`session.done`… `z-ai/glm-5.3-flash`).
+
+### P1-1: изоляция сети svc-lo
+`docker exec lastorder-last-order-1 python -c …create_connection…`:
+`mc-server:25575 gaierror: [Errno -3] Temporary failure in name resolution`;
+`mc-server:25565 gaierror …`; контроль: `hive:8000 CONNECTED`, `llm-gateway:4000 CONNECTED`.
+RCON и слоты недостижимы.
+
+### P1-2: файлы оператора и uid
+Владение (`ls -ln /workplace/`): `GOALS.md`, `INBOX.md`, `PERSONA.md`, `AGENTS.md`,
+`SESSION_PROMPT.md`, `opencode.json` — uid 0, `-r--r--r--`; `memory/` — 1001:1001, 0777.
+Записи от uid агента (`docker exec -u 1001:1001 … sh -c 'echo x >> …'`):
+`cannot create /workplace/GOALS.md: Permission denied` (то же INBOX.md, PERSONA.md);
+`memory-write-ok`. Правка оператора будит: `printf … >> /workplace/INBOX.md` от root (путь
+оператора — `docker compose exec last-order` как root; bind-mount не заводился) →
+`15:06:11 session.start reasons: [{"kind": "operator", "detail": "INBOX.md"}]` →
+`15:07:17 session.done code 0`. Собственные записи агента не будят: дайджест берётся только
+с операторских файлов (тест `test_admin_wake.py`).
+
+### P1-4: ключ шлюза LO
+`stand_up.sh` выпускает `GATEWAY_KEY_LO` отдельным ключом: `gateway_keys.py list` →
+`last-order-10221646 0.0049 30 0.15` (rpm 30, потолок $0.15/ч). Расход отделим от hive:
+в отчёте по ключам строка LO своя (выше), у hive — своя.
+
+### Ключей провайдера в контейнере LO нет
+Имена env контейнера: только `ADMIN_*, GATEWAY_NODE_KEY, GATEWAY_URL, HIVE_MCP_LO_KEY, …` —
+нет `OPENROUTER_API_KEY`/`ZAI_API_KEY`. Внимание: pid 1 — это tini, он хранит исходный env
+контейнера (включая `GATEWAY_NODE_KEY`, виртуальный ключ шлюза, не провайдерский); сам процесс
+администратора (`pid 7 python -m runtime.hive.admin`) после scrub энтрипоинта содержит 0
+переменных `GATEWAY_NODE_KEY|ZAI_API_KEY|OPENROUTER_API_KEY` (проверено по `/proc/7/environ`).
+Ключ лежит: `/home/sister/.local/share/opencode/auth.json` 1001:1001 600 (своё кредо агента,
+разрешено ADR-033) и `/run/node/secrets/gateway_node_key` root 0400 — uid 1001 туда
+`agent-blocked-from-root-secret`. `knowledge` у LO смонтирован `:ro` (compose), запись —
+только через MCP.
+
+### Прочее из плана
+P1-3: ядро root-owned (см. ls выше), переписывается из образа на каждом старте; откат подмены и
+нетронутость `memory/` — тесты `test_admin_wake.py`. P1-5: раскладка — `HiveLayout` (константы
+`base/proposals/p-*.json`, `nodes/*/will.md`, статус из содержимого) — тесты там же. P1-6: новых
+видов вызовов LLM нет, кроме сессии smart; пауза 30 с между сессиями живьём (15:07:17→15:07:47).
+P1-7: `agent/network/AGENTS.md` перечисляет доступное (MCP propose/decide/set_goals/chronicle/
+send) и прямо запрещает писать базу руками.
+
+### Проверки
+`bash <root>/dev/check.sh` (в worktree): `pytest: ok · 672 passed, 2 skipped in 53.66s`;
+`check.py: ok · Every workplace is intact…`. `docker compose -f docker/compose.yml up -d` —
+стенд поднят, все сервисы healthy (вывод выше по ходу раунда). Стенд после проб остановлен
+(`docker compose stop`, тома сохранены: knowledge, hive-work с events.jsonl и state.json).
