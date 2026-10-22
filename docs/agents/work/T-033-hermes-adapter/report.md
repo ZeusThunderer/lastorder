@@ -144,3 +144,77 @@ of the ask — a one-line question gets a one-line answer…») НЕ встав�
 Из рабочего места в контекст грузится `AGENTS.md` (перекрывающих файлов в шаблоне нет — тест);
 плюс описания инструментов (read_file/write_file/patch/search_files/terminal/process_manage и
 MCP). Полные тексты — в `docs/agents/harness-spike.md`, раздел Hermes.
+
+## Раунд 2 · 2026-10-22
+Коммиты: 8547a03 · d35fe66 · 4f2e709 (take) · 1ba9120 (merge main) · 4df4198 · a51c375 · этот
+
+### Ответ на ревью (раунд 1)
+- R1-1 · fixed 8547a03: `workplace.drop_hermes_config` перерендеривает `config.yaml` (root 0444)
+  перед КАЖДОЙ life-сессией — вызывает `HermesAdapter.life_turn` (адаптеру добавлены
+  `body_base`/`hive_url`/`node_key`, регистрация в `__main__.py`); will-режим меняет только URL
+  (хирургия через 0o644→write→0o444), `will_session` конфиг не трогает. Тест
+  `test_hermes_life_turn_re_renders_the_real_hive_for_the_next_generation`: 3 поколения,
+  2 will-цикла, у второго и третьего поколений hive = `hive_mcp_url(hive_url)`. Цикл проверен
+  и в контейнере (реальный код раннера): start `http://hive:8000/node/mcp` → will
+  `http://127.0.0.1:8702/mcp` (после хирургии root:root · 444) → next gen снова hive,
+  после ререндера root:root · 444.
+- R1-2 · fixed d35fe66 с верифицированным отклонением: `config.yaml`/`SOUL.md` — root 0444
+  (правка на месте сестрой запрещена — проверено в контейнере), но сам каталог НЕ может быть
+  root-owned sticky 1777: detached-gateway апстрима требует владельца-гейтвей-юзера и запрещает
+  запись другим. Живой вывод (root-owned home, 0 вызовов LLM):
+  `{"type":"result","exit_code":1,…,"error":"Gateway inaccessible: unsafe_control_path
+  (/home/sister/.hermes is owned by uid 0, expected uid 1001 (gateway user); chown it to the
+  gateway user)"}` (обе попытки, tokens input 0). Реализована альтернатива, которую ревью
+  заранее допустило: дом сестры 0700 + root 0444 файлы + перерендер на сессию (подмена самого
+  `config.yaml` не переживает следующей life-сессии; снос всего дома не лечится — оговорено
+  в C-3). Entrypoint: общий `chown -R` перенесён ДО рендера дома, иначе он отдавал конфиг
+  сестре. Тест `test_hermes_home_config_is_runner_owned` + контейнерные пробы ниже.
+- R1-3 · fixed 8547a03: лишний `_chmod(HERMES_HOME, 0o700)` в will-режиме убран.
+
+### Контейнерные проверки (образ `ai-char-node:hermes`, final HEAD a51c375)
+- Раскладка (без ключа): `/home/sister/.hermes · sister:sister · 700`,
+  `config.yaml · root:root · 444`, `SOUL.md · root:root · 444`.
+- Сестра: `echo x >> config.yaml` → Permission denied; `chmod 666` → Operation not permitted;
+  свой state (`state.db`, `sessions/`) растёт (sister:sister). Root-дом (первая попытка
+  sticky-плана): append/rm/mv/chmod/replace — все Operation not permitted, но шлюз не стартует
+  (вывод выше), поэтому план отвергнут.
+- С ключом: `hermes doctor` — только косметика («Missing ~/.local/bin/hermes symlink»);
+  md5 config.yaml до/после сессии одинаков (6c91175b…): Hermes конфиг не трогает, миграций нет.
+- Oneshot «ответь одним словом»: `{"type":"result","session_id":"local-7627…","exit_code":0,
+  "text":"Blue","tokens":{"input":4688,"output":32}}` — 1 вызов LLM (после правки раскладки;
+  упавшие пробы root-дома — 0 вызовов).
+
+### Проверки
+```
+$ bash dev/check.sh        # после a51c375
+pytest: ok · 663 passed, 2 skipped in 45.02s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+$ docker build -f docker/node/Dockerfile -t ai-char-node:hermes .   # сам, 3 раза за раунд,
+# последний — на a51c375: DONE (все слои #1..#24 DONE, без ERROR)
+```
+Секреты: grep префикса ключа по worktree — clean. Квота за раунд: 1 model-вызов ≈ 1,1 кредита
+(Flash-формула), упавшие пробы — 0 вызовов. Не прогонялось: стенд с живым hive/body MCP и
+настоящий 429 (как в раунде 1) — T-034.
+
+### Отклонения от задачи
+- HERMES_HOME принадлежит сестре (0700), а не root sticky 1777 — жёсткое требование шлюза
+  апстрима (доказательство выше); файлы конфига всё равно root 0444. Ревью эту альтернативу
+  допускало явно.
+
+### Вне задачи
+- BOARD.md пришёл merge'ом main (1ba9120), больше ничего.
+
+### Вызовы надзора
+- 2026-10-22 · result · 664043c · VERDICT: changes · cost_usd: 0.7482728.
+
+### Самопроверка
+Раундов `lo-checker`: 2 · итог **CHECK: findings**. Находки:
+- C-1 · fixed (этот коммит): раунд 2 дописан — ответы на R1-1..R1-3, выводы docker build,
+  контейнерных проб и unsafe_control_path выше.
+- C-2 · fixed (этот коммит): `status: review` коммитом сдачи.
+- C-3 · fixed a51c375: формулировки в workplace.py/harness-spike.md/entrypoint.sh сужены до
+  «лечится подмена/удаление самого config.yaml»; снос всего HERMES_HOME — только рестарт
+  контейнера (mkdir под root, шлюз откажет, .env не восстановится).
+- C-4 · оставлено: merge-коммит 1ba9120 — шаг 3 lo-take (`git merge main`), префикс/трейлер
+  туда git не вставляет; историю ветки после ревью не переписываю. Все прочие коммиты раунда
+  несут префикс T-033 и `Agent: zcode`, дальше — тоже.
