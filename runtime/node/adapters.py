@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
+from runtime.node.workplace import HERMES_HOME
+
 
 @dataclass(frozen=True)
 class Command:
@@ -170,7 +172,7 @@ HERMES_TOOLSETS = ("file", "terminal")
 class HermesAdapter:
     name = "hermes"
 
-    def __init__(self, model: str, home: str = "/home/sister/.hermes"):
+    def __init__(self, model: str, home: str = str(HERMES_HOME)):
         self._model = model
         self._home = home
         # One scratch file, overwritten per turn: the runner never runs two sessions
