@@ -48,7 +48,45 @@ if [ -n "${GATEWAY_NODE_KEY:-}" ]; then
 else
   log "no gateway node key: the opencode harness (and failover) will only wait"
 fi
+
+# The sister's whole home is hers — except what 2b renders next: HERMES_HOME's
+# config.yaml and SOUL.md stay root's 0444 (review R1-2), so this blanket chown
+# must run BEFORE the hermes render, not after it.
 chown -R "${SISTER_UID}:${SISTER_GID}" "$SISTER_HOME"
+
+# 2b. HERMES_HOME (tmpfs): config.yaml + the neutral SOUL.md via
+#     workplace.drop_hermes_home, plus .env with the Z.ai coding key + base URL —
+#     exactly the two env names Hermes's zai provider reads. drop_hermes_home
+#     stamps the final ownership itself: the dir is the sister's 0700 (the gateway
+#     refuses a root-owned or writable-by-others home — verified in the container),
+#     while config.yaml/SOUL.md stay root 0444 (the harness config is the runner's,
+#     R1-2; a replaced config.yaml file is re-rendered before the next life
+#     session), only .env is hers at 0600. The key rides the helper's environment,
+#     never argv:
+#     /proc/<pid>/cmdline is world-readable, /proc/<pid>/environ is not. Rendered
+#     even without the key (config-only), so the harness still fails cleanly
+#     instead of scaffold-failing on a dead home.
+[ -n "${ZAI_API_KEY:-}" ] || log "no Z.ai key: HARNESS=hermes (like zcode) would only wait"
+HERMES_KEY="${ZAI_API_KEY:-}" \
+HERMES_MODEL="${HERMES_MODEL:-${ZCODE_MODEL:-GLM-5.3-Flash}}" \
+HERMES_NODE_MCP_KEY="$(cat "$SECRET_DIR/node_mcp_key" 2>/dev/null || printf '%s' "${HIVE_NODE_KEY:-}")" \
+BODY_BASE="${BODY_BASE:-http://body-1:8700}" HIVE_URL="${HIVE_URL:-http://hive:8000}" \
+SISTER_UID="$SISTER_UID" SISTER_GID="$SISTER_GID" \
+  /app/.venv/bin/python -c '
+import os
+from pathlib import Path
+from runtime.node.workplace import drop_hermes_home
+drop_hermes_home(
+    Path("/home/sister/.hermes"),
+    model=os.environ["HERMES_MODEL"],
+    body_base=os.environ["BODY_BASE"],
+    hive_url=os.environ["HIVE_URL"],
+    node_key=os.environ["HERMES_NODE_MCP_KEY"],
+    glm_key=os.environ["HERMES_KEY"],
+    uid=int(os.environ["SISTER_UID"]),
+    gid=int(os.environ["SISTER_GID"]),
+)
+' || log "hermes home render failed: the hermes harness will not run"
 
 # 3. Nothing secret may ride further: not into the runner's /proc/environ (execve
 #    rebuilds it from what is left), not into any child the runner spawns.

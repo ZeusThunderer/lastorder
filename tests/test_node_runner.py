@@ -17,6 +17,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import yaml
 
 from runtime.config import CHARACTER_DIR, REPO_ROOT
 from runtime.hive.client import HiveRejected, HiveUnavailable
@@ -24,7 +25,14 @@ from runtime.knowledge.schema import Will
 from runtime.lastorder.naming import preset
 from runtime.lastorder.persona import PersonaProvider
 from runtime.lastorder.traits import Traits, load_quirks
-from runtime.node.adapters import Command, OpenCodeAdapter, ZCodeAdapter, quota_exhausted
+from runtime.node.adapters import (
+    CONTINUE_MESSAGE,
+    Command,
+    HermesAdapter,
+    OpenCodeAdapter,
+    ZCodeAdapter,
+    quota_exhausted,
+)
 from runtime.node.config import NodeConfig
 from runtime.node.runner import NodeRunner
 from runtime.node.willproxy import WillProxy
@@ -53,6 +61,7 @@ def make_cfg(tmp_path: Path, **over) -> NodeConfig:
         gateway_key="gk-node",
         zcode_model="GLM-5.3-Flash",
         opencode_model="openrouter/qwen/qwen3.7-flash",
+        hermes_model="GLM-5.3-Flash",
         naming="lab",
         will_timeout_s=0.2,
         poll_s=0.05,
@@ -628,6 +637,57 @@ def test_zcode_adapter_commands_and_session_id() -> None:
     assert "--continue" in cont.argv
 
 
+def _hermes_adapter(home: Path) -> HermesAdapter:
+    return HermesAdapter(
+        "GLM-5.3-Flash",
+        body_base="http://body-1:8700",
+        hive_url="http://hive:8000",
+        node_key="sk-node-one",
+        home=str(home),
+    )
+
+
+def test_hermes_adapter_commands_and_session_id(tmp_path: Path) -> None:
+    adapter = _hermes_adapter(tmp_path / ".hermes")
+    first = adapter.life_turn("Life session.\n\nlong prompt", None)
+    assert first.argv[:4] == ("hermes", "chat", "--query-file", first.argv[3])
+    query = Path(first.argv[3])
+    assert query.read_text(encoding="utf-8") == "Life session.\n\nlong prompt"
+    tail = first.argv[4:]
+    assert tail == ("--oneshot", "--format", "stream-json", "--yolo", "--toolsets", "file,terminal")
+    assert first.env == {"HERMES_HOME": str(tmp_path / ".hermes")}
+    # the prompt rides the file, never argv
+    assert "Life session." not in first.argv
+    resume = adapter.life_turn("p", "20261022_120000_a1b2c3")
+    assert resume.argv[first.argv.index("--query-file") + 2 :] == tail + ("--resume", "20261022_120000_a1b2c3")
+    assert query.read_text(encoding="utf-8") == CONTINUE_MESSAGE  # the nudge, not the whole prompt again
+    will = adapter.will_session("Will session (you have just died).")
+    assert "--resume" not in will.argv
+    assert query.read_text(encoding="utf-8").startswith("Will session")
+    stream = (
+        '{"type":"system","subtype":"init","model":"glm-5.3-flash","session_id":""}\n'
+        '{"type":"text","text":"…"}\n'
+        '{"type":"result","session_id":"20261022_120101_d4e5f6","exit_code":0,"text":"ok"}\n'
+    )
+    assert adapter.session_id(stream) == "20261022_120101_d4e5f6"  # init's empty id must not win
+    assert adapter.session_id("no json at all") is None
+
+
+def test_hermes_quota_marks_on_the_sampled_stream() -> None:
+    """The 429 sample is the stream-json envelope hermes prints when a provider call
+    fails (live-captured in the dry run against a 404 probe, the status/body swapped
+    for the documented Z.ai 429/1302 wording — a provoked 429 never fired: four
+    parallel sessions were all served). No key material inside."""
+    sample = (REPO_ROOT / "tests" / "fixtures" / "hermes-stream-429.jsonl").read_text(encoding="utf-8")
+    assert quota_exhausted(sample)
+    # the same envelope with a neutral error is not a quota mark
+    ok_sample = (
+        sample.replace("429", "503").replace("1302", "1310")
+        .replace("rate limit exceeded, quota exhausted", "try again much later")
+    )
+    assert not quota_exhausted(ok_sample)
+
+
 def test_quota_marks_are_narrow() -> None:
     assert quota_exhausted("HTTP 429 from api.z.ai")
     assert quota_exhausted("error code: 1302")
@@ -664,6 +724,251 @@ def test_config_validation(monkeypatch) -> None:
     monkeypatch.setenv("QUOTA_ACTION", "switch")
     with pytest.raises(ValueError, match="QUOTA_ACTION"):
         NodeConfig.from_env()
+
+
+def test_config_accepts_hermes_and_derives_its_model(monkeypatch) -> None:
+    for name in ("HARNESS", "HARNESS_FAILOVER", "QUOTA_ACTION", "HERMES_MODEL", "ZCODE_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("NODE_SLOT", "LastOrder01")
+    monkeypatch.setenv("HARNESS", "hermes")
+    monkeypatch.setenv("ZCODE_MODEL", "GLM-5.3")
+    cfg = NodeConfig.from_env()
+    assert cfg.harness == "hermes" and cfg.hermes_model == "GLM-5.3"  # HERMES_MODEL defaults to ZCODE_MODEL
+    monkeypatch.setenv("HARNESS", "zcode")
+    monkeypatch.setenv("HARNESS_FAILOVER", "hermes")  # hermes is a legal failover target too
+    cfg = NodeConfig.from_env()
+    assert cfg.failover == "hermes"
+
+
+# --- hermes workplace/home ----------------------------------------------------------------------
+
+
+def test_render_hermes_config() -> None:
+    config = workplace.render_hermes_config("GLM-5.3-Flash", "http://body-1:8700/", "http://hive:8000", "sk-node-one")
+    assert config["_config_version"] == 51
+    assert config["model"] == {"default": "glm-5.3-flash", "provider": "zai"}
+    zcode = workplace.render_zcode_config("http://body-1:8700/", "http://hive:8000", "sk-node-one")
+    assert config["mcp_servers"]["body"]["url"] == zcode["mcp"]["servers"]["body"]["url"]
+    assert config["mcp_servers"]["hive"]["url"] == zcode["mcp"]["servers"]["hive"]["url"]
+    assert config["mcp_servers"]["hive"]["headers"] == {"X-Node-Key": "sk-node-one"}
+    assert config["memory"] == {"memory_enabled": False, "user_profile_enabled": False, "nudge_interval": 0}
+    assert config["skills"]["creation_nudge_interval"] == 0
+    assert config["updates"]["check"] is False
+    assert config["auxiliary"]["background_review"]["enabled"] is False
+    assert config["platform_toolsets"] == {"cli": ["file", "terminal"]}
+    # no key material in the file: the Z.ai key rides HERMES_HOME/.env, not the config
+    text = yaml.safe_dump(config)
+    assert "GLM_API_KEY" not in text and "zai-token" not in text
+
+
+def test_drop_hermes_home_layout(tmp_path: Path) -> None:
+    home = tmp_path / ".hermes"
+    workplace.drop_hermes_home(
+        home,
+        model="GLM-5.3-Flash",
+        body_base="http://body-1:8700",
+        hive_url="http://hive:8000/",
+        node_key="sk-node-one",
+        glm_key="zai-token",
+    )
+    config = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+    assert config["model"]["provider"] == "zai"
+    assert config["mcp_servers"]["hive"]["url"] == "http://hive:8000/node/mcp"
+    soul = (home / "SOUL.md").read_text(encoding="utf-8")
+    assert "AGENTS.md" in soul and "PERSONA.md" in soul  # non-empty: the identity slot is taken
+    env_text = (home / ".env").read_text(encoding="utf-8")
+    assert "GLM_API_KEY=zai-token" in env_text
+    assert f"GLM_BASE_URL={workplace.HERMES_GLM_BASE_URL}" in env_text
+    if os.name == "posix":  # 0600: the Windows readonly bit cannot express it
+        assert stat.S_IMODE((home / ".env").stat().st_mode) & 0o777 == 0o600
+
+
+def test_drop_hermes_home_without_key_leaves_no_env(tmp_path: Path) -> None:
+    home = tmp_path / ".hermes"
+    workplace.drop_hermes_home(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    assert (home / "config.yaml").exists() and not (home / ".env").exists()
+
+
+def test_workplace_template_has_no_files_that_override_agents_md() -> None:
+    """Hermes reads AGENTS.md of the workplace, but .hermes.md/HERMES.md (and
+    CLAUDE.md/.cursorrules) would take precedence — none may exist in the template."""
+    overrides = {".hermes.md", "HERMES.md", "CLAUDE.md", ".cursorrules"}
+    found = [p.name for p in CHARACTER_DIR.rglob("*") if p.name in overrides]
+    assert found == []
+
+
+def test_hermes_will_mode_points_the_config_at_the_proxy(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / ".hermes"
+    workplace.drop_hermes_home(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    monkeypatch.setattr(workplace, "HERMES_HOME", home)
+    workplace.set_will_mode(tmp_path, "hermes", "http://127.0.0.1:8702")
+    config = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+    assert config["mcp_servers"]["hive"]["url"] == "http://127.0.0.1:8702/mcp"
+    assert config["mcp_servers"]["body"]["url"] == "http://body-1:8700/mcp"  # the body stays direct
+    assert stat.S_IMODE((home / "config.yaml").stat().st_mode) & 0o777 == 0o444  # still the runner's
+
+
+def test_hermes_will_mode_re_renders_over_a_substituted_config(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """R2-2: HERMES_HOME is the sister's (0700) — at will time the config.yaml NAME
+    can be her substitution (memory back on, an extra MCP server, another model).
+    set_will_mode must not read-and-patch that file: it re-renders the whole config
+    from the last drop's params, with only the hive entry at the will proxy."""
+    home = tmp_path / ".hermes"
+    workplace.drop_hermes_home(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    monkeypatch.setattr(workplace, "HERMES_HOME", home)
+    # the sister replaces the runner's file with her own (she owns the directory)
+    config_path = home / "config.yaml"
+    os.chmod(config_path, 0o644)  # test-host loosening: unlink of 0444 on Windows
+    config_path.unlink()
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "model": {"default": "glm-5.3", "provider": "zai"},
+                "mcp_servers": {
+                    "hive": {"url": "http://hive:8000/node/mcp"},
+                    "evil": {"url": "http://sister:9/mcp"},
+                },
+                "memory": {"memory_enabled": True, "user_profile_enabled": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    workplace.set_will_mode(tmp_path, "hermes", "http://127.0.0.1:8702")
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert config["mcp_servers"]["hive"]["url"] == "http://127.0.0.1:8702/mcp"
+    assert set(config["mcp_servers"]) == {"body", "hive"}  # her extra MCP is gone
+    assert config["memory"]["memory_enabled"] is False  # and so is her memory
+    assert config["model"] == {"default": "glm-5.3-flash", "provider": "zai"}
+    assert config["mcp_servers"]["body"]["url"] == "http://body-1:8700/mcp"
+    assert stat.S_IMODE(config_path.stat().st_mode) & 0o777 == 0o444  # the runner's again
+
+
+def test_hermes_will_mode_without_a_prior_render_leaves_the_config_alone(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """R2-2 degraded tail: a runner restart between the last life render and the
+    will empties the render cache. Nothing is written then — the will session runs
+    unmarked, the real hive refuses an unmarked submit_will and the emergency will
+    covers it; a render from stale guesses would be worse than none."""
+    home = tmp_path / ".hermes"
+    workplace.drop_hermes_home(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    monkeypatch.setattr(workplace, "HERMES_HOME", home)
+    monkeypatch.setattr(workplace, "_HERMES_RENDER", {})
+    before = (home / "config.yaml").read_text(encoding="utf-8")
+    workplace.set_will_mode(tmp_path, "hermes", "http://127.0.0.1:8702")
+    assert (home / "config.yaml").read_text(encoding="utf-8") == before
+
+
+@pytest.mark.skipif(os.name != "posix", reason="planted symlinks and their modes are a POSIX attack")
+def test_drop_hermes_config_never_follows_planted_symlinks(tmp_path: Path) -> None:
+    """R2-1: HERMES_HOME is the sister's (0700) — she can unlink the runner's names
+    there and plant symlinks. The drop must neither chmod nor write through them:
+    both planted config.yaml and config.yaml.runner-tmp point at a 0600 secret;
+    after the drop the secret keeps its mode and content, and config.yaml is a
+    regular file with the fresh render."""
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    secret = tmp_path / "runner_key"
+    secret.write_text("RUNNER-SECRET", encoding="utf-8")
+    os.chmod(secret, 0o600)
+    os.symlink(secret, home / "config.yaml")
+    os.symlink(secret, home / "config.yaml.runner-tmp")
+    workplace.drop_hermes_config(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    assert stat.S_IMODE(secret.stat().st_mode) & 0o777 == 0o600  # never chmod'd
+    assert secret.read_text(encoding="utf-8") == "RUNNER-SECRET"  # never written
+    config_path = home / "config.yaml"
+    assert not config_path.is_symlink() and config_path.is_file()
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert config["model"]["provider"] == "zai"
+    assert stat.S_IMODE(config_path.stat().st_mode) & 0o777 == 0o444
+    assert not (home / "config.yaml.runner-tmp").exists()  # landed, not left behind
+
+
+def test_hermes_life_turn_re_renders_the_real_hive_for_the_next_generation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """R1-1: one HERMES_HOME serves every generation of the slot and the nodes change
+    without a container restart. The will session of a generation points the config at
+    the will proxy; the NEXT generation's life session must re-render the real hive
+    URL before hermes starts, or it lives its whole life on the stopped proxy."""
+    home = tmp_path / ".hermes"
+    workplace.drop_hermes_home(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    adapter = _hermes_adapter(home)
+    monkeypatch.setattr(workplace, "HERMES_HOME", home)
+
+    def hive_url_of_config() -> str:
+        config = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+        return config["mcp_servers"]["hive"]["url"]
+
+    # generation 1: a life session on the real hive, then the will session rewires
+    adapter.life_turn("generation 1 life", None)
+    assert hive_url_of_config() == workplace.hive_mcp_url("http://hive:8000")
+    workplace.set_will_mode(tmp_path, "hermes", "http://127.0.0.1:8702")
+    adapter.will_session("generation 1 will")  # must NOT clobber the proxy URL
+    assert hive_url_of_config() == "http://127.0.0.1:8702/mcp"
+
+    # generation 2: same container, same HERMES_HOME, the will proxy is long dead
+    adapter.life_turn("generation 2 life", None)
+    assert hive_url_of_config() == workplace.hive_mcp_url("http://hive:8000")
+    config = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+    assert config["mcp_servers"]["body"]["url"] == "http://body-1:8700/mcp"
+    assert config["model"] == {"default": "glm-5.3-flash", "provider": "zai"}  # a full re-render
+
+    # and the cycle repeats: a second will does not leak into a third generation
+    workplace.set_will_mode(tmp_path, "hermes", "http://127.0.0.1:8703")
+    adapter.life_turn("generation 3 life", None)
+    assert hive_url_of_config() == workplace.hive_mcp_url("http://hive:8000")
+
+
+def test_hermes_home_config_is_runner_owned(tmp_path: Path) -> None:
+    """R1-2: config.yaml and SOUL.md are the runner's, not the sister's — 0444 with
+    no write bit anywhere, so she cannot edit them in place. The DIRECTORY is hers
+    0700: the detached gateway refuses any other owner ("unsafe_control_path",
+    verified in the container round 2) — the workplace's sticky-root plan cannot
+    apply, and a delete/replace is instead healed by the adapter's per-life
+    re-render (R1-1). Her .env stays her own 0600."""
+    home = tmp_path / ".hermes"
+    workplace.drop_hermes_home(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+        glm_key="zai-token", uid=1001, gid=1001,
+    )
+    for name in ("config.yaml", "SOUL.md"):
+        assert stat.S_IMODE((home / name).stat().st_mode) & 0o777 == 0o444
+    if os.name == "posix":  # the uid side needs a POSIX host
+        assert stat.S_IMODE(home.stat().st_mode) & 0o7777 == 0o700  # the gateway's demand
+        if hasattr(os, "geteuid") and os.geteuid() == 0:  # full plan: root renders, sister uses
+            assert home.stat().st_uid == 1001
+            assert (home / "config.yaml").stat().st_uid == 0
+            assert (home / "SOUL.md").stat().st_uid == 0
+            assert (home / ".env").stat().st_uid == 1001
+        assert stat.S_IMODE((home / ".env").stat().st_mode) & 0o777 == 0o600
+    # the per-life re-render keeps the protection (R1-1's path must not loosen it)
+    workplace.drop_hermes_config(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    assert stat.S_IMODE((home / "config.yaml").stat().st_mode) & 0o777 == 0o444
 
 
 def staged_markdown(serial: int) -> str:

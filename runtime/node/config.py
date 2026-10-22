@@ -15,7 +15,7 @@ from pathlib import Path
 
 from runtime.config import CHARACTER_DIR, REPO_ROOT, env
 
-HARNESSES = ("opencode", "zcode")
+HARNESSES = ("opencode", "zcode", "hermes")
 QUOTA_ACTIONS = ("wait", "switch")
 
 
@@ -59,6 +59,7 @@ class NodeConfig:
     gateway_key: str  # the node's virtual gateway key (opencode auth, entrypoint-rendered)
     zcode_model: str
     opencode_model: str
+    hermes_model: str
     naming: str
     will_timeout_s: float  # a COLD will session (fresh context, files, submit_will) is slower than the spike's warm 2.5 min
     poll_s: float  # /runner/status poll while a session runs
@@ -107,6 +108,7 @@ class NodeConfig:
         posix_uid = env("SISTER_UID", default="") or ""
         uid = int(posix_uid) if posix_uid.isdigit() else None
         gid = int(env("SISTER_GID", default=posix_uid) or 0) if uid is not None else None
+        zcode_model = env("ZCODE_MODEL", default="GLM-5.3-Flash") or "GLM-5.3-Flash"
         return cls(
             slot=slot,
             body_base=env("BODY_BASE", default="http://body-1:8700") or "http://body-1:8700",
@@ -122,11 +124,15 @@ class NodeConfig:
             zai_key=zai_key,
             gateway_url=env("GATEWAY_URL", default="http://llm-gateway:4000") or "",
             gateway_key=gateway_key,
-            zcode_model=env("ZCODE_MODEL", default="GLM-5.3-Flash") or "GLM-5.3-Flash",
+            zcode_model=zcode_model,
             opencode_model=(
                 env("OPENCODE_MODEL", default="openrouter/qwen/qwen3.7-flash")
                 or "openrouter/qwen/qwen3.7-flash"
             ),
+            # HERMES_MODEL rides the same Z.ai plan as zcode, so its default IS
+            # ZCODE_MODEL (compose passes only ZCODE_MODEL; HERMES_MODEL is the
+            # per-harness override for the spike without a compose change).
+            hermes_model=env("HERMES_MODEL", default=zcode_model) or zcode_model,
             naming=env("NODE_NAMING_PRESET", default="lab") or "lab",
             will_timeout_s=_float("WILL_TIMEOUT_S", 600.0),
             poll_s=_float("MIND_POLL_S", 2.0),
