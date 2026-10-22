@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
-from runtime.node.workplace import HERMES_HOME
+from runtime.node.workplace import HERMES_HOME, drop_hermes_config
 
 
 @dataclass(frozen=True)
@@ -159,21 +159,34 @@ class ZCodeAdapter:
 
 
 # Hermes Agent (NousResearch, MIT) — the third node harness (ADR-032), on the Z.ai
-# GLM Coding Plan like zcode. Everything static lives in HERMES_HOME (rendered by the
-# entrypoint): config.yaml (provider `zai`, both MCP servers, toolsets), .env with
-# GLM_API_KEY/GLM_BASE_URL. The adapter only drives the headless CLI: one oneshot
-# `hermes chat` per session intent, the prompt as a file (never through a shell or
-# argv — the SESSION_PROMPT is kilobytes), stream-json on stdout for the session id
-# and the quota marks. Toolsets are pinned here AND in config.yaml: the CLI flag is
-# the per-run surface, the config is what any other Hermes entry would see.
+# GLM Coding Plan like zcode. Everything static lives in HERMES_HOME: config.yaml
+# (provider `zai`, both MCP servers, toolsets; laid out by the entrypoint and
+# RE-RENDERED by the adapter before every life session — review R1-1, the
+# generations of a slot share the one home) and .env with GLM_API_KEY/GLM_BASE_URL.
+# The adapter only drives the headless CLI: one oneshot `hermes chat` per session
+# intent, the prompt as a file (never through a shell or argv — the SESSION_PROMPT
+# is kilobytes), stream-json on stdout for the session id and the quota marks.
+# Toolsets are pinned here AND in config.yaml: the CLI flag is the per-run surface,
+# the config is what any other Hermes entry would see.
 HERMES_TOOLSETS = ("file", "terminal")
 
 
 class HermesAdapter:
     name = "hermes"
 
-    def __init__(self, model: str, home: str = str(HERMES_HOME)):
+    def __init__(
+        self,
+        model: str,
+        *,
+        body_base: str,
+        hive_url: str,
+        node_key: str,
+        home: str = str(HERMES_HOME),
+    ):
         self._model = model
+        self._body_base = body_base
+        self._hive_url = hive_url
+        self._node_key = node_key
         self._home = home
         # One scratch file, overwritten per turn: the runner never runs two sessions
         # at once, and a crash-loop must not litter the tmpfs with prompts.
@@ -195,6 +208,17 @@ class HermesAdapter:
         return Command(argv, env={"HERMES_HOME": self._home})
 
     def life_turn(self, prompt: str, session_id: str | None) -> Command:
+        # R1-1: one HERMES_HOME serves every generation of the slot and the nodes
+        # change without a container restart — the will session of the previous
+        # generation left the proxy URL in the config, so re-assert the real hive
+        # here, right before hermes starts.
+        drop_hermes_config(
+            Path(self._home),
+            model=self._model,
+            body_base=self._body_base,
+            hive_url=self._hive_url,
+            node_key=self._node_key,
+        )
         # A resume carries only the continuation nudge: the session history is in
         # Hermes's state (HERMES_HOME/sessions), the context rebuilds from the
         # workplace files on a fresh first prompt — same contract as zcode.
@@ -203,6 +227,8 @@ class HermesAdapter:
         return self._command(CONTINUE_MESSAGE, session_id)
 
     def will_session(self, prompt: str) -> Command:
+        # No config render here: the runner's set_will_mode has just pointed the
+        # hive MCP at the will proxy, and a render would clobber it (R1-1).
         return self._command(prompt, None)  # a fresh session, like the other two
 
     def session_id(self, output: str) -> str | None:

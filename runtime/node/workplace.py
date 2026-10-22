@@ -183,9 +183,12 @@ def render_opencode_config(
 # Hermes Agent (ADR-032 third harness) keeps its home on the sister's tmpfs, NOT in
 # the workplace: state.db, sessions and the .env with the Z.ai key are per-container
 # runtime state, while the workplace is the persona that gets archived read-only.
-# Rendered once per container start by the entrypoint (drop_hermes_home); the node
-# MCP key inside config.yaml is the agent's own identity, same rule as zcode.json
-# (ADR-033: keys are names inside the network).
+# The entrypoint lays the home out once per container (drop_hermes_home); the
+# adapter then re-renders config.yaml before EVERY life session (drop_hermes_config,
+# review R1-1) — one home serves all generations of the slot, and the will session
+# of the previous generation leaves the proxy URL in it. The node MCP key inside
+# config.yaml is the agent's own identity, same rule as zcode.json (ADR-033: keys
+# are names inside the network).
 HERMES_HOME = Path("/home/sister/.hermes")
 # The coding endpoint of the GLM Coding Plan (harness-spike step 0): Hermes would
 # otherwise probe endpoints itself and could land on the billed-by-balance one.
@@ -250,6 +253,32 @@ def render_hermes_config(model: str, body_base: str, hive_url: str, node_key: st
     }
 
 
+def drop_hermes_config(
+    home: Path,
+    *,
+    model: str,
+    body_base: str,
+    hive_url: str,
+    node_key: str,
+) -> None:
+    """(Re)render HERMES_HOME/config.yaml, root-owned 0444 — the runner's file, not
+    the sister's (review R1-2). The entrypoint calls it once per container; the
+    hermes adapter calls it again before EVERY life session (review R1-1): the will
+    session before this one pointed the hive MCP at the will proxy, and without this
+    render every later generation of the slot would sit on the stopped proxy."""
+    home.mkdir(parents=True, exist_ok=True)
+    path = home / "config.yaml"
+    if path.exists():
+        # Windows refuses to replace over the readonly bit; POSIX needs no loosening
+        _chmod(path, 0o644)
+    _write_readonly(
+        path,
+        json.dumps(render_hermes_config(model, body_base, hive_url, node_key), indent=2),
+        uid=0,
+        gid=0,
+    )
+
+
 def drop_hermes_home(
     home: Path,
     *,
@@ -261,33 +290,26 @@ def drop_hermes_home(
     uid: int | None = None,
     gid: int | None = None,
 ) -> None:
-    """Lay out HERMES_HOME: config.yaml, the neutral SOUL.md and (when the
-    entrypoint passes the Z.ai key) the 0600 sister-owned .env. Everything else
-    (state.db, sessions, memories) Hermes creates itself on first run."""
-    home.mkdir(parents=True, exist_ok=True)
-    config = home / "config.yaml"
-    config.write_text(
-        json.dumps(render_hermes_config(model, body_base, hive_url, node_key), indent=2),
-        encoding="utf-8",
+    """Lay out HERMES_HOME (review R1-2): the directory itself and config.yaml /
+    SOUL.md are the runner's — root-owned, the dir sticky like the workplace
+    (WORKPLACE_DIR_MODE), so the sister grows her state.db/sessions/memories in it
+    but cannot delete, replace or chmod the harness config. The .env with the Z.ai
+    key is her own (0600, same boundary as the zcode provider config, ADR-033).
+    Everything else Hermes creates itself on first run."""
+    drop_hermes_config(
+        home, model=model, body_base=body_base, hive_url=hive_url, node_key=node_key
     )
-    (home / "SOUL.md").write_text(HERMES_SOUL_MD, encoding="utf-8")
+    _write_readonly(home / "SOUL.md", HERMES_SOUL_MD, uid=0, gid=0)
     if glm_key:
         env_file = home / ".env"
         env_file.write_text(
             f"GLM_API_KEY={glm_key}\nGLM_BASE_URL={HERMES_GLM_BASE_URL}\n",
             encoding="utf-8",
         )
+        _own(env_file, uid, gid)
         _chmod(env_file, 0o600)
-    # The home is the sister's: she must read config/SOUL/.env and write her state.
-    if uid is not None and hasattr(os, "chown"):
-        for name in ("config.yaml", "SOUL.md", ".env"):
-            path = home / name
-            if path.exists():
-                try:
-                    os.chown(path, uid, gid if gid is not None else -1)
-                except OSError:
-                    pass  # non-POSIX or unprivileged: the mode plan still applies
-    _chmod(home, 0o700)
+    _own(home, 0, 0)
+    _chmod(home, WORKPLACE_DIR_MODE)
 
 
 def _drop_harness_configs(
@@ -403,9 +425,11 @@ def set_will_mode(root: Path, harness: str, proxy_url: str) -> None:
 
 
 def _set_hermes_will_mode(proxy_url: str) -> None:
-    """The hermes twin of set_will_mode: the config lives in HERMES_HOME (YAML —
-    Hermes may have rewritten it with its own migrations after the first run, so
-    no JSON round-trip). A missing or unparsable config leaves the will session
+    """The hermes twin of set_will_mode: point the hive MCP of the runner-owned
+    config.yaml at the will proxy (read as YAML — the file may be the rendered JSON
+    or the surgery's own dump; Hermes itself can no longer rewrite it, R1-2). The
+    next life turn re-renders the file back onto the real hive (R1-1), so no
+    restore is needed here. A missing or unparsable config leaves the will session
     on the real hive: submit_will without the runner mark is refused there and
     the emergency will covers it — degraded, never unsafe."""
     path = HERMES_HOME / "config.yaml"
@@ -419,8 +443,10 @@ def _set_hermes_will_mode(proxy_url: str) -> None:
     if not isinstance(entry, dict):
         return
     entry["url"] = f"{proxy_url.rstrip('/')}/mcp"
-    _chmod(HERMES_HOME, 0o700)
+    # the runner's readonly file, same write path as the zcode/opencode branch
+    _chmod(path, 0o644)
     path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    _chmod(path, READ_ONLY_FILE)
 
 
 def link_current(workplaces: Path, serial: int) -> bool:

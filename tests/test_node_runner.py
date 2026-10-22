@@ -637,8 +637,18 @@ def test_zcode_adapter_commands_and_session_id() -> None:
     assert "--continue" in cont.argv
 
 
+def _hermes_adapter(home: Path) -> HermesAdapter:
+    return HermesAdapter(
+        "GLM-5.3-Flash",
+        body_base="http://body-1:8700",
+        hive_url="http://hive:8000",
+        node_key="sk-node-one",
+        home=str(home),
+    )
+
+
 def test_hermes_adapter_commands_and_session_id(tmp_path: Path) -> None:
-    adapter = HermesAdapter("GLM-5.3-Flash", home=str(tmp_path / ".hermes"))
+    adapter = _hermes_adapter(tmp_path / ".hermes")
     first = adapter.life_turn("Life session.\n\nlong prompt", None)
     assert first.argv[:4] == ("hermes", "chat", "--query-file", first.argv[3])
     query = Path(first.argv[3])
@@ -801,7 +811,10 @@ def test_hermes_will_mode_points_the_config_at_the_proxy(tmp_path: Path, monkeyp
     config = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
     assert config["mcp_servers"]["hive"]["url"] == "http://127.0.0.1:8702/mcp"
     assert config["mcp_servers"]["body"]["url"] == "http://body-1:8700/mcp"  # the body stays direct
-    # a config hermes itself rewrote (real YAML, not the rendered JSON) survives the surgery
+    assert stat.S_IMODE((home / "config.yaml").stat().st_mode) & 0o777 == 0o444  # still the runner's
+    # surgery reads YAML too, not only the rendered JSON (an older image may leave a
+    # dumped config behind); the write path goes through the readonly bit
+    os.chmod(home / "config.yaml", 0o644)
     (home / "config.yaml").write_text(
         "model:\n  default: glm-5.3-flash\nmcp_servers:\n  hive:\n    url: http://hive:8000/node/mcp\n",
         encoding="utf-8",
@@ -809,6 +822,75 @@ def test_hermes_will_mode_points_the_config_at_the_proxy(tmp_path: Path, monkeyp
     workplace.set_will_mode(tmp_path, "hermes", "http://127.0.0.1:8702")
     config = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
     assert config["mcp_servers"]["hive"]["url"] == "http://127.0.0.1:8702/mcp"
+    assert stat.S_IMODE((home / "config.yaml").stat().st_mode) & 0o777 == 0o444
+
+
+def test_hermes_life_turn_re_renders_the_real_hive_for_the_next_generation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """R1-1: one HERMES_HOME serves every generation of the slot and the nodes change
+    without a container restart. The will session of a generation points the config at
+    the will proxy; the NEXT generation's life session must re-render the real hive
+    URL before hermes starts, or it lives its whole life on the stopped proxy."""
+    home = tmp_path / ".hermes"
+    workplace.drop_hermes_home(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    adapter = _hermes_adapter(home)
+    monkeypatch.setattr(workplace, "HERMES_HOME", home)
+
+    def hive_url_of_config() -> str:
+        config = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+        return config["mcp_servers"]["hive"]["url"]
+
+    # generation 1: a life session on the real hive, then the will session rewires
+    adapter.life_turn("generation 1 life", None)
+    assert hive_url_of_config() == workplace.hive_mcp_url("http://hive:8000")
+    workplace.set_will_mode(tmp_path, "hermes", "http://127.0.0.1:8702")
+    adapter.will_session("generation 1 will")  # must NOT clobber the proxy URL
+    assert hive_url_of_config() == "http://127.0.0.1:8702/mcp"
+
+    # generation 2: same container, same HERMES_HOME, the will proxy is long dead
+    adapter.life_turn("generation 2 life", None)
+    assert hive_url_of_config() == workplace.hive_mcp_url("http://hive:8000")
+    config = yaml.safe_load((home / "config.yaml").read_text(encoding="utf-8"))
+    assert config["mcp_servers"]["body"]["url"] == "http://body-1:8700/mcp"
+    assert config["model"] == {"default": "glm-5.3-flash", "provider": "zai"}  # a full re-render
+
+    # and the cycle repeats: a second will does not leak into a third generation
+    workplace.set_will_mode(tmp_path, "hermes", "http://127.0.0.1:8703")
+    adapter.life_turn("generation 3 life", None)
+    assert hive_url_of_config() == workplace.hive_mcp_url("http://hive:8000")
+
+
+def test_hermes_home_config_is_runner_owned(tmp_path: Path) -> None:
+    """R1-2: config.yaml and SOUL.md are the runner's, not the sister's — 0444 with
+    no write bit anywhere, in a root-owned sticky home (the WORKPLACE_DIR_MODE plan,
+    exercised on the stand; here the mode side). She grows her state.db/sessions in
+    the home but cannot rewrite the harness config; her .env stays her own 0600."""
+    home = tmp_path / ".hermes"
+    workplace.drop_hermes_home(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+        glm_key="zai-token", uid=1001, gid=1001,
+    )
+    for name in ("config.yaml", "SOUL.md"):
+        assert stat.S_IMODE((home / name).stat().st_mode) & 0o777 == 0o444
+    if os.name == "posix":  # the sticky bit and the uid side need a POSIX host
+        assert stat.S_IMODE(home.stat().st_mode) & 0o7000 == stat.S_ISVTX
+        if hasattr(os, "geteuid") and os.geteuid() == 0:  # full plan: root renders, sister uses
+            assert home.stat().st_uid == 0
+            assert (home / "config.yaml").stat().st_uid == 0
+            assert (home / "SOUL.md").stat().st_uid == 0
+            assert (home / ".env").stat().st_uid == 1001
+        assert stat.S_IMODE((home / ".env").stat().st_mode) & 0o777 == 0o600
+    # the per-life re-render keeps the protection (R1-1's path must not loosen it)
+    workplace.drop_hermes_config(
+        home, model="GLM-5.3-Flash", body_base="http://body-1:8700",
+        hive_url="http://hive:8000", node_key="sk-node-one",
+    )
+    assert stat.S_IMODE((home / "config.yaml").stat().st_mode) & 0o777 == 0o444
 
 
 def staged_markdown(serial: int) -> str:

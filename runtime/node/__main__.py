@@ -37,7 +37,12 @@ def main() -> int:
         adapters={
             "opencode": OpenCodeAdapter(cfg.opencode_model),
             "zcode": ZCodeAdapter(cfg.zcode_model),
-            "hermes": HermesAdapter(cfg.hermes_model),
+            "hermes": HermesAdapter(
+                cfg.hermes_model,
+                body_base=cfg.body_base,
+                hive_url=cfg.hive_url,
+                node_key=cfg.node_key,
+            ),
         },
         naming=naming,
         quirks=quirks,

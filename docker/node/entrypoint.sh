@@ -49,12 +49,21 @@ else
   log "no gateway node key: the opencode harness (and failover) will only wait"
 fi
 
-# 2b. HERMES_HOME (tmpfs, the sister's): config.yaml + the neutral SOUL.md via
+# The sister's whole home is hers — except what 2b renders next: HERMES_HOME's
+# dir, config.yaml and SOUL.md stay root's (review R1-2), so this blanket chown
+# must run BEFORE the hermes render, not after it.
+chown -R "${SISTER_UID}:${SISTER_GID}" "$SISTER_HOME"
+
+# 2b. HERMES_HOME (tmpfs): config.yaml + the neutral SOUL.md via
 #     workplace.drop_hermes_home, plus .env with the Z.ai coding key + base URL —
-#     exactly the two env names Hermes's zai provider reads. The key rides the
-#     helper's environment, never argv: /proc/<pid>/cmdline is world-readable,
-#     /proc/<pid>/environ is not. Rendered even without the key (config-only), so
-#     the harness still fails cleanly instead of scaffold-failing on a dead home.
+#     exactly the two env names Hermes's zai provider reads. drop_hermes_home
+#     stamps the final ownership itself: root-owned sticky home with root 0444
+#     config.yaml/SOUL.md (the harness config is the runner's, R1-2 — the sister
+#     grows her state in the home but cannot rewrite the config), only .env is
+#     hers at 0600. The key rides the helper's environment, never argv:
+#     /proc/<pid>/cmdline is world-readable, /proc/<pid>/environ is not. Rendered
+#     even without the key (config-only), so the harness still fails cleanly
+#     instead of scaffold-failing on a dead home.
 [ -n "${ZAI_API_KEY:-}" ] || log "no Z.ai key: HARNESS=hermes (like zcode) would only wait"
 HERMES_KEY="${ZAI_API_KEY:-}" \
 HERMES_MODEL="${HERMES_MODEL:-${ZCODE_MODEL:-GLM-5.3-Flash}}" \
@@ -76,7 +85,6 @@ drop_hermes_home(
     gid=int(os.environ["SISTER_GID"]),
 )
 ' || log "hermes home render failed: the hermes harness will not run"
-chown -R "${SISTER_UID}:${SISTER_GID}" "$SISTER_HOME"
 
 # 3. Nothing secret may ride further: not into the runner's /proc/environ (execve
 #    rebuilds it from what is left), not into any child the runner spawns.
