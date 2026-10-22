@@ -50,7 +50,7 @@ else
 fi
 
 # The sister's whole home is hers — except what 2b renders next: HERMES_HOME's
-# dir, config.yaml and SOUL.md stay root's (review R1-2), so this blanket chown
+# config.yaml and SOUL.md stay root's 0444 (review R1-2), so this blanket chown
 # must run BEFORE the hermes render, not after it.
 chown -R "${SISTER_UID}:${SISTER_GID}" "$SISTER_HOME"
 
