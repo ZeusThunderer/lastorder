@@ -26,6 +26,7 @@ import json
 import os
 import secrets
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import asdict, dataclass
@@ -142,6 +143,7 @@ class NodeRunner:
         log: Callable[[str, dict[str, Any]], None] | None = None,
         seed_factory: Callable[[], int] | None = None,
         will_proxy_factory: Callable[[str, str, str], Any] | None = None,
+        sweep: Callable[[], None] | None = None,
     ):
         self.cfg = cfg
         self._mind = mind
@@ -160,6 +162,7 @@ class NodeRunner:
                 target, node_key=node_key, runner_key=runner_key
             )
         )
+        self._sweep = sweep or self._kill_sister_uid_processes
 
     # --- plumbing -----------------------------------------------------------------------
 
@@ -236,6 +239,31 @@ class NodeRunner:
     def _hive_pause(self, attempt: int) -> float:
         return min(self.cfg.hive_retry_pause_s * (2**attempt), self.cfg.hive_retry_max_s)
 
+    def _kill_sister_uid_processes(self) -> None:
+        """Kill EVERY process of the sister's uid (review R2-4): killpg only reaches the
+        session group, so a child that detached (setsid/nohup/disown) would survive her
+        death, the will session and the respawn — and write into the heir's memory under
+        the same uid. The sweep runs as a setuid(sister) child doing os.kill(-1, SIGKILL):
+        from root, kill(-1) would take the whole container down, from the sister's uid it
+        reaches only her own processes (the sweeper kills itself too — expected). Called
+        only after the life session is stopped for a death and after the will session,
+        never between an agent's own turns: a harness may keep a server between runs."""
+        uid = self.cfg.sister_uid
+        if uid is None or not hasattr(os, "setuid"):
+            return  # no privilege drop on this host: the process group was the boundary
+        argv = (
+            sys.executable, "-c",
+            "import os, sys; os.setgroups([]); os.setgid(int(sys.argv[2]));"
+            " os.setuid(int(sys.argv[1])); os.kill(-1, 9)",
+            str(uid), str(self.cfg.sister_gid or uid),
+        )
+        try:
+            subprocess.run(argv, check=False, timeout=30)
+        except OSError as exc:
+            self._log("runner.sweep_failed", {"error": f"{type(exc).__name__}: {exc}"})
+            return
+        self._log("runner.sister_swept", {"uid": uid})
+
     # --- the loop -----------------------------------------------------------------------
 
     def run(self) -> None:
@@ -268,6 +296,14 @@ class NodeRunner:
             return
         armed = status.get("serial")
         if not armed:
+            if self._keys_missing():
+                # fail-closed (review R2-6): without both keys the node would run open —
+                # an empty runner key silently passes no gate, an empty node key ships
+                # harness configs with a blank identity. Wait for the operator instead;
+                # NODE_DEV_OPEN=1 is the explicit dev exception.
+                self._log("runner.no_keys", {"slot": self.cfg.slot})
+                self._sleep(self.cfg.restart_pause_max_s)
+                return
             state = self._birth()
         else:
             armed = int(armed)
@@ -298,6 +334,9 @@ class NodeRunner:
                 attempt += 1
 
     # --- birth --------------------------------------------------------------------------
+
+    def _keys_missing(self) -> bool:
+        return not self.cfg.runner_key and not self.cfg.node_key and not self.cfg.dev_open
 
     def _birth(self) -> LifeState:
         seed = self._seed_factory()
@@ -460,6 +499,7 @@ class NodeRunner:
                         process.wait(self.cfg.kill_grace_s)
                     process.kill()
                     self._log("session.stopped_for_death", {"serial": state.serial})
+                    self._sweep()  # detached sisters die with their node (R2-4)
                     return death
                 next_poll = time.monotonic() + self.cfg.poll_s
             time.sleep(min(0.2, self.cfg.poll_s))
@@ -578,7 +618,20 @@ class NodeRunner:
                     # hive closed this node itself (lost-close): the will stays staged
                     self._log("will.superseded", {"serial": state.serial, "error": str(exc)})
                     return SUPERSEDED
-                # permanent: park a copy for the operator, keep the staged file
+                if exc.status in (401, 403):
+                    # An auth refusal is a configuration error the operator fixes
+                    # (review R2-8, the 00033 case): parking here would drop the will the
+                    # moment the key is repaired. Retry with the capped pause and a loud
+                    # log, like unavailability.
+                    self._log(
+                        "will.auth_retry",
+                        {"serial": state.serial, "status": exc.status, "error": str(exc)},
+                    )
+                    self._sleep(self._hive_pause(attempt))
+                    attempt += 1
+                    continue
+                # permanent (400/422 and friends): park a copy for the operator, keep the
+                # staged file
                 parked = self.cfg.workplaces / workplace.RUNNER_DIR / "parked"
                 parked.mkdir(parents=True, exist_ok=True)
                 (parked / f"{workplace.serial_dir(state.serial)}.md").write_text(
@@ -644,5 +697,6 @@ class NodeRunner:
             process.wait()
             output = process.output()
             self._log("will.session_done", {"serial": state.serial, "tail": _tail(output, 300)})
+        self._sweep()  # the will session's strays must not meet the heir (R2-4)
         proxy.stop()
         return output

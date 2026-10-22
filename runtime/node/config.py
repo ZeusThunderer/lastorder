@@ -72,6 +72,7 @@ class NodeConfig:
     pending_wills: Path | None  # hive's run volume mounted ro (staged submit_will files)
     sister_uid: int | None  # the harness runs as this uid; None = no privilege drop
     sister_gid: int | None
+    dev_open: bool = False  # NODE_DEV_OPEN=1: the explicit open dev mode (review R2-6)
 
     @classmethod
     def from_env(cls) -> "NodeConfig":
@@ -139,4 +140,5 @@ class NodeConfig:
             pending_wills=Path(pending) if pending else None,
             sister_uid=uid,
             sister_gid=gid if uid is not None else None,
+            dev_open=(env("NODE_DEV_OPEN", default="") or "") == "1",
         )

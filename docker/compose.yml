@@ -1,6 +1,6 @@
 # Last Order MVP stack (ADR-015). Run from the repo root:
 #   bash docker/node/up.sh                  # the whole stack with secrets lifted from .env
-#   docker compose -f docker/compose.yml up -d   # no keys: nodes come up and wait
+#   NODE_DEV_OPEN=1 docker compose -f docker/compose.yml up -d   # dev, no keys: gates open
 # Slots are body-N + mind-N + node-N triples; the mind lives in its body's network
 # namespace because the unionclef py4j gateway listens on localhost only, and the node
 # sandbox reaches ONLY its own body (slot-N, internal), hive/llm-gateway/zai-egress
@@ -50,6 +50,9 @@ x-mind: &mind
     JEV_MIN_INTERVAL_S: "${JEV_MIN_INTERVAL_S:-3}"
     JEV_POLICY_PATH: /workplaces/current/policy/threat.md
     JEV_POLICY_MAX_CHARS: "${JEV_POLICY_MAX_CHARS:-1500}"
+    # fail-closed (review R2-6): without the slot's runner key the mind refuses to
+    # start rather than serve /runner/* ungated; NODE_DEV_OPEN=1 is the dev exception
+    NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
   command: ["python", "-m", "runtime.mind"]
 
 # The node sandbox of a slot (T-027, ADR-033): the runner plus both harnesses in one
@@ -94,9 +97,21 @@ x-node: &node
     # (verified on the stand: a sister could read the runner key), so files-under-
     # /run/secrets cannot hold the boundary. Per-slot values come below.
     ZAI_KEY_FILE: /run/node/secrets/zai_api_key
+    # fail-closed (review R2-6): without both keys the runner logs runner.no_keys and
+    # waits instead of birthing an open node; NODE_DEV_OPEN=1 is the dev exception
+    NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
   command: ["python", "-m", "runtime.node"]
   volumes:
-    - hive-run:/hive-run:ro   # the staged wills of submit_will (read-off, T-028 contract)
+    # Only the staged wills of submit_will (T-028 contract), by subpath: the whole
+    # hive-run volume would also show events.jsonl and other slots' wills to the
+    # sister (review R2-9). The hive creates the subpath before uvicorn starts.
+    - &hive-wills-mount
+      type: volume
+      source: hive-run
+      target: /hive-run/pending_wills
+      read_only: true
+      volume:
+        subpath: pending_wills
 
 services:
   mc-server:
@@ -149,7 +164,7 @@ services:
   # The sandbox of slot 1 (T-027).
   node-1:
     <<: *node
-    depends_on: [mind-1]
+    depends_on: [mind-1, hive]   # hive creates the pending_wills subpath before uvicorn
     environment:
       <<: *node-env
       NODE_SLOT: LastOrder01
@@ -162,7 +177,7 @@ services:
       GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_1:-}"
       ZAI_API_KEY: "${ZCODE_API_KEY:-}"
     volumes:
-      - hive-run:/hive-run:ro
+      - *hive-wills-mount
       - workplaces-1:/workplaces
     networks: [slot-1, svc-1]
 
@@ -191,7 +206,7 @@ services:
 
   node-2:
     <<: *node
-    depends_on: [mind-2]
+    depends_on: [mind-2, hive]
     environment:
       <<: *node-env
       NODE_SLOT: LastOrder02
@@ -204,7 +219,7 @@ services:
       GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_2:-}"
       ZAI_API_KEY: "${ZCODE_API_KEY:-}"
     volumes:
-      - hive-run:/hive-run:ro
+      - *hive-wills-mount
       - workplaces-2:/workplaces
     networks: [slot-2, svc-2]
 
@@ -233,7 +248,7 @@ services:
 
   node-3:
     <<: *node
-    depends_on: [mind-3]
+    depends_on: [mind-3, hive]
     environment:
       <<: *node-env
       NODE_SLOT: LastOrder03
@@ -246,7 +261,7 @@ services:
       GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_3:-}"
       ZAI_API_KEY: "${ZCODE_API_KEY:-}"
     volumes:
-      - hive-run:/hive-run:ro
+      - *hive-wills-mount
       - workplaces-3:/workplaces
     networks: [slot-3, svc-3]
 
@@ -254,7 +269,9 @@ services:
   # the lifetime scan and RCON deaths (T-022), the network MCP (T-028). Port 8000 stays
   # inside the docker network. Exactly one uvicorn worker: lifecycle.json, the inboxes
   # and the slot sequence are in-process state under locks (T-022 review P1-4). The key
-  # maps are lifted by docker/node/up.sh; empty maps keep the pre-T-027 open behaviour.
+  # maps are lifted by docker/node/up.sh; an empty HIVE_RUNNER_KEYS is a startup refusal
+  # (review R2-6) — NODE_DEV_OPEN=1 is the explicit dev exception. The mkdir creates the
+  # pending_wills subpath the node sandboxes mount read-only (R2-9) before uvicorn runs.
   hive:
     build:
       context: ..
@@ -274,16 +291,11 @@ services:
       HIVE_MCP_NODE_KEYS: "${HIVE_MCP_NODE_KEYS:-}"
       HIVE_RUNNER_KEYS: "${HIVE_RUNNER_KEYS:-}"
       HIVE_MCP_LO_KEY: "${HIVE_MCP_LO_KEY:-}"
+      NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
     command:
-      - uvicorn
-      - runtime.hive.app:create_app
-      - --factory
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8000"
-      - --workers
-      - "1"
+      - sh
+      - -c
+      - mkdir -p /hive-run/pending_wills && exec uvicorn runtime.hive.app:create_app --factory --host 0.0.0.0 --port 8000 --workers 1
     volumes:
       - knowledge:/knowledge
       - hive-run:/hive-run   # not over the image's system /run (review R1-6)
@@ -412,6 +424,7 @@ volumes:
   knowledge:
   hive-run:
   gateway-db:
+  jev-hf:
   workplaces-1:
   workplaces-2:
   workplaces-3:

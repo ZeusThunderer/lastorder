@@ -38,10 +38,36 @@ _QUOTA_MARKS = (
     re.compile(r"\bquota\b", re.IGNORECASE),
 )
 
+# A whole harness dump is tens of thousands of JSON events with chat, coordinates and
+# counters: a "429" coordinate or the word "quota" in a replica must not switch the
+# adapter (review R2-7). Marks are searched only where a harness can state the problem:
+# error/result JSON events and the tail of the output (where a fatal crash prints).
+_QUOTA_SCAN_TAIL = 2000
+
+
+def _quota_event(line: str) -> bool:
+    line = line.strip()
+    if not line.startswith("{"):
+        return False
+    try:
+        doc = json.loads(line)
+    except ValueError:
+        return False
+    if not isinstance(doc, dict):
+        return False
+    kind = doc.get("type", doc.get("event", ""))
+    return isinstance(kind, str) and any(
+        word in kind.lower() for word in ("error", "result")
+    )
+
 
 def quota_exhausted(output: str) -> bool:
-    """True when the harness output says the quota/ceiling ran out (not a plain crash)."""
-    return any(mark.search(output) for mark in _QUOTA_MARKS)
+    """True when the harness output says the quota/ceiling ran out (not a plain crash).
+    Only error/result JSON events and the output tail are searched — see R2-7."""
+    for line in output.splitlines():
+        if _quota_event(line) and any(mark.search(line) for mark in _QUOTA_MARKS):
+            return True
+    return any(mark.search(output[-_QUOTA_SCAN_TAIL:]) for mark in _QUOTA_MARKS)
 
 
 class OpenCodeAdapter:

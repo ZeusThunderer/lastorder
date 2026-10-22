@@ -574,7 +574,6 @@ def main() -> None:
 
     serial_raw = env("NODE_SERIAL", default="")
     birth: BirthRecord | None = None
-    hive: HiveClient | None = None
     if serial_raw:
         serial = int(serial_raw)  # a bad value is a startup error, not a silent no-clock
         born_at = env("NODE_BORN_AT", default="")
@@ -582,8 +581,24 @@ def main() -> None:
         if not born_at or not ttl_raw:
             raise ValueError("NODE_SERIAL set: NODE_BORN_AT and NODE_TTL_MIN are required too")
         birth = BirthRecord(serial=serial, born_at=born_at, ttl_min=int(ttl_raw))
-        hive = HiveClient(base_url=env("HIVE_URL", default="http://hive:8000") or "http://hive:8000")
         log.info("life clock armed: serial %d, ttl %s min", serial, ttl_raw)
+
+    # The hive client is NOT tied to a startup clock: compose arms the life clock through
+    # POST /runner/birth, and retire_stuck must work in that mode too (review R2-3) —
+    # before, a mind without NODE_SERIAL answered "no hive client configured". The client
+    # carries the slot's runner key so /registry/request_death passes the hive gate.
+    runner_key = env("MIND_RUNNER_KEY", default="") or ""
+    if not runner_key and (env("NODE_DEV_OPEN", default="") or "") != "1":
+        # fail-closed (review R2-6): an empty key would leave /runner/respawn and
+        # /runner/birth ungated; NODE_DEV_OPEN=1 is the explicit dev exception
+        raise ValueError(
+            "MIND_RUNNER_KEY is empty: the /runner commands would be open."
+            " Set the slot's runner key or NODE_DEV_OPEN=1 for a dev run."
+        )
+    hive = HiveClient(
+        base_url=env("HIVE_URL", default="http://hive:8000") or "http://hive:8000",
+        runner_key=runner_key,
+    )
 
     call_log = JsonlLog(log_path)
     body = Py4jBody()

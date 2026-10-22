@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import stat
+from collections.abc import Iterator
 from pathlib import Path
 
 from runtime.knowledge.slice import format_serial
@@ -46,6 +47,25 @@ def _chmod(path: Path, mode: int) -> None:
     os.chmod(path, mode)
 
 
+def _iter_tree_no_links(root: Path) -> Iterator[Path]:
+    """root and everything under it, never following symlinks (review R2-1): a symlink
+    planted by the sister is yielded as a leaf, its target never entered — neither for
+    recursion (os.walk(followlinks=False), unlike rglob on Python 3.13) nor for chmod,
+    which follows the link and would re-mode a root file outside the workplace."""
+    yield root
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in dirnames + filenames:
+            yield Path(dirpath) / name
+
+
+def _chmod_tree(root: Path, dir_mode: int, file_mode: int) -> None:
+    """Mode a whole runner-owned tree, symlinks untouched (see _iter_tree_no_links)."""
+    for item in _iter_tree_no_links(root):
+        if item.is_symlink():
+            continue
+        _chmod(item, dir_mode if item.is_dir() else file_mode)
+
+
 def _own(path: Path, uid: int | None, gid: int | None) -> None:
     if uid is not None and hasattr(os, "chown"):
         try:
@@ -64,17 +84,19 @@ def _write_readonly(path: Path, text: str, *, uid: int | None = None, gid: int |
 
 def _copy_tree_readonly(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst)
-    for item in [dst, *dst.rglob("*")]:
-        _chmod(item, READ_ONLY_DIR if item.is_dir() else READ_ONLY_FILE)
+    _chmod_tree(dst, READ_ONLY_DIR, READ_ONLY_FILE)
 
 
 def _force_rmtree(path: Path) -> None:
     """Remove a read-only tree (the shared refresh of the next birth): give the modes
-    back first — POSIX refuses rmdir on 0555 dirs, Windows unlink on 0444 files."""
+    back first — POSIX refuses rmdir on 0555 dirs, Windows unlink on 0444 files. A
+    symlink is only unlinked, never chmod'd: chmod follows the link and would loosen
+    whatever root-owned file it points at (review R2-1)."""
 
     def _loosen(func, target, _exc) -> None:
         try:
-            os.chmod(target, 0o700 if os.path.isdir(target) else 0o600)
+            if not os.path.islink(target):
+                os.chmod(target, 0o700 if os.path.isdir(target) else 0o600)
             func(target)
         except OSError:
             pass
@@ -87,7 +109,9 @@ def _make_sister_writable(root: Path, uid: int | None, gid: int | None) -> None:
         path = root / name
         if not path.exists():
             continue
-        for item in [path, *path.rglob("*")]:
+        for item in _iter_tree_no_links(path):
+            if item.is_symlink():
+                continue  # the runner never re-modes or re-owns a symlink's target (R2-1)
             _own(item, uid, gid)
             _chmod(item, SISTER_DIR if item.is_dir() else SISTER_FILE)
     goals = root / "GOALS.md"
@@ -282,7 +306,10 @@ def link_current(workplaces: Path, serial: int) -> bool:
 
 
 def archive_workplace(workplaces: Path, serial: int) -> Path:
-    """agent/<serial> → archive/<serial>, everything read-only (NETWORK.md section 6.5)."""
+    """agent/<serial> → archive/<serial>, everything read-only (NETWORK.md section 6.5).
+    Symlinks the sister left behind are moved as links and never chmod'd: the runner
+    works as root, and a chmod through `memory/k -> /run/node/secrets/runner_key` would
+    re-mode the secret itself (review R2-1)."""
     root = workplaces / "agent" / serial_dir(serial)
     if not root.exists():
         raise FileNotFoundError(f"no workplace of {serial_dir(serial)} to archive")
@@ -293,6 +320,5 @@ def archive_workplace(workplaces: Path, serial: int) -> Path:
     if dst.exists():
         _force_rmtree(dst)
     root.replace(dst)
-    for item in [dst, *dst.rglob("*")]:
-        _chmod(item, READ_ONLY_DIR if item.is_dir() else READ_ONLY_FILE)
+    _chmod_tree(dst, READ_ONLY_DIR, READ_ONLY_FILE)
     return dst

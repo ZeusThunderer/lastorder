@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 from pathlib import Path
 
 import httpx
@@ -247,6 +248,7 @@ class Rig:
         self.mind = FakeMind()
         self.hive = FakeHive()
         self.journal: list = []
+        self.logs: list[tuple[str, dict]] = []
         self.spawns = FakeSpawn([], self.journal)
         self.zcode = FakeAdapter("zcode", self.journal)
         self.opencode = FakeAdapter("opencode", self.journal)
@@ -264,6 +266,8 @@ class Rig:
             sleep=self.pauses.append,
             seed_factory=lambda: 4242,
             will_proxy_factory=lambda target, node_key, runner_key: self.proxy,
+            log=lambda type, payload=None: self.logs.append((type, payload or {})),
+            sweep=lambda: self.journal.append(("sweep",)),
         )
 
     def script(self, *processes: FakeProcess) -> None:
@@ -499,6 +503,112 @@ def test_respawn_refused_not_dead_counts_as_done(tmp_path: Path) -> None:
     rig.runner._death_path(state, "game", "x", "zcode")  # does not loop forever
 
 
+# --- review round 2: symlinks, the uid sweep, fail-closed keys, quota, retire -------
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable on this host: {exc}")
+
+
+def test_archive_never_chmods_through_a_symlink(tmp_path: Path) -> None:
+    """R2-1: the runner works as root; a chmod following `memory/k -> a root-only file`
+    would re-mode the target, and the next sister of the same uid reads the secret."""
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    root = rig.cfg.workplaces / "agent" / f"{state.serial:05d}"
+    secret = tmp_path / "runner_key"
+    secret.write_text("rk", encoding="utf-8")
+    os.chmod(secret, 0o600)
+    secret_mode = stat.S_IMODE(os.stat(secret).st_mode)
+    outside_dir = tmp_path / "run-node"
+    outside_dir.mkdir()
+    dir_mode = stat.S_IMODE(os.stat(outside_dir).st_mode)
+    _symlink_or_skip(root / "memory" / "k", secret)
+    _symlink_or_skip(root / "memory" / "a", outside_dir)
+    archive = workplace.archive_workplace(rig.cfg.workplaces, state.serial)
+    assert (archive / "memory" / "k").is_symlink()  # moved as a link, not followed
+    assert stat.S_IMODE(os.stat(secret).st_mode) == secret_mode
+    assert stat.S_IMODE(os.stat(outside_dir).st_mode) == dir_mode
+
+
+def test_force_rmtree_leaves_symlink_targets_alone(tmp_path: Path) -> None:
+    secret = tmp_path / "node_key"
+    secret.write_text("k", encoding="utf-8")
+    os.chmod(secret, 0o600)
+    secret_mode = stat.S_IMODE(os.stat(secret).st_mode)
+    tree = tmp_path / "old-archive"
+    (tree / "memory").mkdir(parents=True)
+    victim = tree / "memory" / "file"
+    victim.write_text("x", encoding="utf-8")
+    os.chmod(victim, 0o444)  # read-only: the _loosen path is what runs here
+    _symlink_or_skip(tree / "memory" / "k", secret)
+    workplace._force_rmtree(tree)
+    assert not tree.exists()
+    assert stat.S_IMODE(os.stat(secret).st_mode) == secret_mode
+
+
+def test_death_sweeps_stray_sister_processes(tmp_path: Path) -> None:
+    """R2-4: a `setsid` child of the sister survives killpg — the death path sweeps the
+    whole uid after the stopped life session and after the will session."""
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    rig.script(FakeProcess(hang=True), FakeProcess(code=0, output="will done"))
+    rig.mind.kill_at_status = 3  # dies inside the hanging life session's poll
+    rig.runner._generation()
+    order = [entry[0] for entry in rig.journal]
+    assert order.count("sweep") == 2
+    assert order.index("sweep") < order.index("proxy:start")  # after the life session stop
+    assert order.index("spawn") < len(order) - 1 - order[::-1].index("sweep")  # after the will session
+    assert rig.mind.respawn_calls == 1
+
+
+def test_runner_without_keys_waits_instead_of_birthing(tmp_path: Path) -> None:
+    """R2-6: both keys empty means an open node — the runner logs runner.no_keys and
+    waits; NODE_DEV_OPEN=1 is the explicit dev exception that still births."""
+    rig = Rig(tmp_path, runner_key="", node_key="")
+    rig.run_generation()
+    assert rig.hive.births == []
+    assert [t for t, _p in rig.logs] == ["runner.no_keys"]
+    assert rig.pauses == [60.0]  # restart_pause_max_s: waiting for the operator
+
+    rig2 = Rig(tmp_path, runner_key="", node_key="", dev_open=True)
+    rig2.runner._birth()  # dev-open births despite the empty keys
+    rig2.mind.kill()  # armed serial present: the generation walks the death path
+    rig2.script(FakeProcess(code=0, output="w"))
+    rig2.run_generation()
+    assert len(rig2.hive.births) == 1
+
+
+def test_retire_auth_error_retries_loudly(tmp_path: Path) -> None:
+    """R2-8: 401/403 is an operator-fixable config error — retry like unavailability,
+    never park the agent's will behind it."""
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    rig.hive.retire_error = HiveRejected(401, "runner_key", "X-Runner-Key does not open slot")
+    rig.script(FakeProcess(code=0, output="ok"))
+    rig.mind.kill()
+    rig.runner._death_path(state, "game", "x", "zcode")
+    assert len(rig.hive.retires) == 1  # retried around, delivered
+    assert any(t == "will.auth_retry" and p.get("status") == 401 for t, p in rig.logs)
+    assert not (rig.cfg.workplaces / ".runner" / "parked").exists()
+
+
+def test_retire_permanent_4xx_parks_the_will(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    rig.hive.retire_error = HiveRejected(422, "invalid_will", "will does not parse")
+    rig.script(FakeProcess(code=0, output="ok"))
+    rig.mind.kill()
+    rig.runner._death_path(state, "game", "x", "zcode")
+    assert rig.hive.retires == []
+    parked = rig.cfg.workplaces / ".runner" / "parked" / f"{state.serial:05d}.md"
+    assert parked.is_file() and "serial" in parked.read_text(encoding="utf-8")
+    assert rig.mind.respawn_calls == 1  # the death path goes on
+
+
 # --- adapters and config ------------------------------------------------------------------------
 
 
@@ -524,6 +634,19 @@ def test_quota_marks_are_narrow() -> None:
     assert quota_exhausted("Rate limit reached for provider")
     assert not quota_exhausted("panic: boom")
     assert not quota_exhausted("exit status 1")
+
+
+def test_quota_marks_ignore_chat_and_coordinates_deep_in_the_stream() -> None:
+    """R2-7: the harness dump is tens of thousands of events — a 429 coordinate or the
+    word "quota" in a replica must not switch the adapter."""
+    marked = '{"type":"message","text":"координата 429, до quota шуток"}'
+    clean = '{"type":"message","text":"обычная реплика без примет"}'
+    long_stream = marked + "\n" + "\n".join([clean] * 80)  # the marked line is deep
+    assert not quota_exhausted(long_stream)
+    # an error event states it from anywhere in the stream
+    assert quota_exhausted(long_stream + '\n{"type":"error","message":"HTTP 429: rate limit exceeded"}')
+    # and a fatal crash's last words live in the tail
+    assert quota_exhausted("\n".join([clean] * 80) + "\nerror code: 1302")
 
 
 def test_config_validation(monkeypatch) -> None:

@@ -112,7 +112,9 @@ class Stack:
             clock=self.clock,
             node_keys={KEY1: "LastOrder01", KEY2: "LastOrder02"},
             lo_key=KEY_LO,
-            runner_keys=runner_keys,
+            # explicit map (empty default = the open test mode of review R2-6); None
+            # would read the env and refuse to start on an empty HIVE_RUNNER_KEYS
+            runner_keys=runner_keys if runner_keys is not None else {},
         )
         config = uvicorn.Config(self.app, host="127.0.0.1", port=0, log_level="error")
         self.uvicorn = uvicorn.Server(config)

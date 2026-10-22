@@ -74,14 +74,16 @@ def will_text(serial: int, born_at: str, *, slot: str = "LastOrder01") -> str:
 
 
 def make_app_stack(tmp_path: Path, runner_keys: dict[str, str] | None = None):
-    """A full hive over a tmp store: used here and by tests/test_hive_client.py."""
+    """A full hive over a tmp store: used here and by tests/test_hive_client.py. The
+    default is an EXPLICITLY empty key map: tests run open (review R2-6 allows exactly
+    that), while create_app with no map argument would read the env and refuse."""
     clock = FakeClock()
     rcon = FakeRcon()
     store = KnowledgeStore(tmp_path / "kb", git=False, now=lambda: clock().isoformat())
     log = HiveLog(tmp_path / "run" / "events.jsonl")
     app = create_app(
         store=store, rcon=rcon, log=log, run_dir=tmp_path / "run", clock=clock,
-        runner_keys=runner_keys,
+        runner_keys=runner_keys if runner_keys is not None else {},
     )
     return types.SimpleNamespace(
         app=app, client=TestClient(app), store=store, log=log, clock=clock, rcon=rcon
@@ -434,7 +436,84 @@ def test_registry_writes_refuse_without_runner_key(keyed_stack) -> None:
 
 
 def test_registry_writes_open_without_configured_keys(stack) -> None:
-    # no HIVE_RUNNER_KEYS: dev/test default, the endpoints answer as before (T-022 contract)
+    # an explicitly empty map (the test default): endpoints answer as before (T-022 contract)
     record = born(stack)
     response = stack.client.post("/registry/mark_dead", json={"serial": record["serial"]})
     assert response.status_code == 200
+
+
+def test_memory_and_comms_refuse_without_the_slot_runner_key(tmp_path: Path) -> None:
+    """R2-2: the sisters' sandbox shares this port — without the gate a bash POST could
+    rewrite another node's core memory, vote, inbox or speak in her name."""
+    stack = make_app_stack(tmp_path, {"rk-one": "LastOrder01", "rk-two": "LastOrder02"})
+
+    def keyed_birth(slot: str, key: str) -> dict:
+        response = stack.client.post(
+            "/registry/birth", json={"slot": slot, "traits": traits().as_dict()},
+            headers={"X-Runner-Key": key},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    first = keyed_birth("LastOrder01", "rk-one")
+    second = keyed_birth("LastOrder02", "rk-two")
+    cases = [
+        ("/memory/inheritance", {"serial": first["serial"]}),
+        ("/memory/knowledge", {"serial": first["serial"], "handles": ["blk:stone"]}),
+        ("/memory/core_memory", {"serial": first["serial"]}),
+        ("/memory/store_core_memory", {"serial": first["serial"], "text": "goal: выжить"}),
+        ("/memory/submit_candidate", {"serial": first["serial"], "candidate": {}}),
+        ("/memory/submit_vote", {"serial": first["serial"], "vote": {}}),
+        ("/comms/inbox", {"serial": second["serial"]}),
+        ("/comms/send", {"message": {"from_serial": first["serial"], "to_serial": second["serial"], "text": "у спавна стонущий", "ts": ""}}),
+        ("/comms/chatter_turn", {"serial": first["serial"]}),
+    ]
+    for path, body in cases:
+        bare = stack.client.post(path, json=body)
+        assert bare.status_code == 401, (path, bare.text)
+        assert error_of(bare)["kind"] == "runner_key"
+        # another slot's key does not open this serial either
+        wrong = stack.client.post(path, json=body, headers={"X-Runner-Key": "rk-two"})
+        if path == "/comms/inbox":
+            continue  # second's inbox IS rk-two's own: covered by the pass-round below
+        assert wrong.status_code == 401, (path, wrong.text)
+    # the slot's own key passes: memory writes and a comms round in one
+    ok = stack.client.post(
+        "/memory/store_core_memory",
+        json={"serial": first["serial"], "text": "goal: выжить у спавна"},
+        headers={"X-Runner-Key": "rk-one"},
+    )
+    assert ok.status_code == 200
+    sent = stack.client.post(
+        "/comms/send",
+        json={"message": {"from_serial": first["serial"], "to_serial": second["serial"], "text": "у спавна стонущий", "ts": ""}},
+        headers={"X-Runner-Key": "rk-one"},  # the sender's slot key
+    )
+    assert sent.status_code == 200
+    inbox = stack.client.post("/comms/inbox", json={"serial": second["serial"]}, headers={"X-Runner-Key": "rk-two"})
+    assert inbox.status_code == 200 and inbox.json()[0]["text"] == "у спавна стонущий"
+    # the open routes stay open
+    assert stack.client.get("/health").status_code == 200
+    assert stack.client.get("/registry/alive").status_code == 200
+
+
+def test_empty_env_runner_keys_refuse_to_start(monkeypatch, tmp_path: Path) -> None:
+    """R2-6, hive side: an empty HIVE_RUNNER_KEYS from the env is a startup refusal —
+    the gates would be silently open otherwise. NODE_DEV_OPEN=1 is the dev exception."""
+    monkeypatch.setenv("HIVE_RUNNER_KEYS", "")
+    monkeypatch.delenv("NODE_DEV_OPEN", raising=False)
+
+    def build():
+        return create_app(
+            store=KnowledgeStore(tmp_path / "kb", git=False),
+            rcon=FakeRcon(),
+            log=HiveLog(tmp_path / "run" / "events.jsonl"),
+            run_dir=tmp_path / "run",
+            clock=FakeClock(),
+        )
+
+    with pytest.raises(ValueError, match="HIVE_RUNNER_KEYS"):
+        build()
+    monkeypatch.setenv("NODE_DEV_OPEN", "1")
+    app = build()  # the explicit dev exception runs open
+    assert TestClient(app).get("/health").status_code == 200

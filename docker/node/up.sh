@@ -51,6 +51,29 @@ parts() { # parts <prefix> -> "LastOrder01=k1;LastOrder02=k2;..." non-empty entr
 export HIVE_MCP_NODE_KEYS="${HIVE_MCP_NODE_KEYS:-$(parts HIVE_NODE_KEY)}"
 export HIVE_RUNNER_KEYS="${HIVE_RUNNER_KEYS:-$(parts HIVE_RUNNER_KEY)}"
 
+# Fail-closed (review R2-6): a stand raised without keys would come up open (empty
+# HIVE_RUNNER_KEYS ungates the registry/memory/comms routes) and nobody would notice.
+# Refuse instead; NODE_DEV_OPEN=1 is the explicit dev exception (exported for compose,
+# so the hive and the minds run open too).
+if [ "${NODE_DEV_OPEN:-}" = "1" ]; then
+  export NODE_DEV_OPEN=1
+else
+  # A node slot that is actually being raised must have its own pair of keys: no args
+  # means the whole stack (every node). Both keys missing is the silent-open case.
+  targets="${*:-}"
+  for n in 1 2 3; do
+    eval "rk=\${HIVE_RUNNER_KEY_$n:-}"
+    eval "nk=\${HIVE_NODE_KEY_$n:-}"
+    if [ -z "$rk" ] && [ -z "$nk" ]; then
+      if [ -z "$targets" ] || printf '%s\n' $targets | grep -q "node-$n"; then
+        echo "up.sh: node-$n has neither HIVE_RUNNER_KEY_$n nor HIVE_NODE_KEY_$n:" \
+             "refusing — an unkeyed node is an open one (R2-6); keys come from $ROOT/.env" >&2
+        exit 1
+      fi
+    fi
+  done
+fi
+
 if [ -z "${ZCODE_API_KEY:-}" ]; then
   echo "up.sh: no ZCODE_API_KEY in env or $ROOT/.env: node-N starts, the zcode harness waits" >&2
 fi
