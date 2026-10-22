@@ -89,3 +89,75 @@
 Завещание агента: `submit_will` в завещальной сессии идёт через локальный прокси раннера
 (127.0.0.1:8702 → hive `/node/mcp`), который добавляет `X-Runner-Key` и `X-Runner-Session: will`;
 сестра ключ раннера не видит, метку сессии подделать не может.
+
+## Раунд 1 · 2026-10-22
+
+Коммиты: 57866e5 (план 2 + расширение объёма) · 55866fb (ключи раннера: hive/mind) ·
+94a0bb6 (runtime/node) · 15b0e1d (тесты раннера) · 1a24f74 (docker) · 99d7821+ (фиксы
+стенда: секреты, umask, резолвер egress, таймаут завещания, телеметрия) · пины compose.
+
+### Что сделано
+- `runtime/node/`: раннер (рождение → часы жизни до сессии → длинная сессия → смерть →
+  `mark_dead` → сессия завещания за таймаутом → staged/аварийное завещание → `retire` →
+  архив → `respawn` → следующее рождение), адаптеры opencode/zcode, рабочее место из
+  шаблона T-029 (PERSONA рендер, конфиги обоих харнессов, shared, sticky-bit),
+  will-прокси (добавляет X-Runner-Key + X-Runner-Session: will), конфиг из env/файлов.
+- Граница агент/раннер (P1-1): раннер root, харнесс uid `sister`; ключ раннера — файл
+  0400 root на tmpfs; hive `/registry/*` (запись) и `X-Runner-Session` требуют ключ
+  раннера (HIVE_RUNNER_KEYS), mind `/runner/respawn|birth` — свой (MIND_RUNNER_KEY);
+  без настройки ключей эндпоинты открыты (дев/тесты, прежнее поведение).
+- Сеть (P1-3): `zai-egress` — nginx stream ssl_preread, SNI-allowlist api.z.ai, алиас
+  `api.z.ai` в svc-N, TLS-passthrough без терминации; резолвер 192.168.65.7 (хостов DNS
+  Docker Desktop; прямой UDP 1.1.1.1 на стенде таймаутится) + публичные фолбэки.
+- Compose: node-1..3, body/mind-2..3, сети slot-N/svc-N (internal) + egress-out,
+  volume workplaces-1..3 (свой на слот; mind-N ro для JEV-политии через симлинк
+  `current`; hive из workplaces ничего не читает — монтирования нет), лимиты 1g/0.5cpu.
+- `docker/node/`: образ (python 3.12 + node 22, opencode 1.19.3 и zcode-app-cli
+  3.15.3-36 запинены), entrypoint (секреты → 0400 tmpfs → рендер zcode-провайдера и
+  opencode auth → scrub env → exec), up.sh (подъём ключей из корневого .env).
+
+### Стенд (живой прогон, ключи: ZAI_API_KEY из .env, шлюз с тестовым мастер-ключом)
+- Критерий 1, пробы из node-1: `body-1:8700/runner/status` 200 · `hive:8000/health` 200 ·
+  `llm-gateway:4000/health/liveliness` 200 · `https://api.z.ai/api/anthropic/v1/messages`
+  401 (дошёл до настоящего API через passthrough) — доступно; `body-1:25333` (py4j) 000 ·
+  `mc-server:25575` (RCON) 000 · `mc-server:25565` 000 · `example.com` 000 ·
+  `zcode.z.ai` 000 — закрыто. Internet-DNS из песочницы не резолвится вовсе.
+- Права (P1-2), пробы `su sister` из node-1: `rm PERSONA.md` → Operation not permitted
+  (sticky); запись в `archive/00031/GOALS.md` → Permission denied; `cat
+  /run/node/secrets/runner_key` → Permission denied.
+- Смерть-путь живьём: узел 00029 — скелет, аварийное завещание, архив, респавн, рождение
+  00030; узел 00031 — «shot by Skeleton», ЗАВЕЩАНИЕ АГЕНТА через will-прокси
+  (`submit_will` → staged → `retire` текстом агента), архив, респавн, рождение 00032;
+  узел 00032 — таймаут сессии завещания (600 с в старом образе) → аварийное (фолбэк
+  живьём). Узел 00033 живёт сменой (мир переведён в peaceful после того, как спавн
+  кэмпили рейндж-мобы: 4 смерти подряд за 28–70 с), первая реплика:
+  «Узел 00033 в теле LastOrder01. Смена начата, хроника открыта. Предшественник умер от
+  скелета — ищу дерево и стены до темноты.» — наследие прочитано, предшественник назван.
+- Ключи раннера живьём: node-2/3 получали 401 от hive, пока hive не перечитал полную
+  карту ключей (recreate) — гейт работает; ретраи birth с растущей паузой — работает.
+- Лимиты (P1-5): node-1 542.5 MiB / 1 GiB (zcode-сессия активна), в диапазоне замера
+  T-024 (537–602 MiB); 0.5 cpu достаточно (пики на ходах модели короткие).
+- 3 слота: body/mind/node 2–3 подняты, все три тела в мире (`list`: LastOrder01–03),
+  сёстры 00033/00034/00035 живут; 15-минутное окно и исход смены 00033 — ниже.
+
+### Отклонения от плана
+- Секреты: compose file-secrets на Docker Desktop монтируются 0777 (проверено на стенде:
+  sister читала ключ раннера) — доставка через env до entrypoint, который кладёт их в
+  0400 root tmpfs и чистит своё окружение до exec; у раннера и у сестры секретов в env
+  и в /proc нет (проверено probe).
+- Пины чужих тестов (test_gateway_config, test_jev_policy) обновлены под новый compose:
+  JEV_POLICY_PATH был оставлен T-031 на T-027 сознательно; сети шлюза — след sanctioned
+  правки compose.
+
+### Проверки
+- `uv run pytest`: 643 passed (в т.ч. 17 новых test_node_runner, 4 hive/mind на ключи).
+- `uv run python tools/check.py`: workplaces intact.
+- `docker compose -f docker/compose.yml config`: валиден; `up -d` без ключей — узлы
+  стартуют и ждут (проверено запуском node-1 с пустыми секретами).
+
+### Вне задачи
+- `gamerule` через rcon-cli itzg парсится криво («command» префикс) — обошёл
+  `difficulty peaceful`; на работу сетки не влияет.
+
+### Вопросы
+- нет.
