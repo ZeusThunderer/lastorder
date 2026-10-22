@@ -376,3 +376,10 @@ $ docker compose -f docker/compose.yml --profile jev config -q    # ok (jev-hf �
 ### Вызовы надзора
 - 2026-10-22 · result · 07aeb71 · VERDICT: changes · cost_usd: нет (parse-шаг обёртки
   упал на python-стабе Windows, бюджет $4)
+
+### Самопроверка
+- lo-checker: раундов 1, CHECK: clean
+- C-1 · fixed e9390ba — задублированная секция «Раунд 3» убрана (повторный после
+  сорванного heredoc append), оставлена одна
+- C-2 · fixed e9390ba — имя теста в отчёте дословно:
+  `test_retire_permanent_4xx_parks_the_will`

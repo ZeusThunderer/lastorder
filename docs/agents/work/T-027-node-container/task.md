@@ -2,7 +2,7 @@
 id: T-027
 title: Контейнер узла node-N — песочница, раннер с адаптерами харнесса, архив
 stage: E2
-status: in_progress
+status: review
 criticality: critical
 branch: z/T-027-node-container
 created: 2026-10-17
