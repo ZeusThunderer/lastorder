@@ -167,8 +167,14 @@ class ZCodeAdapter:
 # intent, the prompt as a file (never through a shell or argv — the SESSION_PROMPT
 # is kilobytes), stream-json on stdout for the session id and the quota marks.
 # Toolsets are pinned here AND in config.yaml: the CLI flag is the per-run surface,
-# the config is what any other Hermes entry would see.
-HERMES_TOOLSETS = ("file", "terminal")
+# the config is what any other Hermes entry would see. In Hermes v0.22.4 the
+# -t/--toolsets value is ALSO the MCP server spawn allowlist
+# (hermes_cli/mcp_startup.set_mcp_server_filter matches bare server names): without
+# `body`/`hive` in the list the servers never start — the T-032 run drove the body
+# and the network through 803 terminal calls with zero MCP. The bare names are the
+# aliases of the mcp-<name> toolsets the servers register
+# (tools/mcp_tool_registration.py), so they double as toolsets legally.
+HERMES_TOOLSETS = ("file", "terminal", "body", "hive")
 
 
 class HermesAdapter:

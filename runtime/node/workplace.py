@@ -281,9 +281,11 @@ def _glm_model(model: str) -> str:
 
 def render_hermes_config(model: str, body_base: str, hive_url: str, node_key: str) -> dict:
     """Hermes config.yaml: the Z.ai coding provider, both MCP servers of the slot,
-    files+terminal toolsets and every Hermes extra (memory, skills, self-review,
-    messenger/cron/browser surfaces, update checks) off. No key material here:
-    GLM_API_KEY/GLM_BASE_URL ride HERMES_HOME/.env (written by the entrypoint)."""
+    the file/terminal/body/hive toolsets (T-035: the two server names ride the CLI
+    flag too — it is the spawn allowlist) and every Hermes extra (memory, skills,
+    self-review, messenger/cron/browser surfaces, update checks) off. No key
+    material here: GLM_API_KEY/GLM_BASE_URL ride HERMES_HOME/.env (written by the
+    entrypoint)."""
     return {
         # the config-version stamp of the pinned release (doctor's "outdated v0 → v51"
         # nudge in the dry run): a freshly rendered config IS current, no migration
@@ -304,9 +306,11 @@ def render_hermes_config(model: str, body_base: str, hive_url: str, node_key: st
                 "sampling": {"enabled": False},
             },
         },
-        # The CLI surface without any --toolsets flag: files, terminal, MCP. The
-        # messenger/browser/cron/delegation toolsets exist upstream but never load.
-        "platform_toolsets": {"cli": ["file", "terminal"]},
+        # The CLI surface, kept equal to the adapter's --toolsets flag (T-035): file,
+        # terminal and the bare MCP server names, which the flag matches as the spawn
+        # allowlist and the registry knows as toolset aliases. The messenger/browser/
+        # cron/delegation toolsets exist upstream but never load.
+        "platform_toolsets": {"cli": ["file", "terminal", "body", "hive"]},
         "memory": {"memory_enabled": False, "user_profile_enabled": False, "nudge_interval": 0},
         "skills": {"creation_nudge_interval": 0},
         "updates": {"check": False},
