@@ -3,7 +3,7 @@ name: "lo-checker"
 description: "Самопроверка задачи T-NNN проекта Last Order до сдачи — прогоняет проверки в worktree задачи и сверяет diff с «Можно трогать», критериями приёмки и чек-листом проекта. Только чтение, ничего не правит и не коммитит. Запускает диспетчер lo-run после итога implemented от lo-worker."
 color: yellow
 model: "account:zai-individual-coding-plan/GLM-5.3-Flash"
-thoughtLevel: medium
+thoughtLevel: high
 tools:
   - Read
   - Bash

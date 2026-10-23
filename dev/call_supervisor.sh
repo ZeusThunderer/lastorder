@@ -90,7 +90,7 @@ out="$(claude -p "$prompt" \
   --no-session-persistence --output-format json < /dev/null)"
 rc=$?
 
-printf '%s' "$out" | EFFORT="$effort" PYTHONIOENCODING=utf-8 python -c '
+printf '%s' "$out" | EFFORT="$effort" PYTHONIOENCODING=utf-8 uv run --no-project python -c '
 import json, os, sys
 try:
     d = json.load(sys.stdin)
