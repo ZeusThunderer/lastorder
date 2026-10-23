@@ -45,8 +45,10 @@ $ bash /c/ai-char/dev/check.sh                 # перед этим комми�
 pytest: ok · 716 passed, 3 skipped in 56.56s
 check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
 $ uv run python dev/mvp_report.py --knowledge C:/lastorder-t032-run/knowledge \
-    --workplaces C:/lastorder-t032-run/workplaces-1 …-2 …-3 --run C:/lastorder-t032-run/run \
-    --to 2026-10-23T15:06:19Z --window 2h
+    --workplaces C:/lastorder-t032-run/workplaces-1 \
+    --workplaces C:/lastorder-t032-run/workplaces-2 \
+    --workplaces C:/lastorder-t032-run/workplaces-3 \
+    --run C:/lastorder-t032-run/run --to 2026-10-23T15:06:19Z --window 2h
 Итог: FAIL · generations PASS · traits PASS · inheritance FAIL (1 из 13) ·
 wills PASS (0 без will.md, 85% аварийных) · sessions FAIL (1 таймаут воли) ·
 cost N-A (шлюз не поднимался) · self_correction FAIL (нет предложений LO) ·
@@ -79,3 +81,44 @@ uc_lines PASS (0 утечек; 4 «WARNING» в сообщениях — зам�
 Раундов `lo-checker`: 1 · итог **CHECK: findings**. Находки: C-1 · fixed (этот коммит);
 C-2 · fixed (этот коммит); C-3 · fixed (этот коммит); C-4 · fixed (этот коммит).
 Не-находка чекера о допустимости N-A по деньгам принята: финальное решение за ревью.
+
+## Раунд 2 · 2026-10-23 · сдача на ревью
+Раунд 1 (инструмент, тесты, прогон, ответы C-1…C-4) — выше. Чекер раунда 2: находок нет;
+попутная заметка диспетчера о сокращённой команде воспроизведения в раунде 1 исправлена
+в этом коммите: `--workplaces` теперь расписан на все три слота дословно (report.md,
+блок «Проверки» раунда 1).
+
+### Проверки
+```
+$ bash /c/ai-char/dev/check.sh                 # перед этим коммитом
+pytest: ok · 716 passed, 3 skipped in 68.48s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+$ uv run python dev/mvp_report.py --knowledge C:/lastorder-t032-run/knowledge \
+    --workplaces C:/lastorder-t032-run/workplaces-1 \
+    --workplaces C:/lastorder-t032-run/workplaces-2 \
+    --workplaces C:/lastorder-t032-run/workplaces-3 \
+    --run C:/lastorder-t032-run/run --to 2026-10-23T15:06:19Z --window 2h --json
+"overall": "FAIL" · pass pass fail pass fail n-a fail pass   # поколения черты наследие
+                                                           # воли сессии расход самоправка uc
+$ git diff main...HEAD --name-only
+dev/mvp_report.py · docs/agents/runs/2026-10-23-mvp.md ·
+docs/agents/work/T-032-mvp-run/{task.md,report.md} · tests/test_mvp_report.py
+```
+Не прогонялось: повтор прогона на стенде с ключами — ключей в корневом `.env` нет;
+N-A по деньгам шлюза задокументирован (чекер раунда 2: допустимо, решение за ревью).
+
+### Отклонения от задачи
+- Как в раунде 1 (стенд dev-open без ключей шлюза/hive/LO; узлы 00071/00073/00080
+  закрыты в начале окна).
+
+### Вне задачи
+- Предложения задач раунда 1 остаются открытыми для надзора (ключи оператора; T-029
+  первая реплика; will-подсказка/таймаут; лимит памяти node-N; П-1…П-4 из T-034).
+
+### Вызовы надзора
+- (не было)
+
+### Самопроверка
+Раундов `lo-checker`: 2 · итог последнего: `CHECK: clean`. Находки раунда 1: C-1 · fixed
+0971756; C-2 · fixed 0971756; C-3 · fixed 0971756; C-4 · fixed 0971756. Раунд 2 — находок
+нет; попутная заметка диспетчера (команда воспроизведения) · fixed (этот коммит).
