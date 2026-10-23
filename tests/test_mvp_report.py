@@ -239,9 +239,9 @@ class Stand:
             encoding="utf-8",
         )
 
-    def messages(self, rows: list[str]) -> None:
+    def messages(self, rows: list[dict]) -> None:
         (self.run / "hermes-messages.jsonl").write_text(
-            "\n".join(json.dumps({"role": "user", "content": row}, ensure_ascii=False) for row in rows) + "\n",
+            "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
             encoding="utf-8",
         )
 
@@ -310,7 +310,7 @@ def full_stand(tmp_path: Path) -> Stand:
     stand.proposal("p-0001")
     stand.gateway(0.60)
     stand.hermes()
-    stand.messages(["observe: hp 20, chat: <LastOrder02> на смене"])
+    stand.messages([{"role": "user", "content": "observe: hp 20, chat: <LastOrder02> на смене"}])
     return stand
 
 
@@ -432,7 +432,14 @@ def test_self_correction_fails_without_memory_and_proposals(tmp_path: Path) -> N
 
 def test_uc_lines_fail_on_service_prefix_and_na_without_messages(tmp_path: Path) -> None:
     leaky = full_stand(tmp_path / "a")
-    leaky.messages(["observe result", "chat line: [Alto Clef] Task finished"])
+    # a leaked uc line rides an observe result; a sister's own WARNING note must not count
+    leaky.messages(
+        [
+            {"role": "tool", "content": json.dumps({"hp": 20, "chat": ["[Alto Clef] Task finished"]})},
+            {"role": "tool", "content": json.dumps({"content": "WARNING: after placing, perception shows dirt"})},
+            {"role": "assistant", "content": "WARNING: my own note, in my own file"},
+        ]
+    )
     item = next(i for i in leaky.report().items if i.key == "uc_lines")
     assert item.status == "fail"
     assert any("[Alto Clef] Task finished" in line for line in item.lines)

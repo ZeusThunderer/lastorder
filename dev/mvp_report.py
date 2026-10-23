@@ -59,6 +59,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from runtime.knowledge.schema import SchemaError, Will  # noqa: E402
 from runtime.knowledge.slice import format_serial, parse_utc  # noqa: E402
+from runtime.perception.chat import is_service_line  # noqa: E402
 
 # The uc chat markers of runtime/perception/chat.py (ADR-020): if one of these ever
 # appears in a Hermes message, the scrub failed.
@@ -685,6 +686,38 @@ def item_self_correction(
     return item
 
 
+def _service_leaks(path: Path) -> list[str]:
+    """uc service lines inside what the harness fed the agent.
+
+    A real leak rides an observe result: role=tool content whose decoded JSON carries
+    a `chat` array. Assistant rows are the agent's own speech — the sisters write
+    "WARNING: ..." into their own notes (seen in the 2026-10-23 run), and that is not
+    a leak, so only user and tool rows are scanned, tool rows through the chat array
+    (is_service_line, the observe rule itself), user rows line by line.
+    """
+    hits: list[str] = []
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            row = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if row.get("role") not in ("user", "tool"):
+            continue
+        content = str(row.get("content") or "")
+        texts = content.splitlines()
+        if row.get("role") == "tool":
+            try:
+                decoded = json.loads(content)
+            except json.JSONDecodeError:
+                decoded = None
+            if isinstance(decoded, dict) and isinstance(decoded.get("chat"), list):
+                texts = [str(item) for item in decoded["chat"]]
+        for text in texts:
+            if is_service_line(text):
+                hits.append(f"{row.get('role')}: {text.strip()[:160]}")
+    return hits
+
+
 def item_uc_lines(facts: Facts) -> Item:
     item = Item("uc_lines", "8. Служебные строки uc не попадают агенту")
     item.lines.append(
@@ -695,13 +728,8 @@ def item_uc_lines(facts: Facts) -> Item:
         item.status = "n-a"
         item.reason = "нет дампа сообщений харнесса (hermes-messages.jsonl) — проверить нечем"
         return item
-    hits: list[str] = []
-    for line in facts.hermes_messages.read_text(encoding="utf-8", errors="replace").splitlines():
-        for prefix in SERVICE_PREFIXES:
-            if prefix in line:
-                hits.append(line.strip()[:200])
-                break
-    item.lines.extend(f"- ПРОПОУСК: {hit}" for hit in hits[:10])
+    hits = _service_leaks(facts.hermes_messages)
+    item.lines.extend(f"- ПРОПУСК: {hit}" for hit in hits[:10])
     item.status = "pass" if not hits else "fail"
     item.reason = (
         f"в сообщениях агента служебных строк uc: {len(hits)}"
