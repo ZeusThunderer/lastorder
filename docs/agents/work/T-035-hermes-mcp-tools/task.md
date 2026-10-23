@@ -2,11 +2,14 @@
 id: T-035
 title: Hermes — инструменты MCP тела и hive в сессиях узла
 stage: E3
-status: in_progress
+status: blocked
 criticality: critical
 branch: z/T-035-hermes-mcp-tools
 created: 2026-10-23
 ---
+
+Blocked: критерий 3 упирается в отсутствие пакета `mcp` в hermes-venv образа — фикс в
+`docker/node/Dockerfile` («Нельзя трогать»), вопрос и варианты в report.md (Раунд 1).
 
 # T-035. Hermes — инструменты MCP тела и hive в сессиях узла
 
