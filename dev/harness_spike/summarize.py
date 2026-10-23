@@ -372,10 +372,31 @@ def hermes_stream_summary(events: list[dict]) -> dict:
 
 def hermes_state_summary(state: dict, runner_events: list[dict]) -> dict:
     """HERMES_HOME/state.db dump (the node runner pipes the CLI stdout away): the
-    `sessions`/`session_model_usage` rows are the token source. `turns` here are
+    `sessions`/`session_model_usage` rows are the token source; usage columns
+    (api_call_count, tokens) live in `session_model_usage` and are joined onto each
+    session row by id (summed when a session used several models). `turns` here are
     api_call_count (model requests, the zcode-comparable metric). A session started
     within +-120 s of a runner `will.session` event is the will session, not life."""
-    rows = [r for r in (state.get("sessions") or []) if isinstance(r, dict)]
+    usage: dict[str, dict[str, int]] = {}
+    for u in state.get("session_model_usage") or []:
+        if not isinstance(u, dict) or not u.get("session_id"):
+            continue
+        acc = usage.setdefault(str(u["session_id"]), {})
+        for col in ("api_call_count", "input_tokens", "output_tokens", "reasoning_tokens",
+                    "cache_read_tokens", "cache_write_tokens"):
+            v = u.get(col)
+            if isinstance(v, (int, float)) and v >= 0:
+                acc[col] = acc.get(col, 0) + int(v)
+    rows = []
+    for r in state.get("sessions") or []:
+        if not isinstance(r, dict):
+            continue
+        row = dict(r)
+        u = usage.get(str(row.get("id")))
+        if u:
+            for col, val in u.items():
+                row[col] = val  # the usage row is authoritative over session-level copies
+        rows.append(row)
     will_started = [
         _iso_to_unix(str(ev.get("ts") or "")) for ev in runner_events
         if str(ev.get("type") or "") == "will.session"
@@ -401,7 +422,7 @@ def hermes_state_summary(state: dict, runner_events: list[dict]) -> dict:
             "messages": _int(row, "message_count"),
             "tool_calls": _int(row, "tool_call_count"),
             "model": row.get("model"),
-            "title": row.get("title"),
+            "title": row.get("display_name") or row.get("title"),
             "compression_fallback_streak": _int(row, "compression_fallback_streak"),
         }
         if any(abs(started - w) <= 120 for w in will_started):
@@ -425,11 +446,17 @@ def hermes_state_summary(state: dict, runner_events: list[dict]) -> dict:
         _tot(sessions, "cache_write"),
         "state.db: turns = api_call_count; output includes reasoning tokens",
     )
+    # state.db counts the cached prefix OUTSIDE input_tokens (hermes's own result
+    # envelope folds it in, the DB does not) — the share uses the DB convention here
+    tin, tcache = _tot(sessions, "input"), _tot(sessions, "cache_read")
+    if tin + tcache:
+        block["tokens"]["cache_share"] = round(tcache / (tin + tcache), 3)
     block["sessions"] = sessions
     block["life_sessions"] = len(life)
     block["will_sessions"] = len(will)
     block["reasoning_total"] = _tot(sessions, "reasoning")
-    block["compression_marks"] = sum(1 for r in sessions if r["compression_fallback_streak"])
+    # no compaction/summary marks exist in the state.db dump (usage rows carry task=""),
+    # so nothing is reported for auxiliary calls — absence is not zero
     block["quota_credits"] = {
         "model": model,
         "credits": glm_credits(

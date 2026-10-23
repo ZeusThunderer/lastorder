@@ -191,3 +191,31 @@ def test_hermes_main_reads_the_mind_log_when_present(tmp_path: Path, monkeypatch
         summarize.main()
     summary = json.loads((run / "summary.json").read_text(encoding="utf-8"))
     assert summary["mcp"]["calls_by_tool"] == {"observe": 1}
+
+
+def test_hermes_state_summary_joins_usage_rows_by_session_id() -> None:
+    state = {
+        "sessions": [
+            {"id": "local-a", "started_at": 1792754040.0, "model": "glm-5.3-flash",
+             "message_count": 10, "tool_call_count": 4},
+            {"id": "local-b", "started_at": 1792754904.0, "model": "glm-5.3-flash",
+             "message_count": 5, "tool_call_count": 2},
+        ],
+        "session_model_usage": [
+            {"session_id": "local-a", "model": "glm-5.3-flash", "api_call_count": 3,
+             "input_tokens": 1000, "output_tokens": 100, "reasoning_tokens": 10,
+             "cache_read_tokens": 5000, "cache_write_tokens": 0},
+            {"session_id": "local-b", "model": "glm-5.3-flash", "api_call_count": 2,
+             "input_tokens": 2000, "output_tokens": 200, "reasoning_tokens": 20,
+             "cache_read_tokens": 1000, "cache_write_tokens": 0},
+        ],
+    }
+    out = summarize.hermes_state_summary(state, [])
+    assert out["turns"] == 5
+    by_id = {s["session_id"]: s for s in out["sessions"]}
+    assert by_id["local-a"]["api_calls"] == 3
+    assert by_id["local-a"]["input"] == 1000
+    assert out["quota_credits"]["model"] == "glm-5.3-flash"
+    # (1000+2000)*2.3 + (5000+1000)*0.56 + (100+10+200+20)*8 all /10^4
+    expected = (3000 * 2.3 + 6000 * 0.56 + 330 * 8) / 10_000
+    assert abs(out["quota_credits"]["credits"] - expected) < 0.01
