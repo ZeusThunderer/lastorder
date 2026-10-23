@@ -112,6 +112,17 @@ def store(base: Path) -> KnowledgeStore:
     return KnowledgeStore(base, git=False)
 
 
+@pytest.fixture(autouse=True)
+def no_repo_primer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """T-012 tests are hermetic to the repo: agent/last_order/primer is the real primer
+    (T-010), and a fresh plain-mode store would load all of it, shifting ids and counts.
+    Tests that want a primer set PRIMER_DIR themselves and override this."""
+    directory = tmp_path / "empty-primer"
+    directory.mkdir()
+    monkeypatch.setenv("PRIMER_DIR", str(directory))
+    return directory
+
+
 # --- init and primer ----------------------------------------------------------------------
 
 
@@ -596,8 +607,9 @@ def test_unknown_node_and_broken_candidate(store: KnowledgeStore):
 
 def test_git_log_shows_every_op_as_hive(base: Path, monkeypatch):
     monkeypatch.delenv("PERCEPTION_MODE", raising=False)
-    monkeypatch.delenv("PRIMER_DIR", raising=False)
-    opened = KnowledgeStore(base, git=True)  # plain mode, no primer dir: nothing to load
+    # PRIMER_DIR stays at the autouse fixture's empty directory: the repo primer (T-010)
+    # is real content, not this test's concern
+    opened = KnowledgeStore(base, git=True)  # plain mode, empty primer dir: nothing to load
     serial = birth(opened)
     opened.submit_candidate(serial, candidate())
     peer = birth(opened, slot="LastOrder02")

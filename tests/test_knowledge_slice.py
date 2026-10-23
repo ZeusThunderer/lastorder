@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from runtime.knowledge import budget
 from runtime.knowledge.schema import Record, Will, WillMeta
 from runtime.knowledge.slice import (
@@ -14,6 +16,17 @@ from runtime.lastorder.traits import Traits
 from runtime.ports import KnowledgeCandidate, NetworkGoal, NodeBrief, Vote
 
 T0 = "2026-10-17T10:00:00+00:00"
+
+
+@pytest.fixture(autouse=True)
+def no_repo_primer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """The store test below builds a fresh plain-mode base; the repo primer
+    (agent/last_order/primer, T-010) must not leak into it — PRIMER_DIR points
+    at an empty directory."""
+    directory = tmp_path / "empty-primer"
+    directory.mkdir()
+    monkeypatch.setenv("PRIMER_DIR", str(directory))
+    return directory
 
 
 def traits(seed: int = 42) -> Traits:
