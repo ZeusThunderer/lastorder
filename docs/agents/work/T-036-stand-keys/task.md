@@ -2,7 +2,7 @@
 id: T-036
 title: Ключи стенда — генерация локальных токенов и виртуальных ключей шлюза в .env
 stage: E3
-status: ready
+status: in_progress
 criticality: normal
 branch: z/T-036-stand-keys
 created: 2026-10-23
