@@ -1,7 +1,10 @@
 # Last Order MVP stack (ADR-015). Run from the repo root:
-#   docker compose -f docker/compose.yml up -d --build
-# Slots are body-N + mind-N pairs; the mind lives in its body's network namespace because the
-# unionclef py4j gateway listens on localhost only.
+#   bash docker/node/up.sh                  # the whole stack with secrets lifted from .env
+#   NODE_DEV_OPEN=1 docker compose -f docker/compose.yml up -d   # dev, no keys: gates open
+# Slots are body-N + mind-N + node-N triples; the mind lives in its body's network
+# namespace because the unionclef py4j gateway listens on localhost only, and the node
+# sandbox reaches ONLY its own body (slot-N, internal), hive/llm-gateway/zai-egress
+# (svc-N, internal) and api.z.ai through the passthrough proxy (ADR-033, T-027).
 name: lastorder
 
 x-body: &body
@@ -18,6 +21,97 @@ x-body: &body
     BODY_SIM_DISTANCE: "${BODY_SIM_DISTANCE:-5}"   # vanilla client minimum; lower falls back to 12
     BODY_MAX_FPS: "${BODY_MAX_FPS:-10}"
     MALLOC_ARENA_MAX: "2"   # glibc arenas: 8 per thread by default, 2 is plenty for a JVM body
+
+# The mind of a slot (NETWORK.md section 3): C1 plus the body MCP server on :8700 in the
+# body's network namespace (the py4j bridge stays localhost-only). The runner endpoints
+# (/runner/status, /runner/respawn, /runner/birth) ride the same port behind the slot's
+# runner key (T-027). The Jev policy is the living sister's workplace file, reached
+# through the `current` symlink the runner maintains on the slot's workplaces volume
+# (re-read on every threat, so a rebirth moves it by itself).
+x-mind: &mind
+  build:
+    context: ..
+    dockerfile: docker/mind/Dockerfile
+  image: lastorder-mind:dev
+  restart: unless-stopped
+  environment: &mind-env
+    MCP_BODY_PORT: "8700"
+    MCP_LOG_PATH: /mind-run/log.jsonl
+    MIND_TICK_S: "${MIND_TICK_S:-0.5}"
+    MIND_IDLE_S: "${MIND_IDLE_S:-120}"
+    MIND_FLEE_HP: "${MIND_FLEE_HP:-6}"
+    # LLM through the gateway (T-026, ADR-033): no provider key ever enters this
+    # container. No health gate on llm-gateway on purpose: a down gateway is a retry
+    # case (NETWORK.md section 9), Jev timeouts fall back to the C1 rules.
+    LLM_API_BASE: http://llm-gateway:4000
+    JEV_BACKEND: "${JEV_BACKEND:-rules}"
+    JEV_MODEL: "${JEV_MODEL:-openrouter/typesafe/jev-router}"
+    JEV_TIMEOUT_S: "${JEV_TIMEOUT_S:-1.5}"
+    JEV_MIN_INTERVAL_S: "${JEV_MIN_INTERVAL_S:-3}"
+    JEV_POLICY_PATH: /workplaces/current/policy/threat.md
+    JEV_POLICY_MAX_CHARS: "${JEV_POLICY_MAX_CHARS:-1500}"
+    # fail-closed (review R2-6): without the slot's runner key the mind refuses to
+    # start rather than serve /runner/* ungated; NODE_DEV_OPEN=1 is the dev exception
+    NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
+  command: ["python", "-m", "runtime.mind"]
+
+# The node sandbox of a slot (T-027, ADR-033): the runner plus both harnesses in one
+# container. The runner is root (it drops every harness process to the `sister` uid and
+# reads its secrets from 0400 files); the container itself is read-only with tmpfs homes
+# and no privilege beyond what supervision needs. Limits per NETWORK.md section 9
+# (the T-024 spike measured 537-602 MiB harness peaks; the stand run re-checks 1g/0.5).
+x-node: &node
+  build:
+    context: ..
+    dockerfile: docker/node/Dockerfile
+  image: lastorder-node:dev
+  restart: unless-stopped
+  mem_limit: 1g
+  cpus: "0.5"
+  read_only: true
+  tmpfs:
+    - /tmp:size=1g,mode=1777
+    - /home/sister:size=768m,mode=700
+    - /run/node:size=64m,mode=700
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  cap_add: ["SETUID", "SETGID", "CHOWN", "FOWNER", "DAC_OVERRIDE", "KILL"]
+  pids_limit: 512
+  environment: &node-env
+    BODY_BASE: http://body-1:8700
+    HIVE_URL: http://hive:8000
+    WORKPLACES_DIR: /workplaces
+    HARNESS: "${NODE_HARNESS:-zcode}"
+    HARNESS_FAILOVER: "${NODE_HARNESS_FAILOVER:-opencode}"
+    QUOTA_ACTION: "${NODE_QUOTA_ACTION:-wait}"
+    GATEWAY_URL: http://llm-gateway:4000
+    ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"
+    OPENCODE_MODEL: "${OPENCODE_MODEL:-openrouter/qwen/qwen3.7-flash}"
+    WILL_TIMEOUT_S: "${WILL_TIMEOUT_S:-900}"
+    HIVE_PENDING_WILLS: /hive-run/pending_wills
+    SISTER_UID: "1001"
+    SISTER_GID: "1001"
+    # Secrets reach the container as env ONLY as far as the entrypoint, which writes
+    # them to the root-only tmpfs /run/node/secrets (0400) and scrubs its environment
+    # before exec'ing the runner: compose file-secrets are 0777 on Docker Desktop
+    # (verified on the stand: a sister could read the runner key), so files-under-
+    # /run/secrets cannot hold the boundary. Per-slot values come below.
+    ZAI_KEY_FILE: /run/node/secrets/zai_api_key
+    # fail-closed (review R2-6): without both keys the runner logs runner.no_keys and
+    # waits instead of birthing an open node; NODE_DEV_OPEN=1 is the dev exception
+    NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
+  command: ["python", "-m", "runtime.node"]
+  volumes:
+    # Only the staged wills of submit_will (T-028 contract), by subpath: the whole
+    # hive-run volume would also show events.jsonl and other slots' wills to the
+    # sister (review R2-9). The hive creates the subpath before uvicorn starts.
+    - &hive-wills-mount
+      type: volume
+      source: hive-run
+      target: /hive-run/pending_wills
+      read_only: true
+      volume:
+        subpath: pending_wills
 
 services:
   mc-server:
@@ -51,20 +145,211 @@ services:
       MC_SERVER: mc-server:25565
     volumes:
       - body-1:/data
+    networks: [default, slot-1]   # slot-1 carries mind-1's MCP to node-1 (internal)
 
+  # The mind of slot 1: see the x-mind anchor.
   mind-1:
+    <<: *mind
+    network_mode: "service:body-1"
+    depends_on: [body-1]
+    environment:
+      <<: *mind-env
+      MC_USERNAME: LastOrder01
+      LLM_API_KEY: "${GATEWAY_KEY_MIND_1:-}"
+      MIND_RUNNER_KEY: "${HIVE_RUNNER_KEY_1:-}"
+    volumes:
+      - mind-1-run:/mind-run
+      - workplaces-1:/workplaces:ro   # the Jev policy of the living sister, read-only
+
+  # The sandbox of slot 1 (T-027).
+  node-1:
+    <<: *node
+    depends_on: [mind-1, hive]   # hive creates the pending_wills subpath before uvicorn
+    environment:
+      <<: *node-env
+      NODE_SLOT: LastOrder01
+      BODY_BASE: http://body-1:8700
+      RUNNER_KEY_FILE: /run/node/secrets/runner_key
+      HIVE_NODE_KEY_FILE: /run/node/secrets/node_mcp_key
+      GATEWAY_KEY_FILE: /run/node/secrets/gateway_node_key
+      HIVE_RUNNER_KEY: "${HIVE_RUNNER_KEY_1:-}"
+      HIVE_NODE_KEY: "${HIVE_NODE_KEY_1:-}"
+      GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_1:-}"
+      ZAI_API_KEY: "${ZCODE_API_KEY:-}"
+    volumes:
+      - *hive-wills-mount
+      - workplaces-1:/workplaces
+    networks: [slot-1, svc-1]
+
+  body-2:
+    <<: *body
+    environment:
+      <<: *body-env
+      MC_USERNAME: LastOrder02
+      MC_SERVER: mc-server:25565
+    volumes:
+      - body-2:/data
+    networks: [default, slot-2]
+
+  mind-2:
+    <<: *mind
+    network_mode: "service:body-2"
+    depends_on: [body-2]
+    environment:
+      <<: *mind-env
+      MC_USERNAME: LastOrder02
+      LLM_API_KEY: "${GATEWAY_KEY_MIND_2:-}"
+      MIND_RUNNER_KEY: "${HIVE_RUNNER_KEY_2:-}"
+    volumes:
+      - mind-2-run:/mind-run
+      - workplaces-2:/workplaces:ro
+
+  node-2:
+    <<: *node
+    depends_on: [mind-2, hive]
+    environment:
+      <<: *node-env
+      NODE_SLOT: LastOrder02
+      BODY_BASE: http://body-2:8700
+      RUNNER_KEY_FILE: /run/node/secrets/runner_key
+      HIVE_NODE_KEY_FILE: /run/node/secrets/node_mcp_key
+      GATEWAY_KEY_FILE: /run/node/secrets/gateway_node_key
+      HIVE_RUNNER_KEY: "${HIVE_RUNNER_KEY_2:-}"
+      HIVE_NODE_KEY: "${HIVE_NODE_KEY_2:-}"
+      GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_2:-}"
+      ZAI_API_KEY: "${ZCODE_API_KEY:-}"
+    volumes:
+      - *hive-wills-mount
+      - workplaces-2:/workplaces
+    networks: [slot-2, svc-2]
+
+  body-3:
+    <<: *body
+    environment:
+      <<: *body-env
+      MC_USERNAME: LastOrder03
+      MC_SERVER: mc-server:25565
+    volumes:
+      - body-3:/data
+    networks: [default, slot-3]
+
+  mind-3:
+    <<: *mind
+    network_mode: "service:body-3"
+    depends_on: [body-3]
+    environment:
+      <<: *mind-env
+      MC_USERNAME: LastOrder03
+      LLM_API_KEY: "${GATEWAY_KEY_MIND_3:-}"
+      MIND_RUNNER_KEY: "${HIVE_RUNNER_KEY_3:-}"
+    volumes:
+      - mind-3-run:/mind-run
+      - workplaces-3:/workplaces:ro
+
+  node-3:
+    <<: *node
+    depends_on: [mind-3, hive]
+    environment:
+      <<: *node-env
+      NODE_SLOT: LastOrder03
+      BODY_BASE: http://body-3:8700
+      RUNNER_KEY_FILE: /run/node/secrets/runner_key
+      HIVE_NODE_KEY_FILE: /run/node/secrets/node_mcp_key
+      GATEWAY_KEY_FILE: /run/node/secrets/gateway_node_key
+      HIVE_RUNNER_KEY: "${HIVE_RUNNER_KEY_3:-}"
+      HIVE_NODE_KEY: "${HIVE_NODE_KEY_3:-}"
+      GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_3:-}"
+      ZAI_API_KEY: "${ZCODE_API_KEY:-}"
+    volumes:
+      - *hive-wills-mount
+      - workplaces-3:/workplaces
+    networks: [slot-3, svc-3]
+
+  # The hive (NETWORK.md section 3): node registry, knowledge base under git (T-012 store),
+  # the lifetime scan and RCON deaths (T-022), the network MCP (T-028). Port 8000 stays
+  # inside the docker network. Exactly one uvicorn worker: lifecycle.json, the inboxes
+  # and the slot sequence are in-process state under locks (T-022 review P1-4). The key
+  # maps are lifted by docker/node/up.sh; an empty HIVE_RUNNER_KEYS is a startup refusal
+  # (review R2-6) — NODE_DEV_OPEN=1 is the explicit dev exception. The mkdir creates the
+  # pending_wills subpath the node sandboxes mount read-only (R2-9) before uvicorn runs.
+  hive:
     build:
       context: ..
       dockerfile: docker/mind/Dockerfile
     image: lastorder-mind:dev
-    network_mode: "service:body-1"
-    depends_on: [body-1]
+    depends_on:
+      mc-server:
+        condition: service_healthy
     environment:
-      MC_USERNAME: LastOrder01
+      KNOWLEDGE_DIR: /knowledge
+      RUN_DIR: /hive-run
       RCON_HOST: mc-server
       RCON_PASSWORD: "${RCON_PASSWORD:-lastorder}"
-    command: ["python", "tools/body_probe.py", "--kill"]
-    restart: "no"
+      MAX_LIFE_MIN: "${MAX_LIFE_MIN:-45}"
+      LLM_API_BASE: http://llm-gateway:4000
+      LLM_API_KEY: "${GATEWAY_KEY_HIVE:-}"
+      HIVE_MCP_NODE_KEYS: "${HIVE_MCP_NODE_KEYS:-}"
+      HIVE_RUNNER_KEYS: "${HIVE_RUNNER_KEYS:-}"
+      HIVE_MCP_LO_KEY: "${HIVE_MCP_LO_KEY:-}"
+      NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
+    command:
+      - sh
+      - -c
+      - mkdir -p /hive-run/pending_wills && exec uvicorn runtime.hive.app:create_app --factory --host 0.0.0.0 --port 8000 --workers 1
+    volumes:
+      - knowledge:/knowledge
+      - hive-run:/hive-run   # not over the image's system /run (review R1-6)
+    networks: [default, svc-1, svc-2, svc-3, svc-lo]
+    restart: unless-stopped
+
+  # Last Order's own sandbox (T-030, ADR-036): the admin alarm plus the short harness
+  # sessions of the network's administrator. The node image carries both harnesses (the
+  # mind image of the hive does not); the sandbox reaches ONLY hive and llm-gateway over
+  # the internal svc-lo network (plan review P1-1): no mc-server and its RCON, no node
+  # slots, no way out. The knowledge volume is read-only here — the base is written only
+  # by the hive (ADR-017), through the MCP tools the session gets. The node entrypoint
+  # renders the gateway key into the opencode auth store of the agent uid and scrubs it
+  # from the environment; no provider key ever enters this container.
+  last-order:
+    build:
+      context: ..
+      dockerfile: docker/node/Dockerfile
+    image: lastorder-node:dev
+    restart: unless-stopped
+    depends_on: [hive, llm-gateway]
+    mem_limit: 1g
+    cpus: "0.5"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+      - /home/sister:size=768m,mode=700
+      - /run/node:size=64m,mode=700
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["SETUID", "SETGID", "CHOWN", "FOWNER", "DAC_OVERRIDE", "KILL"]
+    pids_limit: 512
+    environment:
+      ADMIN_WORKPLACE: /workplace
+      ADMIN_TEMPLATE_DIR: /app/agent/network
+      ADMIN_KNOWLEDGE_DIR: /knowledge
+      HIVE_URL: http://hive:8000
+      GATEWAY_URL: http://llm-gateway:4000
+      HIVE_MCP_LO_KEY: "${HIVE_MCP_LO_KEY:-}"
+      ADMIN_MODEL: "${LO_MODEL:-z-ai/glm-5.3-flash}"   # the smart tier through the gateway
+      ADMIN_EVERY_MIN: "${ADMIN_EVERY_MIN:-10}"
+      ADMIN_PROPOSALS_BATCH: "${ADMIN_PROPOSALS_BATCH:-3}"
+      ADMIN_POLL_S: "${ADMIN_POLL_S:-5}"
+      ADMIN_SESSION_TIMEOUT_S: "${ADMIN_SESSION_TIMEOUT_S:-600}"
+      ADMIN_SESSION_MIN_GAP_S: "${ADMIN_SESSION_MIN_GAP_S:-30}"
+      NAME_PRESET: "${NAME_PRESET:-lab}"
+      GATEWAY_NODE_KEY: "${GATEWAY_KEY_LO:-}"   # the node entrypoint renders it into opencode auth
+      SISTER_UID: "1001"
+      SISTER_GID: "1001"
+    command: ["python", "-m", "runtime.hive.admin"]
+    volumes:
+      - hive-work:/workplace
+      - knowledge:/knowledge:ro
+    networks: [svc-lo]
 
   # FastJev decision server for C1 (T-005, ADR-004/023). Raises only under --profile jev.
   # GPU 0 is the RTX 2070 (5070 Ti stays free); model checkpoints live in the named volume,
@@ -109,7 +394,103 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # The LLM gateway (NETWORK.md section 3, ADR-033): LiteLLM proxy, the only holder of provider
+  # keys (env, never files). Port 4000 stays inside the docker network — nothing is published
+  # to the host; consumers reach it as llm-gateway:4000. Virtual keys, per-key ceilings (rpm, $/h)
+  # and spend tracking live in its Postgres DB; dev/gateway_keys.py and dev/gateway_report.py
+  # drive both through `docker compose exec`, so no admin port is needed either. Compose cannot
+  # read the repo-root .env, and the proxy refuses to start without a master key — bring it up
+  # with `bash docker/gateway/up.sh`, which lifts GATEWAY_MASTER_KEY (and the provider key)
+  # from the root .env as single variables.
+  llm-gateway:
+    image: ghcr.io/berriai/litellm:main-stable
+    depends_on:
+      gateway-db:
+        condition: service_healthy
+    environment:
+      LITELLM_MASTER_KEY: "${GATEWAY_MASTER_KEY:-}"   # issues virtual keys; set in .env
+      # the password lands in the URL raw (no url-encoding in compose): letters/digits only,
+      # see .env.example
+      DATABASE_URL: postgresql://litellm:${GATEWAY_DB_PASSWORD:-lastorder}@gateway-db:5432/litellm
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"   # the only provider key in the stack
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    networks: [default, gateway-internal, svc-1, svc-2, svc-3, svc-lo]
+    volumes:
+      - ./gateway/config.yaml:/app/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+    restart: unless-stopped
+
+  # Postgres of the gateway: virtual keys and spend rows. Only llm-gateway sees it (private
+  # network, no published port); the default password matches the mc-server RCON precedent of
+  # an internal-only secret with an .env override.
+  gateway-db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: "${GATEWAY_DB_PASSWORD:-lastorder}"
+      POSTGRES_DB: litellm
+    volumes:
+      - gateway-db:/var/lib/postgresql/data
+    networks: [gateway-internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # The only way out of a node sandbox (T-027 plan review P1-3): a TLS passthrough with an
+  # SNI allowlist of exactly api.z.ai. In svc-N it carries the network alias `api.z.ai`, so
+  # the zcode harness talks to the official base URL and verifies the real certificate; no
+  # proxy env, no base-URL override. Everything else (internet, other hosts) is refused.
+  zai-egress:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./node/zai-egress.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      egress-out: {}
+      svc-1:
+        aliases: ["api.z.ai"]
+      svc-2:
+        aliases: ["api.z.ai"]
+      svc-3:
+        aliases: ["api.z.ai"]
+    restart: unless-stopped
+
 volumes:
   world:
   body-1:
+  body-2:
+  body-3:
+  mind-1-run:
+  mind-2-run:
+  mind-3-run:
+  knowledge:
+  hive-run:
+  hive-work:
+  gateway-db:
   jev-hf:
+  workplaces-1:
+  workplaces-2:
+  workplaces-3:
+
+networks:
+  gateway-internal: {}
+  # body-N + node-N of one slot: the mind's MCP and runner endpoints, nothing else
+  slot-1: {internal: true}
+  slot-2: {internal: true}
+  slot-3: {internal: true}
+  # hive + llm-gateway + zai-egress + node-N of one slot: the services a node may use
+  svc-1: {internal: true}
+  svc-2: {internal: true}
+  svc-3: {internal: true}
+  # last-order + hive + llm-gateway only (T-030 review P1-1): the administrator's
+  # bash has no route to mc-server/RCON, the node slots or the internet
+  svc-lo: {internal: true}
+  # the only network with a route out: zai-egress alone sits on it
+  egress-out: {}

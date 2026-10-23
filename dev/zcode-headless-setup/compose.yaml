@@ -1,0 +1,42 @@
+name: zcode-agents
+
+x-agent: &agent
+  build:
+    context: .
+    args:
+      ZCODE_APP_CLI_VERSION: "3.15.3-36"
+      AGENT_UID: "${UID:-1000}"
+      AGENT_GID: "${GID:-1000}"
+  image: zcode-harness:0.16.9
+  secrets: [zai_api_key]
+  environment:
+    ZCODE_MODEL: ${ZCODE_MODEL:-GLM-5.3}
+    ZCODE_MODE: ${ZCODE_MODE:-yolo}
+    ZCODE_MODEL_RETRY_MAX_RETRIES: "3"
+  read_only: true
+  tmpfs:
+    - /tmp:size=1g,mode=1777
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: ["ALL"]
+  pids_limit: 512
+  mem_limit: 4g
+  cpus: "2"
+  init: false   # tini уже в ENTRYPOINT
+  stdin_open: true
+
+services:
+  # Пример: один воркер на один репозиторий. Масштабируй копированием блока,
+  # у каждого воркера — СВОЙ state-том (sqlite сессий не шарить между процессами).
+  agent-a:
+    <<: *agent
+    volumes:
+      - ${REPO_A:-./work/a}:/workspace
+      - zcode-state-a:/home/agent/.zcode
+    command: ["help"]
+
+secrets:
+  zai_api_key:
+    file: ./secrets/zai_api_key   # одна строка: <id>.<secret>, chmod 600
+
+volumes:
+  zcode-state-a:

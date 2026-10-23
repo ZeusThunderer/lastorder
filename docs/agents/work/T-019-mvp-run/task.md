@@ -2,7 +2,7 @@
 id: T-019
 title: Отчёт MVP и 2-часовой прогон сети
 stage: E3
-status: queued
+status: rejected
 criticality: normal
 branch: z/T-019-mvp-run
 created: 2026-10-16
@@ -71,3 +71,5 @@ uv run python dev/mvp_report.py --knowledge <volume> --run <volume-1> <volume-2>
 - Ключи только из окружения; в отчётах прогона нет секретов.
 
 ## Заметки надзора
+- 2026-10-17 · возвращена в draft: архитектура меняется на агента в харнессе (решение пользователя); задача будет переописана или снята.
+- 2026-10-17 · rejected: старая схема снята ADR-032 (агент в харнессе); заменена T-032.

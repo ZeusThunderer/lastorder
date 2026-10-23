@@ -291,6 +291,37 @@ class RecordVote:
         return _plain(asdict(self))
 
 
+@dataclass(frozen=True)
+class Decision:
+    """Last Order's ruling on a record (T-028, NETWORK.md section 7, ADR-036).
+
+    Settles the status outright (`status_of`): accept -> confirmed, reject -> retired.
+    `by` names the deciding authority (the store writes "last_order"); `why` is mandatory —
+    a decision without a recorded reason does not enter the base.
+    """
+
+    by: str
+    accept: bool
+    ts: str
+    why: str
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "Decision":
+        _want(data, ("by", "accept", "why", "ts"))
+        accept = _req(data, "accept")
+        if not isinstance(accept, bool):
+            raise SchemaError("decision.accept: expected a bool")
+        return cls(
+            by=_text(_req(data, "by"), "decision.by"),
+            accept=accept,
+            ts=_iso(_req(data, "ts"), "decision.ts"),
+            why=_text(_req(data, "why"), "decision.why"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain(asdict(self))
+
+
 RECORD_FIELDS = (
     "id",
     "kind",
@@ -303,6 +334,7 @@ RECORD_FIELDS = (
     "evidence",
     "votes",
     "confidence",
+    "decision",
 )
 
 
@@ -321,6 +353,7 @@ class Record:
     evidence: tuple[Evidence, ...] = ()
     votes: tuple[RecordVote, ...] = ()
     confidence: float | None = None
+    decision: Decision | None = None
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "Record":
@@ -355,6 +388,11 @@ class Record:
         )
         if source == "primer" and (status != "confirmed" or evidence or votes):
             raise SchemaError("primer records are confirmed and carry no evidence or votes")
+        decision = None
+        if "decision" in data and data["decision"] is not None:
+            decision = Decision.from_dict(data["decision"])
+        if source == "primer" and decision is not None:
+            raise SchemaError("primer records carry no decision")
         confidence = None
         if "confidence" in data and data["confidence"] is not None:
             value = data["confidence"]
@@ -375,12 +413,15 @@ class Record:
             evidence=evidence,
             votes=votes,
             confidence=confidence,
+            decision=decision,
         )
 
     def to_dict(self) -> dict[str, Any]:
         data = _plain(asdict(self))
         if self.confidence is None:
             data.pop("confidence")
+        if self.decision is None:
+            data.pop("decision")
         return data
 
     def to_entry(self) -> KnowledgeEntry:

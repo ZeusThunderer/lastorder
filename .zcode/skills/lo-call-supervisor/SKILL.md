@@ -22,7 +22,8 @@ description: Только для роли worker (ZCode). Вызвать Claude 
 Из worktree задачи, копией скрипта из **корня** (копия в ветке может быть старше `main`):
 `bash <корень>/dev/call_supervisor.sh plan|result|answer T-NNN <effort>`. Модель не выбираешь —
 всегда Opus. Effort — `low`, `medium` или `high` по таблице в протоколе; `xhigh` и `max` не
-используются, критичной задаче скрипт сам ставит `high`. Размер diff — `git diff --shortstat main...HEAD`,
+используются. По умолчанию `medium`, критичной задаче тоже (`low` скрипт поднимет до `medium`);
+`high` — только исключения из таблицы, с причиной в «Вызовах надзора». Размер diff — `git diff --shortstat main...HEAD`,
 раунд — по `report.md`. Строка `VERDICT: …` стоит в конце ответа, последняя строка вывода —
 `cost_usd: … · effort: …`.
 

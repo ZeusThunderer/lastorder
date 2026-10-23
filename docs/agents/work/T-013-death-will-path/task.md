@@ -2,7 +2,7 @@
 id: T-013
 title: Путь смерти — детектор, завещание, retire, respawn, birth
 stage: E2
-status: queued
+status: done
 criticality: critical
 branch: z/T-013-death-will-path
 created: 2026-10-16

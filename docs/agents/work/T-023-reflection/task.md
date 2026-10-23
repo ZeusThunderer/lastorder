@@ -2,7 +2,7 @@
 id: T-023
 title: Рефлексия C4 — личная цель, core memory, кандидаты знаний
 stage: E2
-status: queued
+status: rejected
 criticality: critical
 branch: z/T-023-reflection
 created: 2026-10-17
@@ -81,3 +81,5 @@ docker compose -f docker/compose.yml up -d mc-server hive body-1 mind-1
 - Черты числами в текст core memory и речь не выводятся.
 
 ## Заметки надзора
+- 2026-10-17 · возвращена в draft: архитектура меняется на агента в харнессе (решение пользователя); задача будет переописана или снята.
+- 2026-10-17 · rejected: старая схема снята ADR-032 (агент в харнессе); заменена T-029.

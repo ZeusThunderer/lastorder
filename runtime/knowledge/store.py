@@ -49,6 +49,7 @@ from runtime.knowledge.schema import (
     ABOUT_KEY,
     CAUSES,
     BirthFile,
+    Decision,
     Evidence,
     PrimerEntry,
     Record,
@@ -131,19 +132,30 @@ class InvalidVoteError(StoreError):
 
 
 def status_of(
-    source: str, author: int | str, evidence: Sequence[Evidence], votes: Sequence[RecordVote]
+    source: str,
+    author: int | str,
+    evidence: Sequence[Evidence],
+    votes: Sequence[RecordVote],
+    decision: "Decision | None" = None,
 ) -> str:
-    """Section 4 status as a pure function of evidence and votes, first match wins.
+    """Section 4 status as a pure function of evidence, votes and a Last Order decision.
 
     Only nodes other than the author count: the author's own vote is his candidate, his
     evidence his testimony. A rejection with a reason is a refutation and outranks
     evidence; a rejection without one changes nothing by itself but still counts as
     "against" for the two-voices confirmation. Primer records are always confirmed.
     Retired is enforced as terminal by the store, not by this function (review P1-3).
+
+    A decision (T-028, NETWORK.md section 7: "решения Last Order двигают статусы") settles
+    the record: accept -> confirmed, reject -> retired, above refuters and evidence —
+    Last Order administers the shared base (ADR-036). The section 4 thresholds stay the
+    lower bound for records nobody has decided on (KNOWLEDGE.md v2 header).
     """
 
     if source == "primer":
         return "confirmed"
+    if decision is not None:
+        return "confirmed" if decision.accept else "retired"
     others = [v for v in votes if v.node != author]
     refuters = {v.node for v in others if not v.accept and v.why}
     if len(refuters) >= 2:
@@ -558,7 +570,11 @@ class KnowledgeStore:
                 joined = duplicate.evidence + evidence
                 data = duplicate.to_dict()
                 data["evidence"] = [e.to_dict() for e in joined]
-                data["status"] = status_of(duplicate.source, duplicate.author, joined, duplicate.votes)
+                # The duplicate's decision rides along (review R1-1): evidence joins never
+                # un-decide a record Last Order has ruled on.
+                data["status"] = status_of(
+                    duplicate.source, duplicate.author, joined, duplicate.votes, duplicate.decision
+                )
                 try:
                     updated = Record.from_dict(data)
                 except SchemaError as exc:
@@ -597,22 +613,182 @@ class KnowledgeStore:
             )
             data = record.to_dict()
             data["votes"] = [v.to_dict() for v in votes]
-            data["status"] = status_of(record.source, record.author, record.evidence, votes)
+            # The record's decision rides along (review R1-1): a vote never un-decides
+            # what Last Order has ruled on — it is recorded, the status stays settled.
+            data["status"] = status_of(
+                record.source, record.author, record.evidence, votes, record.decision
+            )
             try:
                 updated = Record.from_dict(data)
             except SchemaError as exc:
                 raise InvalidVoteError(f"vote rejected: {exc}") from exc
             self._write_record(updated, f"vote: {updated.id} by {serial}")
 
-    def _write_record(self, record: Record, message: str) -> None:
+    def _write_record(
+        self,
+        record: Record,
+        message: str,
+        extra_files: Mapping[Path, str] | None = None,
+    ) -> None:
         records = [r for r in self.records() if r.id != record.id] + [record]
-        self._commit_op(
-            message,
-            {
-                self._records_dir / f"{record.id}.json": _json_text(record.to_dict()),
-                self._catalog_path: self._catalog_text(records),
-            },
-        )
+        files = {
+            self._records_dir / f"{record.id}.json": _json_text(record.to_dict()),
+            self._catalog_path: self._catalog_text(records),
+        }
+        if extra_files:
+            files.update(self._layer_files(extra_files))
+        self._commit_op(message, files)
+
+    # --- decisions, skills and hive's own layers (T-028) ---------------------------------
+
+    def _layer_path(self, raw: Path | str) -> Path:
+        """Resolve one layer path against the root; it must stay inside `base/`."""
+        path = Path(raw)
+        if not path.is_absolute():
+            path = self.root / path
+        resolved = path.resolve()
+        base = (self.root / "base").resolve()
+        if resolved == base or not resolved.is_relative_to(base):
+            raise StoreError(f"layer write outside base/: {raw}")
+        return resolved
+
+    def _layer_files(self, files: Mapping[Path, str] | None) -> dict[Path, str]:
+        """Caller files of a layer write: base/-relative paths only, plain text values.
+
+        The condition of the T-028 plan review: everything `commit_layer` and the decision
+        helpers may touch stays inside `base/` — records of nodes and the `nodes/` tree are
+        out of reach by construction, so the personality core can never ride this path.
+        """
+        out: dict[Path, str] = {}
+        for raw, text in (files or {}).items():
+            if not isinstance(text, str):
+                raise StoreError(f"layer write {raw}: expected text")
+            out[self._layer_path(raw)] = text
+        return out
+
+    def apply_decision(
+        self,
+        record_id: str,
+        *,
+        by: str,
+        accept: bool,
+        why: str,
+        extra_files: Mapping[Path, str] | None = None,
+        message: str | None = None,
+    ) -> Record:
+        """Last Order's ruling on a live record (T-028): set `decision`, recompute the
+        status (`status_of`), one commit. Refuses unknown records, primer, retired
+        (terminal — the fix is a new record) and a second ruling.
+
+        `extra_files`/`message` let the caller (hive's proposal queue) ride its own bookkeeping
+        into the same commit, so the decision and its effect never split across commits.
+        """
+        if not isinstance(why, str) or not why.strip():
+            raise StoreError("decision: why is required")
+        with self._locked():
+            path = self._records_dir / f"{record_id}.json"
+            if not path.exists():
+                raise StoreError(f"unknown record {record_id!r}")
+            record = self._read_record(path)
+            if record.source == "primer":
+                raise StoreError(f"{record.id}: primer records are not decided (section 2)")
+            if record.decision is not None:
+                raise StoreError(f"{record.id}: already decided")
+            if record.status == "retired":
+                raise StoreError(f"{record.id}: retired is terminal, the fix is a new record")
+            decision = Decision(by=by, accept=bool(accept), why=why.strip(), ts=self._now())
+            data = record.to_dict()
+            data["decision"] = decision.to_dict()
+            data["status"] = status_of(
+                record.source, record.author, record.evidence, record.votes, decision
+            )
+            try:
+                updated = Record.from_dict(data)
+            except SchemaError as exc:
+                raise StoreError(f"decision rejected: {exc}") from exc
+            self._write_record(
+                updated,
+                message
+                or f"decision: {updated.id} {'accept' if accept else 'reject'} by {by}: {why.strip()}",
+                extra_files=extra_files,
+            )
+            return updated
+
+    def write_skill(
+        self,
+        *,
+        author: int,
+        description: str,
+        script: str,
+        by: str,
+        why: str,
+        extra_files: Mapping[Path, str] | None = None,
+        message: str | None = None,
+    ) -> Record:
+        """An accepted skill proposal becomes a common skill (T-028, ADR-031/034): one
+        confirmed `kind=skill` record (the description is its claim) plus the script under
+        `base/skills/<record id>`, exactly one commit. The script is stored, never run by
+        hive; nodes execute their own copies through the body MCP."""
+        if not isinstance(why, str) or not why.strip():
+            raise StoreError("decision: why is required")
+        with self._locked():
+            self._load_birth(author)  # the proposer must be a real node; dead is fine
+            self._refuse_raw_ids(description, InvalidCandidateError, "skill.description")
+            self._refuse_raw_ids(script, InvalidCandidateError, "skill.script")
+            decision = Decision(by=by, accept=True, why=why.strip(), ts=self._now())
+            draft = {
+                "id": "k-0000",
+                "kind": "skill",
+                "claim": description,
+                "about": [],
+                "source": "node",
+                "author": author,
+                "ts": self._now(),
+                "status": "confirmed",
+                "evidence": [],
+                "votes": [],
+                "decision": decision.to_dict(),
+            }
+            try:
+                validated = Record.from_dict(draft)
+            except SchemaError as exc:
+                raise InvalidCandidateError(f"skill rejected: {exc}") from exc
+            record_id = f"k-{self._next_record_number_locked():04d}"
+            record = replace(validated, id=record_id)
+            files: dict[Path, str] = {
+                Path(f"base/skills/{record_id}"): script,
+            }
+            if extra_files:
+                files.update(extra_files)
+            self._write_record(
+                record,
+                message
+                or f"decision: skill {record_id} accept by {by}: {why.strip()} (proposer {format_serial(author)})",
+                extra_files=files,
+            )
+            return record
+
+    def commit_layer(self, message: str, files: Mapping[Path, str]) -> None:
+        """One locked commit for hive's own layers (T-028): the proposal queue, common
+        instructions, the chronicle, network goals. Only hive code calls this — the base
+        keeps its single writer (ADR-017) — and every path must live under `base/`."""
+        if not isinstance(message, str) or not message.strip():
+            raise StoreError("layer commit: message is required")
+        with self._locked():
+            self._commit_op(message, self._layer_files(files))
+
+    def append_layer(self, relpath: Path | str, text: str, *, message: str) -> None:
+        """Append `text` to one base/ layer file as one locked commit. The chronicle
+        appends read-modify-write: the read and the write share one hold of the lock,
+        so a concurrent commit can never interleave (T-028 checker C-5)."""
+        if not isinstance(message, str) or not message.strip():
+            raise StoreError("layer commit: message is required")
+        if not isinstance(text, str):
+            raise StoreError("layer append: expected text")
+        with self._locked():
+            path = self._layer_path(relpath)
+            old = path.read_text(encoding="utf-8") if path.exists() else ""
+            self._commit_op(message, {path: old + text})
 
     # --- catalog and goals -----------------------------------------------------------------
 

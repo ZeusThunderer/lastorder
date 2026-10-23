@@ -384,11 +384,11 @@ def test_block_budgets_match_the_documented_total():
     blocks = _blocks()
     assert len(blocks) == 10  # the ten blocks of section 9
     assert sum(blocks.values()) == budget.STEP_BLOCKS_TOTAL
-    # Honest sum, deliberately over the ceiling: the overflow (1360) is documented in
-    # KNOWLEDGE.md section 9 and goes to "Предлагаемые ADR" — the ceiling is not raised
-    # silently, and no constant here may paper over the conflict.
-    assert budget.STEP_BLOCKS_TOTAL == 3860
-    assert budget.STEP_BLOCKS_TOTAL > budget.STEP_INPUT_BUDGET
+    # ADR-029 (operator decision 2026-10-17) raised the step ceiling 2500 -> 4500 and let
+    # B_PERSONA follow the T-011 template growth (1000 -> 1300): the honest block sum now
+    # fits the ceiling with 340 tokens to spare for block headings.
+    assert budget.STEP_BLOCKS_TOTAL == 4160
+    assert budget.STEP_BLOCKS_TOTAL <= budget.STEP_INPUT_BUDGET
 
 
 def test_persona_template_fits_persona_budget():

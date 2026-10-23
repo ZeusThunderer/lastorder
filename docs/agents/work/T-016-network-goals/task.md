@@ -2,7 +2,7 @@
 id: T-016
 title: Контур целей сети в hive (C5) и консолидация
 stage: E3
-status: queued
+status: rejected
 criticality: critical
 branch: z/T-016-network-goals
 created: 2026-10-16
@@ -66,6 +66,7 @@ docker compose -f docker/compose.yml up -d mc-server hive body-1 mind-1
 - Пишет базу только hive. Новых видов вызовов нет: цели и консолидация — `smart` в лимите.
 
 ## Заметки надзора
+- 2026-10-17 · возвращена в draft: архитектура меняется на агента в харнессе (решение пользователя); задача будет переописана или снята.
 - Из ревью T-008 (R4-3): шаблон `why` «<N> смертей» даёт «3 смертей». Склонять число или писать
   «смертей за 120 мин: <N>»; канонические примеры GOALS_COMMS.md поправить заодно, если меняется
   формат (файл в «Можно трогать» не входит — сообщить в отчёте, надзор правит документ сам).
@@ -73,3 +74,4 @@ docker compose -f docker/compose.yml up -d mc-server hive body-1 mind-1
   `{text, why}`, `_read_goals`), раскладка KNOWLEDGE.md §1 — тоже `goals.md`. Перевести хранение и
   чтение в `store.py` на `goals.json` (`runtime/hive/goals_schema.py`), `init: layout` создаёт
   `goals.json` вместо `goals.md`; строку раскладки KNOWLEDGE.md надзор поправит по отчёту.
+- 2026-10-17 · rejected: старая схема снята ADR-032 (агент в харнессе); заменена T-030.

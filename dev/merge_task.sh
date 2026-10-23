@@ -26,7 +26,7 @@ for attempt in 1 2 3; do
       die "conflict between $branch and main: verdict changes, the worker resolves it"
     fi
   fi
-  if ! out="$(cd "$wt" && uv run pytest -q 2>&1 && uv run python tools/check.py 2>&1)"; then
+  if ! out="$(cd "$wt" && bash "$ROOT/dev/check.sh" 2>&1)"; then
     printf '%s\n' "$out" | tail -15 >&2
     die "checks fail in $wt after bringing main in: verdict changes"
   fi

@@ -2,7 +2,7 @@
 id: T-017
 title: Общение узлов — Мисака-нет, игровой чат, болтовня с режиссёром
 stage: E3
-status: queued
+status: rejected
 criticality: critical
 branch: z/T-017-node-comms
 created: 2026-10-16
@@ -75,3 +75,5 @@ docker compose -f docker/compose.yml -f dev/compose.two-slots.yml up -d
 - Вызовы: болтовня — `node` в лимите. Других новых нет.
 
 ## Заметки надзора
+- 2026-10-17 · возвращена в draft: архитектура меняется на агента в харнессе (решение пользователя); задача будет переописана или снята.
+- 2026-10-17 · rejected: старая схема снята ADR-032 (агент в харнессе); заменена T-028, T-029.

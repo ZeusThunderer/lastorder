@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Headless supervisor call from ZCode: Claude Code CLI, Opus only, effort chosen by the caller (ADR-028).
+# Headless supervisor call from ZCode: Claude Code CLI, Opus only, effort chosen by the caller (ADR-028, ADR-038).
 # Protocol: docs/agents/coop-protocol.md, "Вызов надзора из ZCode". Run from the task worktree
 # .worktrees/T-NNN-<slug> (Git Bash on Windows), never from the repo root. Call the root copy of the
 # script: the branch copy may be older than main.
 #   bash <root>/dev/call_supervisor.sh plan   T-NNN [effort]   # review the plan in report.md (status in_progress)
 #   bash <root>/dev/call_supervisor.sh result T-NNN [effort]   # review the submitted work (status review)
 #   bash <root>/dev/call_supervisor.sh answer T-NNN [effort]   # answer the worker's question (status blocked)
-# effort: low | medium | high, default medium (table in coop-protocol.md). Critical work gets high.
+# effort: low | medium | high, default medium (table in coop-protocol.md). Critical work gets at least medium;
+# high is only for the exceptions in the table, the script never raises to it.
 set -uo pipefail
 
 die() { echo "call_supervisor: $*" >&2; exit 2; }
@@ -40,13 +41,13 @@ esac
 [ "$(git branch --show-current)" = "$branch" ] || die "switch to $branch first"
 git diff --quiet && git diff --cached --quiet || die "uncommitted changes: commit them first"
 
-# Critical work (criticality or critical zones in the allowed scope / diff) is reviewed with high effort.
+# Critical work (criticality or critical zones in the allowed scope / diff) is reviewed with at least medium effort.
 critical_re='^(runtime/perception/|runtime/hive/|runtime/llm/|runtime/lastorder/persona\.py|agent/last_order/prompt_template\.md|tests/test_perception\.py|docker/|\.env)|(^|/)(death|will)[^/]*\.py$'
 scope="$(awk '/^Можно трогать:/{f=1;next} /^Нельзя трогать:/{f=0} f' "$task" | tr -d '\r' | grep -o '`[^`]*`' | tr -d '`')"
 hits="$( { printf '%s\n' "$scope"; git diff --name-only main...HEAD; } | grep -E "$critical_re" | sort -u)"
 if [ "$crit" = critical ] || [ -n "$hits" ]; then
   crit=critical
-  [ "$effort" = high ] || { echo "call_supervisor: $id is critical, effort $effort -> high" >&2; effort=high; }
+  [ "$effort" != low ] || { echo "call_supervisor: $id is critical, effort low -> medium" >&2; effort=medium; }
 fi
 
 # Round limits: count headless rounds already in review.md.
