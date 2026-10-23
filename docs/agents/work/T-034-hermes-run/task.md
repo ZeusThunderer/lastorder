@@ -2,7 +2,7 @@
 id: T-034
 title: Прогон узла 15 мин в Hermes на стенде — сравнение с T-024
 stage: E2
-status: review
+status: accepted
 criticality: normal
 branch: z/T-034-hermes-run
 created: 2026-10-22
@@ -61,3 +61,5 @@ NODE_HARNESS=hermes NODE_HARNESS_FAILOVER= docker compose -f docker/compose.yml 
 
 ## Заметки надзора
 - 2026-10-22 · поставлена по просьбе пользователя вместе с T-033.
+- 2026-10-23 · accept (headless): критерий 15 мин не выполнен из-за аварии стенда (нет zai-egress
+  в «Проверках»), принят с объявленным отклонением; П-1…П-4 отчёта — к нарезке.
