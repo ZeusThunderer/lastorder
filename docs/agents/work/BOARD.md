@@ -35,6 +35,6 @@
 | T-029 | Шаблон рабочего места сестры — ядро, правила, стартовые скилы | E2 | done | critical | z/T-029-sister-instructions |
 | T-030 | Last Order — агент-администратор сети по событиям | E3 | done | critical | z/T-030-last-order-agent |
 | T-031 | Jev в C1 по текстовой политике сестры | E3 | done | normal | z/T-031-jev-policy |
-| T-032 | Отчёт MVP и 2-часовой прогон сети агентов | E3 | ready | normal | z/T-032-mvp-run |
+| T-032 | Отчёт MVP и 2-часовой прогон сети агентов | E3 | done | normal | z/T-032-mvp-run |
 | T-033 | Адаптер Hermes Agent в раннере узла — Z.ai, сухой прогон | E2 | done | critical | z/T-033-hermes-adapter |
 | T-034 | Прогон узла 15 мин в Hermes на стенде — сравнение с T-024 | E2 | done | normal | z/T-034-hermes-run |

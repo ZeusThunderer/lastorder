@@ -2,7 +2,7 @@
 id: T-032
 title: Отчёт MVP и 2-часовой прогон сети агентов
 stage: E3
-status: accepted
+status: done
 criticality: normal
 branch: z/T-032-mvp-run
 created: 2026-10-17
