@@ -2,7 +2,7 @@
 id: T-034
 title: Прогон узла 15 мин в Hermes на стенде — сравнение с T-024
 stage: E2
-status: accepted
+status: done
 criticality: normal
 branch: z/T-034-hermes-run
 created: 2026-10-22
