@@ -59,11 +59,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from runtime.knowledge.schema import SchemaError, Will  # noqa: E402
 from runtime.knowledge.slice import format_serial, parse_utc  # noqa: E402
-from runtime.perception.chat import is_service_line  # noqa: E402
+from runtime.perception.chat import SERVICE_PREFIXES, is_service_line  # noqa: E402
 
-# The uc chat markers of runtime/perception/chat.py (ADR-020): if one of these ever
-# appears in a Hermes message, the scrub failed.
-SERVICE_PREFIXES: tuple[str, ...] = ("[Alto Clef]", "[Tungsten]", "WARNING:")
+# The uc chat markers of runtime/perception/chat.py (ADR-020), one source for both
+# the observe scrub and this report's checks: if one of these ever appears in an
+# observe chat array the agent received, the scrub failed.
 COST_CEILING_PER_H = 0.35
 MIN_GENERATIONS = 6
 REF_SHARE = 0.70
@@ -176,12 +176,11 @@ def load_knowledge(root: Path) -> tuple[dict[int, Birth], dict[int, Death], list
                     emergency=bool(meta.emergency),
                     body=will.body,
                 )
-    for pattern, sink in (("*.json", records),):
-        for path in sorted((root / "base" / "records").glob(pattern)):
-            try:
-                sink.append(json.loads(path.read_text(encoding="utf-8")))
-            except json.JSONDecodeError:
-                continue
+    for path in sorted((root / "base" / "records").glob("*.json")):
+        try:
+            records.append(json.loads(path.read_text(encoding="utf-8")))
+        except json.JSONDecodeError:
+            continue
     for path in sorted((root / "base" / "proposals").glob("*.json")):
         try:
             proposals.append(json.loads(path.read_text(encoding="utf-8")))
@@ -204,9 +203,8 @@ def load_runner(root: Path) -> tuple[list[dict], dict[int, str]]:
         for row in _load_jsonl(path):
             if not isinstance(row.get("ts"), str):
                 continue
-            for key in ("slot",):
-                if isinstance(row.get(key), str) and SLOT_RE.fullmatch(row[key]):
-                    slot = row[key]
+            if isinstance(row.get("slot"), str) and SLOT_RE.fullmatch(row["slot"]):
+                slot = row["slot"]
             if isinstance(row.get("payload"), dict) and isinstance(
                 row["payload"].get("slot"), str
             ) and SLOT_RE.fullmatch(row["payload"]["slot"]):
