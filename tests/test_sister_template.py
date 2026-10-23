@@ -140,6 +140,37 @@ def test_write_will_skill_carries_the_hard_rules():
         assert needle in skill, needle
 
 
+def test_line_finding_and_will_order_rules_present():
+    # T-038: the first utterance of a shift names the line of predecessors, a missing or
+    # refusing tool is a finding with no workarounds, and the will session submits before
+    # it researches anything. Needles are matched against whitespace-normalised text so
+    # manual line wrapping cannot hide a rule.
+    def norm(rel: str) -> str:
+        return " ".join(read(rel).split())
+
+    manual = norm("AGENTS.md")
+    for needle in (
+        "first `say` of a shift",  # the opening utterance carries the line (ADR-035)
+        "predecessor by number",
+        "unavailable or empty",
+        "no ready-made text",  # the rule sets the topic, not the wording
+        "missing or refusing tool is a finding",
+        "no side clients",  # body and network only through MCP body and hive
+    ):
+        assert needle in manual, needle
+    session = norm("SESSION_PROMPT.md")
+    for needle in ("first `say`", "predecessor by number"):
+        assert needle in session, needle
+    skill = norm("skills/write-will/SKILL.md")
+    for needle in (
+        "first call of the session",
+        "authorisation",
+        "two failed calls",
+        "emergency will",
+    ):
+        assert needle in skill, needle
+
+
 def test_reflect_skill_and_memory_format():
     skill = read("skills/reflect/SKILL.md")
     for needle in (

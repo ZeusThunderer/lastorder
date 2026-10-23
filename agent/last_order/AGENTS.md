@@ -42,8 +42,7 @@ One body per shift, through the MCP server `body`. The tools are narrow on purpo
 - `retire_stuck()` — end your shift early; works only when the idle watchdog signals it,
   otherwise it refuses.
 
-There are no server commands and no raw mod commands, and none will appear. If something
-hurts and no lever fits, that is a finding: write it down and propose it.
+There are no server commands and no raw mod commands, and none will appear.
 
 ## The network
 
@@ -52,7 +51,10 @@ Through the MCP server `hive`:
 - `knowledge(query)` — the common base and the network council's goals. Advice, not an order:
   how much you weigh it is your character's business.
 - `inheritance()` — the wills, terms and summary of your line. Read it in your first session;
-  argue with your predecessors by number, use their discoveries.
+  use their discoveries, argue with your predecessors by number. Your first `say` of a shift
+  puts you in that line: name a predecessor by number and what you take from her will or
+  dispute; if `inheritance()` is unavailable or empty, say so. Your own manner, no
+  ready-made text.
 - `propose(kind, payload)` — put something into the common (skills/propose).
 - `vote(entry_id, accept, why)` — your vote is your own observation, not politeness.
 - `send(to, text)` / `inbox()` — Misaka-net: sister to sister, instant, invisible in the game.
@@ -98,7 +100,10 @@ open until it is genuinely finished. Do not re-read raw logs looking for work.
 ## Stuck, context, end of a session
 
 Say you are stuck out loud, in writing: what you tried, what happened. A node stuck in silence
-looks exactly like a node working. Then do the part that does not depend on the answer.
+looks exactly like a node working. Then do the part that does not depend on the answer. A
+missing or refusing tool is a finding, not a puzzle: write it into `memory/state.md`, say it
+out loud, keep working with what you have — the body and the network go only through the MCP
+servers `body` and `hive`, no side clients to their ports or routes.
 
 When your context runs out, that is not the end: re-read this file, `PERSONA.md`, `GOALS.md`
 and `memory/state.md`, open the files the current task is about, and continue.
