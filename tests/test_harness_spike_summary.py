@@ -148,3 +148,46 @@ def test_hermes_main_prefers_stream_and_falls_back_to_state(tmp_path: Path) -> N
     summary = json.loads((run / "summary.json").read_text(encoding="utf-8"))
     assert summary["harness_events"]["source"] == "stream-json"
     assert summary["harness_events"]["runs"] == 1
+
+
+def test_mind_log_entries_filters_calls_and_joins_act_effects() -> None:
+    events = [
+        {"ts": 100.0, "kind": "event", "event": "game.damage"},
+        {"ts": 101.0, "kind": "call", "tool": "act", "args": {"lever": "goto"},
+         "ok": True, "t_end": 101.5, "intent_id": "i1"},
+        {"ts": 102.0, "kind": "intent", "phase": "applied", "intent_id": "i1"},
+        {"ts": 105.2, "kind": "intent", "phase": "done", "intent_id": "i1"},
+        {"ts": 106.0, "kind": "call", "tool": "wait_events", "args": {"timeout_s": 2.0},
+         "ok": True, "t_end": 108.0, "woke_by": "timeout"},
+        {"ts": 109.0, "kind": "call", "tool": "say", "args": {"text": "привет"},
+         "ok": False, "t_end": 109.1, "error": "chat filter"},
+    ]
+    out = summarize.mind_log_entries(events)
+    assert [e["tool"] for e in out] == ["act", "wait_events", "say"]
+    assert "kind" not in out[0]
+    assert out[0]["effect_ms"] == 3700  # first settle (105.2) after t_end (101.5)
+    assert "effect_ms" not in out[1]
+    summary = summarize.mcp_summary(out)
+    assert summary["act_to_effect_ms"]["n"] == 1
+    assert summary["act_to_effect_ms"]["p50"] == 3700.0
+    assert summary["say_quotes"] == []  # the rejected say is not a quote
+    assert summary["rejections"]["say: chat filter"] == 1
+
+
+def test_hermes_main_reads_the_mind_log_when_present(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    run = tmp_path / "run"
+    (run / "logs").mkdir(parents=True)
+    (run / "logs" / "runner.log").write_text(
+        json.dumps({"ts": "2026-10-23T11:00:00+00:00", "type": "runner.start"}) + "\n",
+        encoding="utf-8",
+    )
+    (run / "logs" / "mind-log.jsonl").write_text(
+        json.dumps({"ts": 1.0, "kind": "call", "tool": "observe", "args": {}, "ok": True,
+                    "t_end": 1.2}) + "\n",
+        encoding="utf-8",
+    )
+    with monkeypatch.context() as mp:
+        mp.setattr("sys.argv", ["summarize.py", "--harness", "hermes", "--minutes", "15", "--run", str(run)])
+        summarize.main()
+    summary = json.loads((run / "summary.json").read_text(encoding="utf-8"))
+    assert summary["mcp"]["calls_by_tool"] == {"observe": 1}

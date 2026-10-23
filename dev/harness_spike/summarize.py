@@ -20,6 +20,9 @@ Hermes runs (T-034, the stand's node-1 instead of the spike profile) add:
                           the CLI's stream-json away, so the state DB is the token source
 - logs/harness.log     — OPTIONAL stream-json of `hermes chat` (when captured directly);
                           parsed per hermes_cli/stream_json.py v0.22.4 shapes
+- logs/mind-log.jsonl  — the stand's mind log.jsonl (volume mind-1-run) instead of the
+                          spike's mcp-calls.jsonl: `call` records plus the `intent`
+                          settle join that recovers act->effect latency
 
 Prints a human-readable summary and writes summary.json next to the logs. Field names of the
 harness events are best-effort: the parsers below accept both the documented shapes and leave
@@ -83,6 +86,36 @@ def load_json_stream(path: Path) -> list[dict]:
 
 
 # --- the MCP call log ------------------------------------------------------------------
+
+
+def mind_log_entries(events: list[dict]) -> list[dict]:
+    """The stand's mind log.jsonl (runtime/mind/mcp_body.py `JsonlLog`): `call` records
+    carry the fields mcp_summary expects (tool/args/ts/t_end/ok/woke_by/intent_id);
+    `intent` records settle act effects — the spike proxy logged effect_ms directly,
+    the stand log joins them by intent_id (first settle after the call)."""
+    settled: dict[str, float] = {}
+    for ev in events:
+        if (
+            isinstance(ev, dict)
+            and ev.get("kind") == "intent"
+            and ev.get("phase") in ("done", "failed")
+        ):
+            iid = str(ev.get("intent_id") or "")
+            ts = float(ev.get("ts") or 0)
+            if iid and ts and iid not in settled:
+                settled[iid] = ts
+    out: list[dict] = []
+    for ev in events:
+        if not isinstance(ev, dict) or ev.get("kind") != "call":
+            continue
+        entry = {k: v for k, v in ev.items() if k != "kind"}
+        iid = str(entry.get("intent_id") or "")
+        done = settled.get(iid)
+        t_end = float(entry.get("t_end") or entry.get("ts") or 0)
+        if iid and done and done >= t_end:
+            entry["effect_ms"] = round((done - t_end) * 1000)
+        out.append(entry)
+    return out
 
 
 def mcp_summary(entries: list[dict]) -> dict:
@@ -517,7 +550,12 @@ def main() -> None:
 
     run = args.run
     workplace = run / "workplace"
-    mcp = mcp_summary(load_jsonl(run / "logs" / "mcp-calls.jsonl"))
+    mind_log = run / "logs" / "mind-log.jsonl"
+    mcp = mcp_summary(
+        mind_log_entries(load_jsonl(mind_log))
+        if mind_log.exists()
+        else load_jsonl(run / "logs" / "mcp-calls.jsonl")
+    )
     if args.harness == "hermes":
         # the stand's node runner: its own log plus the hermes state DB dump; the
         # stream-json harness.log is optional (only when captured directly)
