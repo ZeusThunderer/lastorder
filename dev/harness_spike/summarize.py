@@ -437,7 +437,8 @@ def hermes_state_summary(state: dict, runner_events: list[dict]) -> dict:
     def _tot(rows_: list[dict], key: str) -> int:
         return sum(r[key] for r in rows_)
 
-    # reasoning is completion tokens too: the plan bills it as output [предположение]
+    # reasoning is completion tokens too: the plan bills it as output (assumption — the
+    # state DB reports the columns separately; the doc carries the caveat)
     block = _usage_block(
         sum(r["api_calls"] for r in sessions),
         _tot(sessions, "input"),
