@@ -41,5 +41,5 @@
 | T-035 | Hermes — инструменты MCP тела и hive в сессиях узла | E3 | ready | critical | z/T-035-hermes-mcp-tools |
 | T-036 | Ключи стенда — генерация локальных токенов и виртуальных ключей шлюза в .env | E3 | ready | normal | z/T-036-stand-keys |
 | T-037 | Стенд — память node-N, zai-egress в зависимостях, без автозапуска при старте Docker | E3 | ready | normal | z/T-037-stand-compose |
-| T-038 | Инструкции сестры — первая реплика в линии, нет инструмента — находка, воля без расследований | E3 | ready | normal | z/T-038-sister-line-and-will |
+| T-038 | Инструкции сестры — первая реплика в линии, нет инструмента — находка, воля без расследований | E3 | done | normal | z/T-038-sister-line-and-will |
 | T-039 | Повтор 2-часового прогона MVP на стенде с ключами, шлюзом и Last Order | E3 | queued | normal | z/T-039-mvp-run-2 |
