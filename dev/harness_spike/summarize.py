@@ -12,6 +12,18 @@ Reads the run directory produced by spike.sh:
 - logs/mc-server.log   — the vanilla chat log (quotes as the server saw them)
 - logs/sandbox-check.txt, cost-check.txt — the review P1-1/P1-7 evidence
 
+Hermes runs (T-034, the stand's node-1 instead of the spike profile) add:
+- logs/runner.log      — the node runner's own JSON log (docker logs of node-1): the
+                          sessions it started, exit codes, the death/will path timeline
+- logs/hermes-state.json — a dump of HERMES_HOME/state.db (sessions + session_model_usage):
+                          per-session api_call_count and token columns — the runner pipes
+                          the CLI's stream-json away, so the state DB is the token source
+- logs/harness.log     — OPTIONAL stream-json of `hermes chat` (when captured directly);
+                          parsed per hermes_cli/stream_json.py v0.22.4 shapes
+- logs/mind-log.jsonl  — the stand's mind log.jsonl (volume mind-1-run) instead of the
+                          spike's mcp-calls.jsonl: `call` records plus the `intent`
+                          settle join that recovers act->effect latency
+
 Prints a human-readable summary and writes summary.json next to the logs. Field names of the
 harness events are best-effort: the parsers below accept both the documented shapes and leave
 a marker when a metric could not be found (nothing is guessed silently).
@@ -74,6 +86,36 @@ def load_json_stream(path: Path) -> list[dict]:
 
 
 # --- the MCP call log ------------------------------------------------------------------
+
+
+def mind_log_entries(events: list[dict]) -> list[dict]:
+    """The stand's mind log.jsonl (runtime/mind/mcp_body.py `JsonlLog`): `call` records
+    carry the fields mcp_summary expects (tool/args/ts/t_end/ok/woke_by/intent_id);
+    `intent` records settle act effects — the spike proxy logged effect_ms directly,
+    the stand log joins them by intent_id (first settle after the call)."""
+    settled: dict[str, float] = {}
+    for ev in events:
+        if (
+            isinstance(ev, dict)
+            and ev.get("kind") == "intent"
+            and ev.get("phase") in ("done", "failed")
+        ):
+            iid = str(ev.get("intent_id") or "")
+            ts = float(ev.get("ts") or 0)
+            if iid and ts and iid not in settled:
+                settled[iid] = ts
+    out: list[dict] = []
+    for ev in events:
+        if not isinstance(ev, dict) or ev.get("kind") != "call":
+            continue
+        entry = {k: v for k, v in ev.items() if k != "kind"}
+        iid = str(entry.get("intent_id") or "")
+        done = settled.get(iid)
+        t_end = float(entry.get("t_end") or entry.get("ts") or 0)
+        if iid and done and done >= t_end:
+            entry["effect_ms"] = round((done - t_end) * 1000)
+        out.append(entry)
+    return out
 
 
 def mcp_summary(entries: list[dict]) -> dict:
@@ -248,6 +290,230 @@ def zcode_summary(events: list[dict]) -> dict:
     }
 
 
+# --- the hermes harness (T-034) ---------------------------------------------------------
+
+# docs.z.ai/devpack/overview, credit rates per 10k tokens: (input, cache_read, output).
+GLM_CREDIT_RATES = (("glm-5.3-flash", (2.3, 0.56, 8.0)), ("glm-5.3", (6.9, 1.7, 24.0)))
+
+
+def glm_credits(model: str, input_t: int, cache_read: int, output_t: int) -> float | None:
+    """Coding-plan credits of a token total; None when the model has no known rates."""
+    low = str(model).lower()
+    rates = next((r for name, r in GLM_CREDIT_RATES if name in low), None)
+    if rates is None:
+        return None
+    return (input_t * rates[0] + cache_read * rates[1] + output_t * rates[2]) / 10_000
+
+
+def _usage_block(turns: int, tin: int, tout: int, tcache: int, tcache_w: int, note: str) -> dict:
+    prefix_total = tin + tcache_w
+    return {
+        "turns": turns or None,
+        "tokens": {
+            "in_per_turn": round(tin / turns, 1) if turns else None,
+            "out_per_turn": round(tout / turns, 1) if turns else None,
+            "cache_read_total": tcache,
+            "cache_write_total": tcache_w,
+            # Anthropic-style accounting (hermes/zcode report it the same way): input
+            # INCLUDES the cached prefix; the share is cache/(input+cache_write).
+            "cache_share": round(tcache / prefix_total, 3) if prefix_total and tcache else None,
+            "totals": {"input": tin, "output": tout, "cache_read": tcache, "cache_write": tcache_w},
+            "note": note,
+        },
+    }
+
+
+def hermes_stream_summary(events: list[dict]) -> dict:
+    """`hermes chat --format stream-json`: text/tool events and ONE terminal result
+    envelope per oneshot run (hermes_cli/stream_json.py v0.22.4): tokens{input, output,
+    total, cache_read, cache_write}, duration_ms, exit_code, session_id."""
+    runs: list[dict] = []
+    tool_uses: dict[str, int] = {}
+    tool_errors: dict[str, int] = {}
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        kind = ev.get("type")
+        if kind == "tool_use":
+            name = str(ev.get("name") or "?")
+            tool_uses[name] = tool_uses.get(name, 0) + 1
+        elif kind == "tool_result" and ev.get("is_error"):
+            name = str(ev.get("name") or "?")
+            tool_errors[name] = tool_errors.get(name, 0) + 1
+        elif kind == "result":
+            tk = ev.get("tokens") or {}
+            runs.append(
+                {
+                    "session_id": ev.get("session_id"),
+                    "exit_code": ev.get("exit_code"),
+                    "input": tk.get("input"),
+                    "output": tk.get("output"),
+                    "cache_read": tk.get("cache_read"),
+                    "cache_write": tk.get("cache_write"),
+                    "duration_ms": ev.get("duration_ms"),
+                    "error": ev.get("error"),
+                }
+            )
+    def _sum(field: str) -> int:
+        return sum(int(r[field]) for r in runs if isinstance(r.get(field), (int, float)))
+    block = _usage_block(
+        len(runs), _sum("input"), _sum("output"), _sum("cache_read"), _sum("cache_write"),
+        "stream-json: one result envelope per oneshot run; input includes cache read",
+    )
+    block["runs"] = len(runs)
+    block["tool_uses"] = tool_uses
+    block["tool_errors"] = tool_errors
+    block["failed_runs"] = sum(1 for r in runs if r.get("exit_code") not in (0, None))
+    block["run_duration_ms"] = {"p50": pct([r["duration_ms"] for r in runs if isinstance(r.get("duration_ms"), (int, float))], 0.5),
+                                "p95": pct([r["duration_ms"] for r in runs if isinstance(r.get("duration_ms"), (int, float))], 0.95)}
+    block["source"] = "stream-json"
+    return block
+
+
+def hermes_state_summary(state: dict, runner_events: list[dict]) -> dict:
+    """HERMES_HOME/state.db dump (the node runner pipes the CLI stdout away): the
+    `sessions`/`session_model_usage` rows are the token source; usage columns
+    (api_call_count, tokens) live in `session_model_usage` and are joined onto each
+    session row by id (summed when a session used several models). `turns` here are
+    api_call_count (model requests, the zcode-comparable metric). A session started
+    within +-120 s of a runner `will.session` event is the will session, not life."""
+    usage: dict[str, dict[str, int]] = {}
+    for u in state.get("session_model_usage") or []:
+        if not isinstance(u, dict) or not u.get("session_id"):
+            continue
+        acc = usage.setdefault(str(u["session_id"]), {})
+        for col in ("api_call_count", "input_tokens", "output_tokens", "reasoning_tokens",
+                    "cache_read_tokens", "cache_write_tokens"):
+            v = u.get(col)
+            if isinstance(v, (int, float)) and v >= 0:
+                acc[col] = acc.get(col, 0) + int(v)
+    rows = []
+    for r in state.get("sessions") or []:
+        if not isinstance(r, dict):
+            continue
+        row = dict(r)
+        u = usage.get(str(row.get("id")))
+        if u:
+            for col, val in u.items():
+                row[col] = val  # the usage row is authoritative over session-level copies
+        rows.append(row)
+    will_started = [
+        _iso_to_unix(str(ev.get("ts") or "")) for ev in runner_events
+        if str(ev.get("type") or "") == "will.session"
+    ]
+    will_started = [t for t in will_started if t]
+
+    def _int(row: dict, key: str) -> int:
+        v = row.get(key)
+        return int(v) if isinstance(v, (int, float)) and v >= 0 else 0
+
+    life, will = [], []
+    for row in rows:
+        started = _int(row, "started_at")
+        rec = {
+            "session_id": row.get("id"),
+            "started_at": row.get("started_at"),
+            "api_calls": _int(row, "api_call_count"),
+            "input": _int(row, "input_tokens"),
+            "output": _int(row, "output_tokens"),
+            "reasoning": _int(row, "reasoning_tokens"),
+            "cache_read": _int(row, "cache_read_tokens"),
+            "cache_write": _int(row, "cache_write_tokens"),
+            "messages": _int(row, "message_count"),
+            "tool_calls": _int(row, "tool_call_count"),
+            "model": row.get("model"),
+            "title": row.get("display_name") or row.get("title"),
+            "compression_fallback_streak": _int(row, "compression_fallback_streak"),
+        }
+        if any(abs(started - w) <= 120 for w in will_started):
+            rec["kind"] = "will"
+            will.append(rec)
+        else:
+            rec["kind"] = "life"
+            life.append(rec)
+    model = next((r["model"] for r in rows if r.get("model")), "")
+    sessions = life + will
+
+    def _tot(rows_: list[dict], key: str) -> int:
+        return sum(r[key] for r in rows_)
+
+    # reasoning is completion tokens too: the plan bills it as output (assumption — the
+    # state DB reports the columns separately; the doc carries the caveat)
+    block = _usage_block(
+        sum(r["api_calls"] for r in sessions),
+        _tot(sessions, "input"),
+        _tot(sessions, "output") + _tot(sessions, "reasoning"),
+        _tot(sessions, "cache_read"),
+        _tot(sessions, "cache_write"),
+        "state.db: turns = api_call_count; output includes reasoning tokens",
+    )
+    # state.db counts the cached prefix OUTSIDE input_tokens (hermes's own result
+    # envelope folds it in, the DB does not) — the share uses the DB convention here
+    tin, tcache = _tot(sessions, "input"), _tot(sessions, "cache_read")
+    if tin + tcache:
+        block["tokens"]["cache_share"] = round(tcache / (tin + tcache), 3)
+    block["sessions"] = sessions
+    block["life_sessions"] = len(life)
+    block["will_sessions"] = len(will)
+    block["reasoning_total"] = _tot(sessions, "reasoning")
+    # no compaction/summary marks exist in the state.db dump (usage rows carry task=""),
+    # so nothing is reported for auxiliary calls — absence is not zero
+    block["quota_credits"] = {
+        "model": model,
+        "credits": glm_credits(
+            model,
+            _tot(sessions, "input"),
+            _tot(sessions, "cache_read"),
+            _tot(sessions, "output") + _tot(sessions, "reasoning"),
+        ),
+        "formula": "(in*rate_in + cache_read*rate_cache + out*rate_out)/10^4, docs.z.ai",
+    }
+    block["source"] = "state.db dump"
+    return block
+
+
+def _iso_to_unix(ts: str) -> float:
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(ts).timestamp()
+    except ValueError:
+        return 0.0
+
+
+# --- the node runner log (stand runs) ----------------------------------------------------
+
+def runner_summary(events: list[dict]) -> dict:
+    """The node runner's JSON log (docker logs of node-N): event counts, every ended
+    session with its exit code and runtime, the death/will path timeline."""
+    counts: dict[str, int] = {}
+    ended: list[dict] = []
+    timeline: list[dict] = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        kind = str(ev.get("type") or "?")
+        counts[kind] = counts.get(kind, 0) + 1
+        if kind == "session.ended":
+            ended.append(
+                {"ts": ev.get("ts"), "harness": ev.get("harness"), "code": ev.get("code"),
+                 "ran_s": ev.get("ran_s"), "tail": ev.get("tail")}
+            )
+        elif any(kind.startswith(p) for p in ("life.", "death", "will.", "current.", "quota.", "harness.", "runner.")):
+            timeline.append({k: v for k, v in ev.items() if k != "type"} | {"type": kind})
+    codes: dict[str, int] = {}
+    for e in ended:
+        codes[str(e["code"])] = codes.get(str(e["code"]), 0) + 1
+    ran = [e["ran_s"] for e in ended if isinstance(e.get("ran_s"), (int, float))]
+    return {
+        "event_counts": counts,
+        "sessions_ended": len(ended),
+        "session_exit_codes": codes,
+        "session_ran_s": {"p50": pct(ran, 0.5), "p95": pct(ran, 0.95), "max": max(ran) if ran else None},
+        "timeline": timeline,
+        "errors": [e for e in ended if e.get("code") not in (0, None)],
+    }
+
+
 # --- misc artifacts ---------------------------------------------------------------------
 
 
@@ -304,7 +570,7 @@ def state_fragment(workplace: Path, limit: int = 15) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--harness", choices=["opencode", "zcode"], required=True)
+    parser.add_argument("--harness", choices=["opencode", "zcode", "hermes"], required=True)
     parser.add_argument("--minutes", type=int, default=15)
     parser.add_argument("--run", type=Path, required=True)
     parser.add_argument("--username", default="LastOrder01")
@@ -312,36 +578,82 @@ def main() -> None:
 
     run = args.run
     workplace = run / "workplace"
-    mcp = mcp_summary(load_jsonl(run / "logs" / "mcp-calls.jsonl"))
-    events = (
-        load_json_stream(run / "logs" / "harness.log")
-        if args.harness == "zcode"
-        else load_jsonl(run / "logs" / "harness.log")
+    mind_log = run / "logs" / "mind-log.jsonl"
+    mcp = mcp_summary(
+        mind_log_entries(load_jsonl(mind_log))
+        if mind_log.exists()
+        else load_jsonl(run / "logs" / "mcp-calls.jsonl")
     )
-    harness = (opencode_summary if args.harness == "opencode" else zcode_summary)(events)
-    summary = {
-        "harness": args.harness,
-        "minutes": args.minutes,
-        "mcp": mcp,
-        "harness_events": harness,
-        "memory": stats_summary(run / "stats.log", r"harness"),
-        "sandbox_check": (run / "logs" / "sandbox-check.txt").read_text(encoding="utf-8", errors="replace").strip()
-        if (run / "logs" / "sandbox-check.txt").exists() else None,
-        "wills": wills_summary(run),
-        "mc_chat_quotes": quotes_from_mc(run / "logs" / "mc-server.log", args.username)[-10:],
-        "cost_check": (run / "cost-check.txt").read_text(encoding="utf-8", errors="replace").strip()
-        if (run / "cost-check.txt").exists() else None,
-        "state_md": state_fragment(workplace),
-    }
-    turns = harness.get("turns") or 0
-    if turns:
-        summary["turns_per_minute"] = round(turns / args.minutes, 2)
-    cost = harness.get("cost_usd")
-    if cost is not None:
-        summary["cost_usd_per_hour"] = round(cost / args.minutes * 60, 3)
+    if args.harness == "hermes":
+        # the stand's node runner: its own log plus the hermes state DB dump; the
+        # stream-json harness.log is optional (only when captured directly)
+        runner_events = load_jsonl(run / "logs" / "runner.log")
+        stream = load_jsonl(run / "logs" / "harness.log")
+        state: dict = {}
+        state_path = run / "logs" / "hermes-state.json"
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8", errors="replace"))
+            except ValueError:
+                state = {}
+        harness = (
+            hermes_stream_summary(stream) if stream
+            else hermes_state_summary(state if isinstance(state, dict) else {}, runner_events)
+        )
+        summary = {
+            "harness": args.harness,
+            "minutes": args.minutes,
+            "mcp": mcp,
+            "harness_events": harness,
+            "runner": runner_summary(runner_events),
+            "memory": stats_summary(run / "stats.log", r"node-1"),
+            "wills": wills_summary(run),
+            "mc_chat_quotes": quotes_from_mc(run / "logs" / "mc-server.log", args.username)[-10:],
+            "staged_wills": _text(run / "logs" / "staged-wills.txt"),
+            "state_md": state_fragment(workplace),
+        }
+        turns = harness.get("turns") or 0
+        if turns:
+            summary["turns_per_minute"] = round(turns / args.minutes, 2)
+        credits = (harness.get("quota_credits") or {}).get("credits")
+        if isinstance(credits, (int, float)):
+            summary["credits_per_hour"] = round(credits / args.minutes * 60, 1)
+    else:
+        events = (
+            load_json_stream(run / "logs" / "harness.log")
+            if args.harness == "zcode"
+            else load_jsonl(run / "logs" / "harness.log")
+        )
+        harness = (opencode_summary if args.harness == "opencode" else zcode_summary)(events)
+        summary = {
+            "harness": args.harness,
+            "minutes": args.minutes,
+            "mcp": mcp,
+            "harness_events": harness,
+            "memory": stats_summary(run / "stats.log", r"harness"),
+            "sandbox_check": (run / "logs" / "sandbox-check.txt").read_text(encoding="utf-8", errors="replace").strip()
+            if (run / "logs" / "sandbox-check.txt").exists() else None,
+            "wills": wills_summary(run),
+            "mc_chat_quotes": quotes_from_mc(run / "logs" / "mc-server.log", args.username)[-10:],
+            "cost_check": (run / "cost-check.txt").read_text(encoding="utf-8", errors="replace").strip()
+            if (run / "cost-check.txt").exists() else None,
+            "state_md": state_fragment(workplace),
+        }
+        turns = harness.get("turns") or 0
+        if turns:
+            summary["turns_per_minute"] = round(turns / args.minutes, 2)
+        cost = harness.get("cost_usd")
+        if cost is not None:
+            summary["cost_usd_per_hour"] = round(cost / args.minutes * 60, 3)
 
     (run / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=1))
+
+
+def _text(path: Path, limit: int = 4000) -> str | None:
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8", errors="replace")[:limit]
 
 
 if __name__ == "__main__":
