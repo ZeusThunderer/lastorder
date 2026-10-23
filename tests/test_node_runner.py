@@ -764,11 +764,11 @@ def test_render_hermes_config() -> None:
 
 
 def test_hermes_toolsets_allow_exactly_the_two_mcp_servers() -> None:
-    """T-035: -t/--toolsets doubles as Hermes's MCP server spawn allowlist — the bare
-    server names must ride the flag or body/hive never start (the T-032 run: zero MCP
-    calls, the body and the network driven through 803 terminal calls). Nothing beyond
-    file, terminal and the two servers may appear; config.yaml's cli toolsets are the
-    flag-less surface and must stay equal to the flag."""
+    """T-035: -t/--toolsets is Hermes's MCP server spawn allowlist AND the agent's
+    enabled_toolsets surface — the bare server names must ride the flag or body/hive
+    never reach the model. Nothing beyond file, terminal and the two servers may
+    appear; config.yaml's cli toolsets are the flag-less surface and must stay equal
+    to the flag."""
     assert HERMES_TOOLSETS == ("file", "terminal", "body", "hive")
     flag = ",".join(HERMES_TOOLSETS)
     argv = _hermes_adapter(Path(tempfile.gettempdir()) / ".hermes").life_turn("p", None).argv

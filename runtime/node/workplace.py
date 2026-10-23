@@ -282,10 +282,10 @@ def _glm_model(model: str) -> str:
 def render_hermes_config(model: str, body_base: str, hive_url: str, node_key: str) -> dict:
     """Hermes config.yaml: the Z.ai coding provider, both MCP servers of the slot,
     the file/terminal/body/hive toolsets (T-035: the two server names ride the CLI
-    flag too — it is the spawn allowlist) and every Hermes extra (memory, skills,
-    self-review, messenger/cron/browser surfaces, update checks) off. No key
-    material here: GLM_API_KEY/GLM_BASE_URL ride HERMES_HOME/.env (written by the
-    entrypoint)."""
+    flag too — it gates the MCP servers and their toolsets) and every Hermes extra
+    (memory, skills, self-review, messenger/cron/browser surfaces, update checks)
+    off. No key material here: GLM_API_KEY/GLM_BASE_URL ride HERMES_HOME/.env
+    (written by the entrypoint)."""
     return {
         # the config-version stamp of the pinned release (doctor's "outdated v0 → v51"
         # nudge in the dry run): a freshly rendered config IS current, no migration
