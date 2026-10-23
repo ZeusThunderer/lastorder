@@ -2,7 +2,7 @@
 id: T-038
 title: Инструкции сестры — первая реплика в линии, нет инструмента — находка, воля без расследований
 stage: E3
-status: in_progress
+status: review
 criticality: normal
 branch: z/T-038-sister-line-and-will
 created: 2026-10-23
