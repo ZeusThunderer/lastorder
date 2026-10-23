@@ -51,6 +51,26 @@ WSL2, 24 ГБ / 18 CPU. До T-003 (замер E1 и baseline T-003, серве�
   `user.home` из passwd, а не из `$HOME`, поэтому в entrypoint стоят `-Duser.home=/data` и `hmc.mcdir`.
 - Без GL (`-lwjgl`) клиент работает. Ошибки OpenAL, Realms и 401 на ключ профиля при старте — норма.
 
+## Ключи стенда
+Прогон идёт с ключами: без них `docker/node/up.sh` отказывается подниматься (fail-closed R2-6),
+а приём воли падает в аварийные завещания (T-032). `dev/stand_keys.py` готовит `.env`,
+порядок шагов обязателен — `issue` требует поднятый шлюз, узлы — ключи в `.env`:
+
+1. `uv run python dev/stand_keys.py init` — генерирует недостающие локальные токены
+   (`GATEWAY_MASTER_KEY` с префиксом `sk-`, `GATEWAY_DB_PASSWORD`, `HIVE_MCP_LO_KEY`,
+   `HIVE_NODE_KEY_1..3`, `HIVE_RUNNER_KEY_1..3`, `RCON_PASSWORD`; `secrets.token_urlsafe`).
+   Существующие значения не перезаписываются, остальные строки и комментарии `.env`
+   сохраняются. Вывод — только имена ключей и added/kept, значений в нём нет.
+2. Ключи провайдеров (`OPENROUTER_API_KEY`, `ZAI_API_KEY`) скрипт не создаёт: их ставит
+   оператор, скрипт только напишет, каких не хватает.
+3. `bash docker/gateway/up.sh` — поднять шлюз.
+4. `uv run python dev/stand_keys.py issue` — выпустить через шлюз недостающие виртуальные
+   ключи `GATEWAY_KEY_*` (node-1..3, mind-1..3, hive, last-order; потолки ADR-035 по
+   умолчанию) и дописать их в `.env`. Ключ, потерянный из `.env`, выпускается заново —
+   старый живёт в шлюзе до отзыва (`dev/gateway_keys.py revoke`).
+5. `bash docker/node/up.sh` — после `init` проверка R2-6 проходит без `NODE_DEV_OPEN`
+   [проверено: tests/test_stand_keys.py, прогон настоящего up.sh на временном `.env`].
+
 ## Риски
 - Запасной рендер — тот же образ с `BODY_RENDER=xvfb`, 854×480. Для MVP не нужен.
 - Simple Voice Chat: если он стоит, без аудиоустройства падает при входе в мир. В тело его не ставим.
