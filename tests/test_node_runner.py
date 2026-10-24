@@ -13,6 +13,7 @@ import json
 import os
 import re
 import stat
+import tempfile
 from pathlib import Path
 
 import httpx
@@ -28,6 +29,7 @@ from runtime.lastorder.traits import Traits, load_quirks
 from runtime.node.adapters import (
     CONTINUE_MESSAGE,
     Command,
+    HERMES_TOOLSETS,
     HermesAdapter,
     OpenCodeAdapter,
     ZCodeAdapter,
@@ -654,7 +656,10 @@ def test_hermes_adapter_commands_and_session_id(tmp_path: Path) -> None:
     query = Path(first.argv[3])
     assert query.read_text(encoding="utf-8") == "Life session.\n\nlong prompt"
     tail = first.argv[4:]
-    assert tail == ("--oneshot", "--format", "stream-json", "--yolo", "--toolsets", "file,terminal")
+    assert tail == (
+        "--oneshot", "--format", "stream-json", "--yolo",
+        "--toolsets", "file,terminal,body,hive",
+    )
     assert first.env == {"HERMES_HOME": str(tmp_path / ".hermes")}
     # the prompt rides the file, never argv
     assert "Life session." not in first.argv
@@ -755,7 +760,25 @@ def test_render_hermes_config() -> None:
     assert config["skills"]["creation_nudge_interval"] == 0
     assert config["updates"]["check"] is False
     assert config["auxiliary"]["background_review"]["enabled"] is False
-    assert config["platform_toolsets"] == {"cli": ["file", "terminal"]}
+    assert config["platform_toolsets"] == {"cli": ["file", "terminal", "body", "hive"]}
+
+
+def test_hermes_toolsets_allow_exactly_the_two_mcp_servers() -> None:
+    """T-035: -t/--toolsets is Hermes's MCP server spawn allowlist AND the agent's
+    enabled_toolsets surface — the bare server names must ride the flag or body/hive
+    never reach the model. Nothing beyond file, terminal and the two servers may
+    appear; config.yaml's cli toolsets are the flag-less surface and must stay equal
+    to the flag."""
+    assert HERMES_TOOLSETS == ("file", "terminal", "body", "hive")
+    flag = ",".join(HERMES_TOOLSETS)
+    argv = _hermes_adapter(Path(tempfile.gettempdir()) / ".hermes").life_turn("p", None).argv
+    assert argv[argv.index("--toolsets") + 1] == flag
+    will = _hermes_adapter(Path(tempfile.gettempdir()) / ".hermes").will_session("p").argv
+    assert will[will.index("--toolsets") + 1] == flag  # the will proxy session loads hive too
+    config = workplace.render_hermes_config(
+        "GLM-5.3-Flash", "http://body-1:8700", "http://hive:8000", "sk-node-one"
+    )
+    assert config["platform_toolsets"]["cli"] == list(HERMES_TOOLSETS)
     # no key material in the file: the Z.ai key rides HERMES_HOME/.env, not the config
     text = yaml.safe_dump(config)
     assert "GLM_API_KEY" not in text and "zai-token" not in text

@@ -2,7 +2,7 @@
 id: T-035
 title: Hermes — инструменты MCP тела и hive в сессиях узла
 stage: E3
-status: ready
+status: accepted
 criticality: critical
 branch: z/T-035-hermes-mcp-tools
 created: 2026-10-23
@@ -39,11 +39,13 @@ HTTP-клиентами через `terminal`.
 - `runtime/node/adapters.py` — `HERMES_TOOLSETS`, `HermesAdapter`
 - `runtime/node/workplace.py` — `render_hermes_config`, комментарии рядом
 - `tests/test_node_runner.py` — тесты Hermes-адаптера и рендера
+- `docker/node/Dockerfile` — только слой hermes: extra `mcp` в `uv sync` и комментарий рядом
+  (ответ 1)
 - файлы задачи
 
 Нельзя трогать:
 - `unionclef/`, `NetTyan/`, `task1.md`, `.env`
-- `runtime/hive/`, `runtime/mind/`, `docker/`, `agent/`
+- `runtime/hive/`, `runtime/mind/`, остальной `docker/`, `agent/`
 - сетевую политику песочницы (ADR-033): набор серверов — те же два, `body` и `hive`
 
 ## Критерии приёмки
@@ -67,7 +69,10 @@ uv run python tools/check.py
 
 ## Ограничения
 - Сырых команд uc, `@gamer` и команд сервера в инструментах нет (CLAUDE.md, ADR-033).
-- Квота Z.ai общая с воркером: на стенде не больше двух сессий.
+- Квота Z.ai общая с воркером: на стенде не больше двух сессий (после пересборки образа — ещё
+  до двух, ответ 1).
 
 ## Заметки надзора
 - 2026-10-23 · поставлена по разбору артефактов T-032.
+- 2026-10-24 · ответ 1 (headless): в hermes-venv нет SDK `mcp`. «Можно трогать» расширено на слой
+  hermes в `docker/node/Dockerfile`, пересборка образа — в этой задаче.

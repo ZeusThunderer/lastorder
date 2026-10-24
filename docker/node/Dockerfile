@@ -42,13 +42,15 @@ RUN npm install -g --no-fund --no-audit \
 # runtime updates:
 # updates.check is false in the rendered config.yaml and `hermes update` only
 # touches a live checkout the operator runs, not this container.
+# The `mcp` extra carries the MCP client SDK (upstream pins mcp==2.3.0): without it
+# hermes disables every MCP surface at import ("mcp package not installed").
 COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /usr/local/bin/uv
 RUN uv python install --install-dir /opt/hermes-python 3.14 \
     && git clone --depth 1 --branch "${HERMES_AGENT_VERSION}" \
       https://github.com/NousResearch/hermes-agent.git /opt/hermes-src \
     && cd /opt/hermes-src \
     && UV_PYTHON_INSTALL_DIR=/opt/hermes-python UV_PROJECT_ENVIRONMENT=/opt/hermes \
-      uv sync --frozen --no-dev --python 3.14 \
+      uv sync --frozen --no-dev --extra mcp --python 3.14 \
     && ln -s /opt/hermes/bin/hermes /usr/local/bin/hermes \
     && git config --system --add safe.directory /opt/hermes-src \
     && HERMES_HOME=/tmp/hermes-build-home /opt/hermes/bin/hermes --version \
