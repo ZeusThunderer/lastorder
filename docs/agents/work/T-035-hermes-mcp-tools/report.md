@@ -70,3 +70,80 @@ search_files, terminal, write_file, tool_search, tool_describe, tool_call, proce
 
 ### Вызовы надзора
 - нет
+
+## Раунд 2 · 2026-10-24
+Коммиты: 1109631, 78b24d2, ffdcef9; верификация и этот отчёт — коммит раунда.
+
+### Ответ на ревью
+- C-1 · fixed ffdcef9 + раунд 2: пересборка, `import mcp`, повторная oneshot-сессия и расход
+  второй партии записаны ниже (в раунде 1 они существовали только в сообщении диспетчеру).
+- C-2 · fixed: список остановленных контейнеров — раздел ниже.
+- C-3 · fixed: верификация правки образа (пересборка + `import mcp`) записана здесь; артефакт
+  сессии приложен путём `C:/lastorder-t035-run/t035-check-session2.jsonl`.
+
+### Сделано (ответ 1)
+- `docker/node/Dockerfile` (ffdcef9): `uv sync --frozen --no-dev --extra mcp --python 3.14`
+  в слое hermes + 2 строки комментария. `--frozen` не снимался; uv sync с extra прошёл без
+  отказа, других extras нет.
+- Пересборка: `docker compose -f docker/compose.yml build node-1` → `Image lastorder-node:dev
+  Built`, образ `d0529a17f42c` (created 2026-10-24 01:52 +0200, позже коммита ffdcef9).
+- Обязательная проверка SDK: `docker run --rm --entrypoint /opt/hermes/bin/python
+  lastorder-node:dev -I -c "import mcp; …"` → `mcp ok 2.3.0
+  /opt/hermes/lib/python3.14/site-packages/mcp/__init__.py`.
+- Стенд (dev-open, тот же набор сервисов, раннер заморожен SIGSTOP на birth.arm_retry —
+  сессий раннера не было). Входная точка нового образа отрисовала `platform_toolsets.cli =
+  [file, terminal, body, hive]`. Oneshot-сессия с тем же промптом, что в раунде 1:
+  ```
+  docker exec -u 1001:1001 -e HERMES_HOME=/home/sister/.hermes lastorder-node-1-1 \
+    hermes chat --query-file /tmp/t035-prompt.txt --oneshot --format stream-json --yolo \
+    --toolsets file,terminal,body,hive
+  ```
+  exit 0, 779 событий, session `local-1019c1f0ab82c5bfe73fb21da45dd107aea49a89dcdf351f874a9fd137ad0e3e`.
+- Критерий 3. Вызов тела: в потоке `tool_use: tool_describe {"names": ["mcp__body__observe"]}`
+  и `tool_use: mcp__body__observe {}`; в логе шлюза `MCP server 'body' (HTTP): registered
+  10 tool(s)`, `MCP: registered 21 tool(s) from 2 server(s)`,
+  `tool mcp__body__observe completed (1.26s, 52865 chars)` (POST http://body-1:8700/mcp → 200).
+  Ответ observe начинается `"self": {"in_game": true, "hp": 0.0, "dead": true, …}` — T-032
+  состояние аватара. Инструменты hive видны: модель перечислила 11 (mcp__hive__inbox, send,
+  propose, vote, submit_will, inheritance, knowledge, get_prompt, list_prompts,
+  list_resources, read_resource); body 10 + hive 11 = 21. Вызова hive не было — промпт его не
+  требовал; в dev-open вызов ответил бы «unknown node key» (ожидаемо, ответ 1).
+- Как инструменты видны модели: через отложенный каталог — имена доступны сразу через
+  `tool_search`, схема подгружается `tool_describe` (модель сделала describe → call), готового
+  списка в init-событии нет.
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 717 passed, 3 skipped · check.py: ok
+$ uv run pytest tests/test_node_runner.py -q
+35 passed, 3 skipped
+```
+
+### Расход на стенде
+- Вторая партия (после пересборки): 1 сессия из разрешённых двух — 3 вызова API, total 19876
+  токенов (input 18550, из них cache_read 11456; output 1326, reasoning 497) [проверено:
+  result-событие артефакта и state.db `session_model_usage`].
+- Всего за задачу: 3 сессии, 14 запросов API; оплата — план Z.ai, estimated_cost_usd 0.0.
+
+### Остановленные контейнеры после проверки
+`lastorder-node-1-1`, `lastorder-mind-1-1`, `lastorder-body-1-1`, `lastorder-hive-1`,
+`lastorder-mc-server-1`, `lastorder-zai-egress-1` — `docker ps` по этим именам пуст.
+
+### Отклонения от задачи
+- нет
+
+### Вне задачи
+- gateway.log до регистрации MCP пишет «8 tool schema(s) materialized» (схемы базовых
+  toolset-ов) — косметика upstream, не чинил.
+
+### Вопросы
+- нет
+
+### Вызовы надзора
+- 2026-10-24 · answer · 9cf4dc2 · VERDICT: answered · cost_usd: 0.39687800000000006 · effort: medium
+
+### Самопроверка
+- lo-checker: раундов 1 · CHECK: C-1 blocker, C-2/C-3 minor — все закрыты этим раундом
+- C-1 · fixed ffdcef9 (+ этот коммит: верификация и отчёт) · C-2 · fixed (этот коммит) ·
+  C-3 · fixed (этот коммит)
