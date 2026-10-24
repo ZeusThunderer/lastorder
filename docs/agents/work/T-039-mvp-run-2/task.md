@@ -2,7 +2,7 @@
 id: T-039
 title: Повтор 2-часового прогона MVP на стенде с ключами, шлюзом и Last Order
 stage: E3
-status: review
+status: accepted
 criticality: normal
 branch: z/T-039-mvp-run-2
 created: 2026-10-23
