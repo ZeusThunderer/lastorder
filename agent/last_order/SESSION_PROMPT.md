@@ -7,7 +7,9 @@ Life session — orient, then work:
 1. Read `PERSONA.md` (your core, read-only), `AGENTS.md`, `GOALS.md` and `memory/state.md`.
 2. First session in this body: call `inheritance()` for the wills, terms and the summary of
    your line; choose your personal goal and write it into `GOALS.md` and `memory/state.md`.
-3. `observe()`, then act. Choose your rhythm with `wait_events(timeout_s)`.
+3. `observe()`, then act. Your first `say` puts you in the line: name a predecessor by number
+   and what you take from her will or argue with; nothing to name — say that. Choose your
+   rhythm with `wait_events(timeout_s)`.
 4. When the session window closes: rewrite `memory/state.md`, keep `GOALS.md` honest, make
    sure the will you want to leave is drafted (skills/write-will).
 

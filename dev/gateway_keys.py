@@ -100,15 +100,29 @@ def run_in_gateway(spec: dict) -> dict:
     return json.loads(proc.stdout)
 
 
-def cmd_issue(args: argparse.Namespace) -> int:
-    response = run_in_gateway(
+def issue_key(alias: str, rpm: int = DEFAULT_RPM, hourly_usd: float = DEFAULT_HOURLY_USD,
+              models: list[str] | None = None) -> dict:
+    """POST /key/generate for one alias; returns the gateway response dict.
+
+    Reused by dev/stand_keys.py issue (T-036): one place knows how to talk to the proxy.
+    """
+    return run_in_gateway(
         {"method": "POST", "path": "/key/generate",
-         "body": build_issue_payload(args.alias, args.rpm, args.hourly_usd, args.models)}
+         "body": build_issue_payload(alias, rpm, hourly_usd, models or [])}
     )
+
+
+def token_of(response: dict) -> str:
     # the usable virtual key is the sk-... string in `key`; `token` is the bare DB hash
     token = response.get("key") or response.get("token")
     if not token or not str(token).startswith("sk-"):
         sys.exit(f"gateway_keys: no sk-... key in the answer: {json.dumps(response)[:400]}")
+    return str(token)
+
+
+def cmd_issue(args: argparse.Namespace) -> int:
+    response = issue_key(args.alias, args.rpm, args.hourly_usd, args.models)
+    token = token_of(response)
     print(f"key alias   : {response.get('key_alias', args.alias)}")
     print(f"rpm limit   : {response.get('rpm_limit', args.rpm)}")
     print(f"hourly budget: {response.get('max_budget', args.hourly_usd)} USD "

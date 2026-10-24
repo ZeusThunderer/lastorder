@@ -38,8 +38,8 @@
 | T-032 | Отчёт MVP и 2-часовой прогон сети агентов | E3 | done | normal | z/T-032-mvp-run |
 | T-033 | Адаптер Hermes Agent в раннере узла — Z.ai, сухой прогон | E2 | done | critical | z/T-033-hermes-adapter |
 | T-034 | Прогон узла 15 мин в Hermes на стенде — сравнение с T-024 | E2 | done | normal | z/T-034-hermes-run |
-| T-035 | Hermes — инструменты MCP тела и hive в сессиях узла | E3 | ready | critical | z/T-035-hermes-mcp-tools |
-| T-036 | Ключи стенда — генерация локальных токенов и виртуальных ключей шлюза в .env | E3 | ready | normal | z/T-036-stand-keys |
+| T-035 | Hermes — инструменты MCP тела и hive в сессиях узла | E3 | in_progress | critical | z/T-035-hermes-mcp-tools |
+| T-036 | Ключи стенда — генерация локальных токенов и виртуальных ключей шлюза в .env | E3 | done | normal | z/T-036-stand-keys |
 | T-037 | Стенд — память node-N, zai-egress в зависимостях, без автозапуска при старте Docker | E3 | ready | normal | z/T-037-stand-compose |
-| T-038 | Инструкции сестры — первая реплика в линии, нет инструмента — находка, воля без расследований | E3 | ready | normal | z/T-038-sister-line-and-will |
+| T-038 | Инструкции сестры — первая реплика в линии, нет инструмента — находка, воля без расследований | E3 | done | normal | z/T-038-sister-line-and-will |
 | T-039 | Повтор 2-часового прогона MVP на стенде с ключами, шлюзом и Last Order | E3 | queued | normal | z/T-039-mvp-run-2 |
