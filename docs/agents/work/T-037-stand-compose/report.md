@@ -40,3 +40,63 @@
 
 Вызовы надзора:
 - 2026-10-24 · plan · 0a444cb · VERDICT: ok · cost_usd: 0.442461 — компромисс C утверждён (P1-1..P1-5 учтены).
+
+## Раунд 1 · 2026-10-24
+Коммиты: 0600d7b, 0a444cb, ec45ac7, ecb4c44 + этот раунд.
+
+### Сделано
+- `docker/compose.yml`: `mem_limit` `x-node` 1g→1.5g; `zai-egress` в `depends_on` node-1/2/3;
+  политика перезапуска — компромисс C: `"no"` у квото-тратящих node-N/last-order,
+  `on-failure` у остальной инфраструктуры.
+- `docs/architecture/NETWORK.md` §9: таблица лимитов против бюджета WSL-VM 14 ГБ, обоснование
+  1.5g, политика перезапуска со ссылкой на docs.docker.com, остаток компромисса, строка
+  «контейнер node-N упал» в таблице отказов.
+- `tests/test_stand_compose.py`: 5 пинов конфигурации (критерии 1–3 на уровне файла).
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 731 passed, 3 skipped in 54.84s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+$ docker compose -f docker/compose.yml config --quiet   # код 0
+$ docker compose -p t037 -f docker/compose.yml up -d node-1   # без ключей, порт mc 25575
+→ t037-zai-egress-1 Up вместе с node-1 (ps-вывод целиком: evidence.txt)
+$ docker inspect t037-node-1-1 t037-body-1-1 t037-zai-egress-1
+node-1 restart=no mem=1610612736 (1.5 GiB); body-1/zai-egress restart=on-failure
+```
+- Критерий 3 измерен живьём на хосте (матрица в evidence.txt): краш `exit 3` → перезапуск
+  (restarts=6); `docker kill` → лежит; корректный рестарт демона: on-failure+TERM→137
+  поднимается, exit-0 и unless-stopped — нет; жёсткая смерть движка (`wsl --shutdown`):
+  работавшие on-failure/unless-stopped поднимаются, `"no"` — нет. Вывод: одной политикой
+  критерий недостижим → компромисс C (утверждён надзором, план 1, VERDICT: ok).
+- Сессий агента не рождалось: node-1 без ключей — «no Z.ai key … would only wait»
+  (evidence.txt), квота не тратилась. Тестовый проект погашен `down -v`, проект `lastorder`
+  не тронут (контейнеры были и остались Exited).
+
+### Отклонения от задачи
+- Нет: вместо «одной политики» — компромисс C, это путь, предусмотренный критерием 3;
+  зафиксирован в §9 и шапке compose.
+
+### Вне задачи
+- П-1 из T-034 упоминает ещё `llm-gateway` при failover: в `depends_on` не добавлял — критерий
+  называет только zai-egress, маршрут через svc-N уже есть (адресат для будущей задачи).
+- В ключеless-тестовом проекте hive/mind перезапускались по отказу R2-6 — ожидаемо, не дефект.
+
+### Вопросы
+- нет
+
+### Ответ на план-ревью
+- P1-1 · fixed ec45ac7 — комментарий шапки compose переписан под компромисс C.
+- P1-2 · fixed ec45ac7 — §9: остаток компромисса (minds с JEV_BACKEND=llm зовут шлюз в рамках
+  потолков) назван явно.
+- P1-3 · fixed ec45ac7 — §9: таблица лимитов с 1.5g и суммой против 14 GiB, политика со
+  ссылкой на docs.docker.com, строка краша контейнера node-N.
+- P1-4 · fixed ecb4c44 — проверка в `-p t037` без ключей, MC_HOST_PORT=25575, `down -v`,
+  проект `lastorder` не тронут.
+- P1-5 · fixed ec45ac7 — `last-order` оставлен на 1g сознательно (короткие сессии
+  администратора, пика T-032 нет) — отражено в §9 и в раунде.
+
+### Самопроверка
+- lo-checker: раундов 1, CHECK: clean
+- C-1 · fixed: этот коммит раунда (самоссылка на sha невозможна) — ответы P1-1..P1-5 выше,
+  вывод проверок в «Проверки», сырые выводы и ps-вывод критерия 2 — evidence.txt.

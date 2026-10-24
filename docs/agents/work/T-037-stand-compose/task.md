@@ -2,7 +2,7 @@
 id: T-037
 title: Стенд — память node-N, zai-egress в зависимостях, без автозапуска при старте Docker
 stage: E3
-status: in_progress
+status: review
 criticality: normal
 branch: z/T-037-stand-compose
 created: 2026-10-23
@@ -35,16 +35,16 @@ created: 2026-10-23
 - `docker/node/up.sh`, `docker/node/entrypoint.sh`, `runtime/`
 
 ## Критерии приёмки
-- [ ] `mem_limit` у `node-N` поднят до 1.25–1.5g; выбор обоснован пиком T-032 и общим бюджетом хоста
+- [x] `mem_limit` у `node-N` поднят до 1.25–1.5g; выбор обоснован пиком T-032 и общим бюджетом хоста
   из NETWORK.md §9 (обновить таблицу).
-- [ ] `node-N` зависит от `zai-egress`: `docker compose -f docker/compose.yml up -d node-1` поднимает его.
+- [x] `node-N` зависит от `zai-egress`: `docker compose -f docker/compose.yml up -d node-1` поднимает его.
   Вывод `docker compose ps` — в report.md.
-- [ ] Политика перезапуска сервисов стенда такова, что после рестарта демона Docker стенд не
+- [x] Политика перезапуска сервисов стенда такова, что после рестарта демона Docker стенд не
   поднимается сам, а падение процесса в работающем стенде по-прежнему перезапускается (если это
   достижимо одной политикой — объяснить выбор по документации Docker со ссылкой; если нет —
   зафиксировать компромисс). Проверено `docker inspect` и рестартом Docker Desktop либо объяснено,
   почему рестарт не прогонялся.
-- [ ] `docker compose -f docker/compose.yml config` без ошибок.
+- [x] `docker compose -f docker/compose.yml config` без ошибок.
 
 ## Проверки
 ```
