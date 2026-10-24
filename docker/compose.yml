@@ -5,9 +5,11 @@
 # namespace because the unionclef py4j gateway listens on localhost only, and the node
 # sandbox reaches ONLY its own body (slot-N, internal), hive/llm-gateway/zai-egress
 # (svc-N, internal) and api.z.ai through the passthrough proxy (ADR-033, T-027).
-# Restart policy of the whole stack is on-failure: a crashed process is restarted by
-# the daemon, but the stand does not come back on its own when Docker Desktop starts
-# (T-037, NETWORK.md section 9).
+# Restart policy (T-037): infrastructure runs on-failure (a crashed process is
+# restarted by the daemon), but the quota spenders node-N and last-order are "no" —
+# after a Docker daemon death only `no` stays down, so the sandboxes never come back
+# unattended and burn quota (T-034 П-4; measured: on-failure/unless-stopped running
+# containers resurrect after a hard engine kill, NETWORK.md section 9).
 name: lastorder
 
 x-body: &body
@@ -69,7 +71,7 @@ x-node: &node
     context: ..
     dockerfile: docker/node/Dockerfile
   image: lastorder-node:dev
-  restart: on-failure
+  restart: "no"   # quota spender: no unattended resurrect after a daemon death (T-037)
   mem_limit: 1.5g
   cpus: "0.5"
   read_only: true
@@ -320,7 +322,7 @@ services:
       context: ..
       dockerfile: docker/node/Dockerfile
     image: lastorder-node:dev
-    restart: on-failure
+    restart: "no"   # quota spender: no unattended resurrect after a daemon death (T-037)
     depends_on: [hive, llm-gateway]
     mem_limit: 1g
     cpus: "0.5"
