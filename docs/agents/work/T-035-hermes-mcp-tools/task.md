@@ -2,7 +2,7 @@
 id: T-035
 title: Hermes — инструменты MCP тела и hive в сессиях узла
 stage: E3
-status: review
+status: accepted
 criticality: critical
 branch: z/T-035-hermes-mcp-tools
 created: 2026-10-23
