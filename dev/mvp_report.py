@@ -59,11 +59,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from runtime.knowledge.schema import SchemaError, Will  # noqa: E402
 from runtime.knowledge.slice import format_serial, parse_utc  # noqa: E402
+# The uc chat markers (SERVICE_PREFIXES, ADR-020) are one source for both the observe
+# scrub and this report's checks: if one of them ever appears in an observe chat array
+# the agent received, the scrub failed.
 from runtime.perception.chat import SERVICE_PREFIXES, is_service_line  # noqa: E402
 
-# The uc chat markers of runtime/perception/chat.py (ADR-020), one source for both
-# the observe scrub and this report's checks: if one of these ever appears in an
-# observe chat array the agent received, the scrub failed.
 COST_CEILING_PER_H = 0.35
 MIN_GENERATIONS = 6
 REF_SHARE = 0.70
