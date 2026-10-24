@@ -2,7 +2,7 @@
 id: T-037
 title: Стенд — память node-N, zai-egress в зависимостях, без автозапуска при старте Docker
 stage: E3
-status: review
+status: accepted
 criticality: normal
 branch: z/T-037-stand-compose
 created: 2026-10-23

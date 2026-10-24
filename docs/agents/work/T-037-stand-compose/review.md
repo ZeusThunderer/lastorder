@@ -34,3 +34,22 @@
 `mem_limit`, `zai-egress` в `depends_on` трёх узлов, политика по каждому сервису (включая `jev`
 под профилем). Лишних шагов нет; сети и egress (ADR-033) план не трогает; пересечений с задачами
 в работе нет (`dev/tasks.sh`: в работе только T-037).
+
+## Раунд 1 · 2026-10-24 · вердикт: accept · headless
+Проверено: `git diff main...z/T-037-stand-compose` @ 4954dc7 построчно (compose.yml, NETWORK.md §9,
+tests/test_stand_compose.py), report.md «Раунд 1», evidence.txt.
+Прогнано самим: `uv run pytest` — 731 passed, 3 skipped; `uv run python tools/check.py` — ok;
+`docker compose -f docker/compose.yml config --quiet` — код 0. Живой `up -d node-1` и матрицу
+рестартов не повторял (стенд с харнессом не поднимаю), принимаю по evidence.txt.
+
+Критерии: 1 — `x-node` 1.5g, таблица §9 с суммой против 14 ГБ; 2 — `zai-egress` в `depends_on`
+node-1..3, `ps` в evidence.txt; 3 — компромисс C по плану 1, ссылка на docs.docker.com, `inspect`;
+4 — config ok. Изменения в «Можно трогать», `networks` не тронуты (ADR-033). P1-1..P1-5 закрыты.
+Тест `test_infrastructure_restarts_on_failure` пинит политику всех прочих сервисов, включая `jev`.
+
+### Находки
+- R1-1 · minor · `docs/architecture/NETWORK.md` §9 · пометка «[проверено: T-037, `docker inspect`
+  + `wsl --shutdown` на стенде]» — матрица снята на пробных контейнерах nginx/sleep, а не на стенде
+  `lastorder` · при следующей правке §9 уточнить «на хосте стенда, пробные контейнеры». Не блокирует.
+- R1-2 · minor · evidence.txt · тестовый проект погашен `down -v`, а P1-4 просил `stop`. Удалены
+  только volumes `t037`, мир `lastorder` не тронут — вреда нет; впредь держаться формулировки ревью.
