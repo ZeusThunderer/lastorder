@@ -1,0 +1,43 @@
+# T-037 — сырые выводы проверок (для раунда отчёта)
+
+## Критерий 3 — матрица политик (nginx:1.27-alpine + sleep, этот хост, 2026-10-24)
+- краш `exit 3`, on-failure: status=restarting, restarts=6 (перезапускает).
+- `docker kill` (ручное), on-failure: exit=137, restarts=0, лежит (ручная остановка не поднимается).
+- корректный рестарт демона `docker desktop restart`:
+  - on-failure + sleep (TERM->137, как python): поднялся сам (startedAt после рестарта) — плохо;
+  - on-failure + nginx (TERM->0): лежит;
+  - unless-stopped работавший: лежит (демон корректно гасит -> «stopped otherwise»).
+- жёсткая смерть движка `wsl --shutdown` (сценарий инцидента П-4):
+  - on-failure работавший: ПОДНЯЛСЯ;
+  - unless-stopped работавший: ПОДНЯЛСЯ (воспроизведение инцидента);
+  - `no` работавший: лежит (exited 255);
+  - остановленные до смерти: лежат.
+Вывод: одной политикой критерий недостижим -> компромисс C (утверждён надзором, план 1).
+
+## Критерий 2 — up -d node-1 в проекте t037, без ключей (порт mc 25575)
+$ MC_HOST_PORT=25575 docker compose -p t037 -f docker/compose.yml up -d node-1
+... t037-mc-server-1 Healthy, body-1/mind-1/hive Started, node-1 Started
+$ docker compose -p t037 -f docker/compose.yml ps
+NAME                IMAGE                          SERVICE      STATUS PORTS
+t037-body-1-1       lastorder-body:dev             body-1       Up 31 seconds
+t037-hive-1         lastorder-mind:dev             hive         Restarting (1) 3 seconds ago
+t037-mc-server-1    itzg/minecraft-server:java21   mc-server    Up 52 seconds (healthy) 0.0.0.0:25575->25565/tcp
+t037-mind-1-1       lastorder-mind:dev             mind-1       Restarting (1) 7 seconds ago
+t037-node-1-1       lastorder-node:dev             node-1       Up 30 seconds
+t037-zai-egress-1   nginx:1.27-alpine              zai-egress   Up 52 seconds 80/tcp
+(zai-egress поднялся вместе с node-1; hive/mind в ключеless-проекте падают по R2-6 — ожидаемо)
+
+node-1 лог: [node-entrypoint] no Z.ai key / no gateway node key -> «would only wait»:
+runner.start, сессии не рождались, квота не тратилась.
+
+## Критерий 1/3 — docker inspect работающих контейнеров (проект t037)
+/t037-node-1-1   restart=no         mem=1610612736 (1.5 GiB)
+/t037-body-1-1   restart=on-failure mem=2147483648 (2 GiB)
+/t037-zai-egress-1 restart=on-failure
+
+## Критерий 4
+docker compose -f docker/compose.yml config --quiet -> код 0 (CONFIG_OK).
+
+## Полные проверки
+bash dev/check.sh -> pytest: 731 passed, 3 skipped; check.py: ok.
+Проект t037 погашен `down -v`; проект lastorder не тронут (все контейнеры были и остались Exited).

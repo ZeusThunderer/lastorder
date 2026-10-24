@@ -5,12 +5,17 @@
 # namespace because the unionclef py4j gateway listens on localhost only, and the node
 # sandbox reaches ONLY its own body (slot-N, internal), hive/llm-gateway/zai-egress
 # (svc-N, internal) and api.z.ai through the passthrough proxy (ADR-033, T-027).
+# Restart policy (T-037): infrastructure runs on-failure (a crashed process is
+# restarted by the daemon), but the quota spenders node-N and last-order are "no" —
+# after a Docker daemon death only `no` stays down, so the sandboxes never come back
+# unattended and burn quota (T-034 П-4; measured: on-failure/unless-stopped running
+# containers resurrect after a hard engine kill, NETWORK.md section 9).
 name: lastorder
 
 x-body: &body
   build: ./body
   image: lastorder-body:dev
-  restart: unless-stopped
+  restart: on-failure
   depends_on:
     mc-server:
       condition: service_healthy
@@ -33,7 +38,7 @@ x-mind: &mind
     context: ..
     dockerfile: docker/mind/Dockerfile
   image: lastorder-mind:dev
-  restart: unless-stopped
+  restart: on-failure
   environment: &mind-env
     MCP_BODY_PORT: "8700"
     MCP_LOG_PATH: /mind-run/log.jsonl
@@ -59,14 +64,15 @@ x-mind: &mind
 # container. The runner is root (it drops every harness process to the `sister` uid and
 # reads its secrets from 0400 files); the container itself is read-only with tmpfs homes
 # and no privilege beyond what supervision needs. Limits per NETWORK.md section 9
-# (the T-024 spike measured 537-602 MiB harness peaks; the stand run re-checks 1g/0.5).
+# (the T-024 spike measured 537-602 MiB harness peaks; the T-032 run pinned node-1 at
+# 1005/999 MiB of the old 1g cap, so it is 1.5g now, the body's 1.5x margin precedent).
 x-node: &node
   build:
     context: ..
     dockerfile: docker/node/Dockerfile
   image: lastorder-node:dev
-  restart: unless-stopped
-  mem_limit: 1g
+  restart: "no"   # quota spender: no unattended resurrect after a daemon death (T-037)
+  mem_limit: 1.5g
   cpus: "0.5"
   read_only: true
   tmpfs:
@@ -135,7 +141,7 @@ services:
       - "${MC_HOST_PORT:-25565}:25565"   # join from the host to watch
     volumes:
       - world:/data
-    restart: unless-stopped
+    restart: on-failure
 
   body-1:
     <<: *body
@@ -161,10 +167,11 @@ services:
       - mind-1-run:/mind-run
       - workplaces-1:/workplaces:ro   # the Jev policy of the living sister, read-only
 
-  # The sandbox of slot 1 (T-027).
+  # The sandbox of slot 1 (T-027). zai-egress rides along (T-034 П-1): without the
+  # passthrough the zcode harness has no route to api.z.ai and the session dies.
   node-1:
     <<: *node
-    depends_on: [mind-1, hive]   # hive creates the pending_wills subpath before uvicorn
+    depends_on: [zai-egress, mind-1, hive]   # hive creates the pending_wills subpath before uvicorn
     environment:
       <<: *node-env
       NODE_SLOT: LastOrder01
@@ -206,7 +213,7 @@ services:
 
   node-2:
     <<: *node
-    depends_on: [mind-2, hive]
+    depends_on: [zai-egress, mind-2, hive]
     environment:
       <<: *node-env
       NODE_SLOT: LastOrder02
@@ -248,7 +255,7 @@ services:
 
   node-3:
     <<: *node
-    depends_on: [mind-3, hive]
+    depends_on: [zai-egress, mind-3, hive]
     environment:
       <<: *node-env
       NODE_SLOT: LastOrder03
@@ -300,7 +307,7 @@ services:
       - knowledge:/knowledge
       - hive-run:/hive-run   # not over the image's system /run (review R1-6)
     networks: [default, svc-1, svc-2, svc-3, svc-lo]
-    restart: unless-stopped
+    restart: on-failure
 
   # Last Order's own sandbox (T-030, ADR-036): the admin alarm plus the short harness
   # sessions of the network's administrator. The node image carries both harnesses (the
@@ -315,7 +322,7 @@ services:
       context: ..
       dockerfile: docker/node/Dockerfile
     image: lastorder-node:dev
-    restart: unless-stopped
+    restart: "no"   # quota spender: no unattended resurrect after a daemon death (T-037)
     depends_on: [hive, llm-gateway]
     mem_limit: 1g
     cpus: "0.5"
@@ -392,7 +399,7 @@ services:
       timeout: 5s
       start_period: 300s
       retries: 5
-    restart: unless-stopped
+    restart: on-failure
 
   # The LLM gateway (NETWORK.md section 3, ADR-033): LiteLLM proxy, the only holder of provider
   # keys (env, never files). Port 4000 stays inside the docker network — nothing is published
@@ -423,7 +430,7 @@ services:
       timeout: 5s
       start_period: 60s
       retries: 5
-    restart: unless-stopped
+    restart: on-failure
 
   # Postgres of the gateway: virtual keys and spend rows. Only llm-gateway sees it (private
   # network, no published port); the default password matches the mc-server RCON precedent of
@@ -442,7 +449,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    restart: unless-stopped
+    restart: on-failure
 
   # The only way out of a node sandbox (T-027 plan review P1-3): a TLS passthrough with an
   # SNI allowlist of exactly api.z.ai. In svc-N it carries the network alias `api.z.ai`, so
@@ -460,7 +467,7 @@ services:
         aliases: ["api.z.ai"]
       svc-3:
         aliases: ["api.z.ai"]
-    restart: unless-stopped
+    restart: on-failure
 
 volumes:
   world:
