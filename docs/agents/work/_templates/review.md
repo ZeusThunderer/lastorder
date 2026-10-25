@@ -1,7 +1,7 @@
 # T-NNN. Ревью надзора
 
-<!-- Проверка плана: ## План N · YYYY-MM-DD · вердикт: ok | revise [· headless], находки P<N>-<k>.
-     Раунд, вызванный ZCode через dev/call_supervisor.sh, помечается в заголовке: · headless -->
+<!-- Раунд, вызванный ZCode через dev/call_supervisor.sh, помечается в заголовке: · headless.
+     Ответ на вопрос исполнителя: ## Ответ N · YYYY-MM-DD [· headless] -->
 
 ## Раунд 1 · YYYY-MM-DD · вердикт: accept | changes | reject
 Проверено: `git diff main...z/T-NNN-<slug>` @ <sha>

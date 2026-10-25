@@ -4,6 +4,7 @@ title: <коротко, по-русски>
 stage: <R1|E0|E1|E2|…|—>
 status: draft
 criticality: normal
+after: []
 branch: z/T-NNN-<slug>
 created: YYYY-MM-DD
 ---
