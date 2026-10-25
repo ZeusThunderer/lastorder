@@ -44,18 +44,12 @@ board_dirty=0; git diff --quiet -- "$board" || board_dirty=1
 git merge -q --no-ff "$branch" -m "Merge $id: $title" || { git merge --abort 2>/dev/null; die "merge into main failed: local changes in $ROOT overlap"; }
 set_status_file "$task" done
 paths=("$task")
-promoted="$(promote_queued)"
-for d in $promoted; do paths+=("$WORK/$d/task.md"); done
 if [ "$board_dirty" = 0 ]; then
   board_set "$board" "$id" done
-  for d in $promoted; do board_set "$board" "${d:0:5}" ready; done
   paths+=("$board")
-else echo "merge_task: $board has local edits, rows not updated (dev/tasks.sh --sync later)" >&2; fi
-msg=(-m "$id: done")
-[ -z "$promoted" ] || msg+=(-m "ready: $(printf '%s\n' $promoted | cut -c1-5 | tr '\n' ' ' | sed 's/ $//')")
-git commit -q "${msg[@]}" -m "Agent: claude" -- "${paths[@]}" || die "could not commit status done"
+else echo "merge_task: $board has local edits, row not updated (dev/tasks.sh --sync later)" >&2; fi
+git commit -q -m "$id: done" -m "Agent: claude" -- "${paths[@]}" || die "could not commit status done"
 unlock_main
 
 echo "merge_task: $id merged into main as $(git rev-parse --short HEAD)"
-[ -z "$promoted" ] || echo "merge_task: now ready: $(printf '%s\n' $promoted | cut -c1-5 | tr '\n' ' ')"
 echo "merge_task: worktree $wt is left in place; dev/tasks.sh --prune removes it"

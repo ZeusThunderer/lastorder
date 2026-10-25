@@ -21,6 +21,8 @@ if [ "$mode" = take ]; then
     ready|changes|in_progress) ;;
     *) die "$id has status '$status', nothing to take" ;;
   esac
+  open="$(deps_open "$dir")"
+  [ "$status" != ready ] || [ -z "$open" ] || die "$id waits for ${open% } (after:)"
 fi
 
 if [ ! -d "$wt" ]; then
