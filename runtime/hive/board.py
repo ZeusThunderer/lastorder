@@ -36,7 +36,7 @@ import re
 import sqlite3
 import threading
 from collections.abc import Callable, Iterator
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -442,7 +442,7 @@ class Board:
         kind: Any,
         to: Any,
         text: Any,
-        request: MappingLike | None = None,
+        request: dict | None = None,
     ) -> dict:
         if kind not in ("task", "request", "message"):
             raise BoardError(422, "validation", f"kind must be task|request|message, got {kind!r}")
@@ -483,7 +483,7 @@ class Board:
         return entry
 
     def _check_request_payload(
-        self, kind: str, request: MappingLike | None, actor: str
+        self, kind: str, request: dict | None, actor: str
     ) -> tuple[str | None, str | None]:
         if kind != "request":
             if request not in (None, {}):
@@ -1080,7 +1080,6 @@ class Board:
                 )
 
 
-MappingLike = Any  # the request payload arrives as parsed JSON (dict) or None
 
 __all__ = [
     "ALARM_TYPES",
