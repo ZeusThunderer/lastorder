@@ -358,6 +358,46 @@ services:
       - knowledge:/knowledge:ro
     networks: [svc-lo]
 
+  # T-041 console spike (ADR-041): ready-made web consoles for Pi, raised only under
+  # `--profile console-spike` — never with the live stack. Both ride the node image
+  # (pi is inside) and install their npm package at container start, so the stand
+  # itself stays closed; the published ports are loopback-only (the operator's
+  # browser on the host). No Z.ai key here: a UI/session/steer check needs no LLM
+  # turn, so the spike burns no quota. The default network gives the install step
+  # egress — the console service is NOT a node-N sandbox (ADR-033: candidates live
+  # in their own service, the sandboxes stay closed).
+  console-pi-web-ui:
+    image: lastorder-node:dev
+    profiles: ["console-spike"]
+    command:
+      - sh
+      - -c
+      - apt-get update -qq && apt-get install -y -qq --no-install-recommends make g++
+        && npm install -g --no-fund --no-audit --allow-scripts=node-pty,@google/genai,protobufjs pi-web-ui
+        && exec pi-web-ui --host 0.0.0.0 --port 8787 --no-browser
+    ports:
+      - "127.0.0.1:8787:8787"
+    mem_limit: 1g
+    restart: "no"
+
+  # [проверено: T-041] this one does NOT come up in a container: `pi-web install`
+  # demands systemd-run user services and `pi-web start` runs `systemctl --user
+  # start` — a plain container has neither. Kept for reproducing the finding; on a
+  # systemd host (VM) it is the documented path.
+  console-pi-web:
+    image: lastorder-node:dev
+    profiles: ["console-spike"]
+    command:
+      - sh
+      - -c
+      - npm install -g --no-fund --no-audit --allow-scripts=node-pty @jmfederico/pi-web
+        && pi-web install && exec pi-web start --host 0.0.0.0 --port 8504
+    ports:
+      - "127.0.0.1:8504:8504"
+    mem_limit: 1g
+    restart: "no"
+
+
   # FastJev decision server for C1 (T-005, ADR-004/023). Raises only under --profile jev.
   # GPU 0 is the RTX 2070 (5070 Ti stays free); model checkpoints live in the named volume,
   # never a bind mount. The 127.0.0.1 publish exists only for the dev/jev_spike.py measurement;
