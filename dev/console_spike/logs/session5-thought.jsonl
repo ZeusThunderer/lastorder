@@ -1,0 +1,21 @@
+>> {"id": "state-1", "type": "get_state"}
+>> {"id": "thought-1", "type": "prompt", "message": "/thought Мысль оператора: тестовый снег падает вверх."}
+>> {"id": "turn-1", "type": "prompt", "message": "Процитируй одним коротким предложением свою собственную последнюю мысль выше, дословно."}
+<< {"type": "message_start", "line": "{\"type\": \"message_start\", \"message\": {\"role\": \"custom\", \"content\": [{\"type\": \"text\", \"text\": \"Мысль оператора: тестовый снег падает вверх.\"}], \"timestamp\": 1792978948926}}"}
+<< {"type": "message_end", "line": "{\"type\": \"message_end\", \"message\": {\"role\": \"custom\", \"content\": [{\"type\": \"text\", \"text\": \"Мысль оператора: тестовый снег падает вверх.\"}], \"timestamp\": 1792978948926}}"}
+<< {"type": "extension_ui_request", "line": "{\"type\": \"extension_ui_request\", \"id\": \"403f25f6-31ab-4e35-85a0-8174be376306\", \"method\": \"notify\", \"message\": \"thought inserted: 44 chars\", \"notifyType\": \"info\"}"}
+<< {"type": "response", "command": "get_state", "success": true, "data": "{'model': {'id': 'glm-5.3-flash', 'name': 'glm-5.3-flash', 'api': 'openai-completions', 'provider': 'zai', 'baseUrl': 'https://api.z.ai/api/coding/paas/v4', 'reasoning': True, 'input': ['text'], 'cost': {'input': 0, 'out", "error": "None"}
+<< {"type": "response", "command": "prompt", "success": true, "data": "{'disposition': 'handled'}", "error": "None"}
+<< {"type": "response", "command": "prompt", "success": true, "data": "{'disposition': 'started'}", "error": "None"}
+<< {"type": "agent_start", "line": "{\"type\": \"agent_start\"}"}
+<< {"type": "turn_start", "line": "{\"type\": \"turn_start\"}"}
+<< {"type": "message_start", "line": "{\"type\": \"message_start\", \"message\": {\"role\": \"system\", \"content\": \"\", \"sections\": {\"preamble\": \"You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new "}
+<< {"type": "message_end", "line": "{\"type\": \"message_end\", \"message\": {\"role\": \"system\", \"content\": \"\", \"sections\": {\"preamble\": \"You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new fi"}
+<< {"type": "message_start", "line": "{\"type\": \"message_start\", \"message\": {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"Процитируй одним коротким предложением свою собственную последнюю мысль выше, дословно.\"}], \"timestamp\": 1792978949500}}"}
+<< {"type": "message_end", "line": "{\"type\": \"message_end\", \"message\": {\"role\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"Процитируй одним коротким предложением свою собственную последнюю мысль выше, дословно.\"}], \"timestamp\": 1792978949500}}"}
+<< {"type": "message_start", "line": "{\"type\": \"message_start\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"thinking\", \"thinking\": \"The\", \"thinkingSignature\": \"reasoning_content\"}], \"api\": \"openai-completions\", \"provider\": \"zai\", \"model\": \"glm-5.3-flash\", \"usage\": {\"input\": 0, \"output\":"}
+<< {"type": "message_end", "line": "{\"type\": \"message_end\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"thinking\", \"thinking\": \"The user is asking me to quote my own last thought above, verbatim, in one short sentence. The \\\"thought operator\\\" line says: \\\"Мысль оператора: тестовый сн"}
+<< {"type": "turn_end", "line": "{\"type\": \"turn_end\", \"message\": {\"role\": \"assistant\", \"content\": [{\"type\": \"thinking\", \"thinking\": \"The user is asking me to quote my own last thought above, verbatim, in one short sentence. The \\\"thought operator\\\" line says: \\\"Мысль оператора: тестовый снег "}
+<< {"type": "agent_end", "line": "{\"type\": \"agent_end\", \"messages\": [{\"role\": \"system\", \"content\": \"\", \"sections\": {\"preamble\": \"You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new fi"}
+<< {"type": "agent_settled", "line": "{\"type\": \"agent_settled\", \"aborted\": false}"}
+== settled

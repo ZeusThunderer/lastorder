@@ -8,6 +8,7 @@ FROM python:3.12-slim
 ARG OPENCODE_VERSION=1.19.3
 ARG ZCODE_APP_CLI_VERSION=3.15.3-36
 ARG HERMES_AGENT_VERSION=v0.22.4
+ARG PI_CODING_AGENT_VERSION=1.4.0
 ARG SISTER_UID=1001
 ARG SISTER_GID=1001
 
@@ -26,6 +27,15 @@ RUN npm install -g --no-fund --no-audit \
       "zcode-app-cli@${ZCODE_APP_CLI_VERSION}" \
     && npm cache clean --force \
     && opencode --version && zcode --version
+
+# Pi (ADR-041 primary harness; the adapter is T-045): the RPC coding agent on the
+# Z.ai Coding Plan. Same npm pin discipline as above; the package needs Node >= 22.19
+# (NodeSource 22.x satisfies it — `pi --version` below fails the build on an older
+# runtime). MCP is builtin (pi-mcp ships as a core dependency, verified at 1.4.0).
+RUN npm install -g --no-fund --no-audit \
+      "@earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION}" \
+    && npm cache clean --force \
+    && pi --version
 
 # Hermes Agent (ADR-032 third harness), pinned to the upstream git tag: PyPI lags
 # behind (0.19.0 at build time) and upstream blocks wheel builds outright — the

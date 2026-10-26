@@ -407,6 +407,81 @@ def drop_hermes_home(
     _chmod(home, 0o700)
 
 
+# Pi (ADR-041 primary harness; the adapter itself is T-045, this is only the config
+# render). Like Hermes, Pi keeps its agent dir on the sister's tmpfs home, NOT in the
+# workplace: sessions and state are per-container runtime data. ~/.pi/agent carries
+# models.json (the Z.ai coding provider — the same base URL and plan the zcode and
+# hermes configs use), mcp.json (both MCP servers of the slot; MCP is builtin since
+# 1.0 — pi-mcp ships as a core dependency) and settings.json (the zai defaults).
+PI_AGENT_DIR = Path("/home/sister/.pi/agent")
+PI_ZAI_BASE_URL = HERMES_GLM_BASE_URL  # the coding endpoint of the GLM Coding Plan
+
+
+def render_pi_configs(model: str, body_base: str, hive_url: str, node_key: str) -> dict[str, dict]:
+    """The Pi agent-dir configs (T-041): models.json + mcp.json + settings.json, by
+    content. No key material anywhere: models.json interpolates $ZAI_API_KEY from
+    the environment of the pi process at request time (how the key travels is the
+    adapter's business, T-045), mcp.json carries the node key — the agent's own
+    identity, same rule as zcode.json/config.yaml (ADR-033)."""
+    glm = _glm_model(model)
+    return {
+        "models.json": {
+            "providers": {
+                "zai": {
+                    "baseUrl": PI_ZAI_BASE_URL,
+                    "api": "openai-completions",
+                    "apiKey": "$ZAI_API_KEY",
+                    # the endpoint's verified quirks (docs models-configuration.md):
+                    # no developer role, thinking rides thinking.type — the same
+                    # compat the zai guides prescribe
+                    "compat": {"supportsDeveloperRole": False, "thinkingFormat": "zai"},
+                    "models": [{"id": glm, "reasoning": True}],
+                }
+            }
+        },
+        "mcp.json": {
+            "mcpServers": {
+                "body": {"url": f"{body_base.rstrip('/')}/mcp", "timeout": 10},
+                "hive": {
+                    "url": hive_mcp_url(hive_url),
+                    "headers": {"X-Node-Key": node_key},
+                    "timeout": 10,
+                },
+            }
+        },
+        "settings.json": {
+            "defaultProvider": "zai",
+            "defaultModel": glm,
+            "enableInstallTelemetry": False,
+            "enableAnalytics": False,
+        },
+    }
+
+
+def drop_pi_agent_dir(
+    agent_dir: Path,
+    *,
+    model: str,
+    body_base: str,
+    hive_url: str,
+    node_key: str,
+    uid: int | None = None,
+    gid: int | None = None,
+) -> None:
+    """Lay out PI_AGENT_DIR: the three configs root-owned 0444 (the runner's files,
+    the same boundary as HERMES_HOME/config.yaml, R1-2), everything else Pi creates
+    itself on first run. The dir stays the sister's 0700 — sessions and state are
+    hers, only the provider/MCP wiring is ours. A will-session variant (hive at the
+    proxy) belongs to the adapter's per-session re-render, T-045."""
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    for name, config in render_pi_configs(model, body_base, hive_url, node_key).items():
+        _write_file_no_links(
+            agent_dir / name, json.dumps(config, indent=2), mode=READ_ONLY_FILE, uid=0, gid=0
+        )
+    _own(agent_dir, uid, gid)
+    _chmod(agent_dir, 0o700)
+
+
 def _drop_harness_configs(
     root: Path,
     template: Path,

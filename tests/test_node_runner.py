@@ -1031,6 +1031,56 @@ def test_hermes_home_config_is_runner_owned(tmp_path: Path) -> None:
     assert stat.S_IMODE((home / "config.yaml").stat().st_mode) & 0o777 == 0o444
 
 
+# --- the Pi agent dir (T-041) --------------------------------------------------------------------
+
+
+def test_pi_configs_render_the_zai_plan_and_both_mcp_servers() -> None:
+    """T-041: models.json (the zai provider, $ZAI_API_KEY interpolated from the pi
+    process env, never stored), mcp.json (body + hive, the node key header),
+    settings.json (the zai defaults, telemetry off)."""
+    configs = workplace.render_pi_configs(
+        "GLM-5.3-Flash",
+        body_base="http://body-1:8700",
+        hive_url="http://hive:8000",
+        node_key="sk-node-one",
+    )
+    zai = configs["models.json"]["providers"]["zai"]
+    assert zai["baseUrl"] == "https://api.z.ai/api/coding/paas/v4"
+    assert zai["api"] == "openai-completions"
+    assert zai["apiKey"] == "$ZAI_API_KEY"
+    assert zai["compat"] == {"supportsDeveloperRole": False, "thinkingFormat": "zai"}
+    assert zai["models"][0]["id"] == "glm-5.3-flash"
+    servers = configs["mcp.json"]["mcpServers"]
+    assert servers["body"]["url"] == "http://body-1:8700/mcp"
+    assert servers["hive"]["url"] == "http://hive:8000/node/mcp"
+    assert servers["hive"]["headers"] == {"X-Node-Key": "sk-node-one"}
+    settings = configs["settings.json"]
+    assert settings["defaultProvider"] == "zai"
+    assert settings["defaultModel"] == "glm-5.3-flash"
+    assert settings["enableInstallTelemetry"] is False and settings["enableAnalytics"] is False
+
+
+def test_drop_pi_agent_dir_writes_the_three_configs(tmp_path: Path) -> None:
+    agent_dir = tmp_path / "pi-agent"
+    workplace.drop_pi_agent_dir(
+        agent_dir,
+        model="GLM-5.3-Flash",
+        body_base="http://body-1:8700/",
+        hive_url="http://hive:8000",
+        node_key="sk-node-one",
+        uid=1001,
+        gid=1001,
+    )
+    for name in ("models.json", "mcp.json", "settings.json"):
+        assert (agent_dir / name).is_file(), name
+    models = json.loads((agent_dir / "models.json").read_text(encoding="utf-8"))
+    assert "zai" in models["providers"]
+    mcp = json.loads((agent_dir / "mcp.json").read_text(encoding="utf-8"))
+    assert mcp["mcpServers"]["body"]["url"] == "http://body-1:8700/mcp"  # trailing / dropped
+    if os.name == "posix":  # the mode side needs a POSIX host, like hermes above
+        assert stat.S_IMODE((agent_dir / "models.json").stat().st_mode) & 0o777 == 0o444
+
+
 STAGED_BODY = "Урок: не ходить в горы ночью.\nШутка: жадность — наследство, я не просил."
 
 
