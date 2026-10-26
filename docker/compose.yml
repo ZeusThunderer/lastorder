@@ -378,7 +378,7 @@ services:
     ports:
       - "127.0.0.1:8787:8787"
     mem_limit: 1g
-    restart: "no"
+    restart: on-failure
 
   # [проверено: T-041] this one does NOT come up in a container: `pi-web install`
   # demands systemd-run user services and `pi-web start` runs `systemctl --user
@@ -395,7 +395,7 @@ services:
     ports:
       - "127.0.0.1:8504:8504"
     mem_limit: 1g
-    restart: "no"
+    restart: on-failure
 
 
   # FastJev decision server for C1 (T-005, ADR-004/023). Raises only under --profile jev.
