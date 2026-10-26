@@ -62,7 +62,9 @@ Last Order живёт в одной долгой сессии Pi на Z.ai Codin
   и тревога на доску (T-042) — тест.
 - [ ] Last Order может ответить сестре (`send`) и оператору (`post(kind=message, to=operator)`),
   ставит задачи на доске; инструменты сестры ей по-прежнему недоступны и наоборот — тест.
-- [ ] `agent/network/AGENTS.md`: вес задачи оператора и задач сети по ADR-042, одна-две фразы.
+- [ ] `agent/network/AGENTS.md`: правила доски по `docs/architecture/TASKBOARD.md`, раздел 13,
+  сжато; `board(filter=all)` — для летописи.
+- [ ] admin ставит тревоги `harness_failover` и `quota` через `board_alarm` (T-042) — тест.
 - [ ] `docker/node/up.sh` передаёт `HIVE_MCP_LO_KEY` и `GATEWAY_KEY_LO` — тест или вывод
   `up.sh` с пометкой.
 - [ ] Живая проверка на стенде (`hive last-order llm-gateway zai-egress` + `hapi-hub` + один слот): Last Order

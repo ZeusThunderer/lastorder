@@ -36,7 +36,8 @@ created: 2026-10-26
   `runtime/node/config.py`
 - `docker/compose.yml` — env `node-N` (по умолчанию `NODE_HARNESS=pi`); сеть `node-2`, `node-3`
   до `hapi-hub` — как у `node-1` в T-044
-- `agent/last_order/AGENTS.md` — коротко (ADR-042):
+- `agent/last_order/AGENTS.md` — коротко, по `docs/architecture/TASKBOARD.md`, раздел 13
+  (ADR-042); строка про `inbox` — Мисака-нет теперь приходит конвертом `misaka-link` (T-048):
   - голос оператора в чате — наблюдение;
   - задача оператора на доске — сильная просьба: высший приоритет, отказ — с причиной на доске;
   - задачи Last Order и сестёр — совет;
@@ -54,6 +55,8 @@ created: 2026-10-26
 - [ ] `PiAdapter`: команда `hapi pi`, id сессии и учёт расхода из файла сессии Pi — тесты argv
   и разбора по образцу Hermes.
 - [ ] R2-3 T-041: сестра не может подменить конфиги Pi — тест.
+- [ ] Раннер ставит тревоги `harness_failover`, `session_missing`, `stuck`, `quota`,
+  `emergency_will` (TASKBOARD.md, раздел 7) через `board_alarm` — тест.
 - [ ] Жизнь и волевая сессия идут в Pi; аварийная воля при таймауте — как прежде — тест.
 - [ ] Отказ Z.ai → OpenCode через шлюз + тревога на доске — тест.
 - [ ] Hermes и OpenCode остаются выбираемыми через `NODE_HARNESS` — тест.
