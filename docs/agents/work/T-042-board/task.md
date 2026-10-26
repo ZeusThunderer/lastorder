@@ -2,7 +2,7 @@
 id: T-042
 title: Доска задач в hive — хранилище, переходы, смерть, HTTP, лента, MCP-инструменты
 stage: I
-status: ready
+status: accepted
 criticality: critical
 after: [T-041]
 branch: z/T-042-board

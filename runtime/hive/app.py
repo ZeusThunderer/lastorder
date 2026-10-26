@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -44,9 +45,11 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import StreamingResponse
 
 from runtime.config import env
 from runtime.comms.schema import MSG_MAX_CHARS, MSG_TTL_S
+from runtime.hive.board import OPERATOR, Board, BoardError
 from runtime.hive.client import (
     WireError,
     birth_record_to_json,
@@ -240,6 +243,8 @@ def create_app(
     node_keys: dict[str, str] | None = None,
     lo_key: str | None = None,
     runner_keys: dict[str, str] | None = None,
+    operator_key: str | None = None,
+    stream_poll_s: float | None = None,
 ) -> FastAPI:
     clock = clock or (lambda: datetime.now(timezone.utc))
     run_dir = Path(run_dir if run_dir is not None else (env("RUN_DIR") or "run"))
@@ -251,6 +256,12 @@ def create_app(
     if lifecycle is None:
         lifecycle = Lifecycle(store, rcon, log=log, run_dir=run_dir, clock=clock)
     service = HiveService(store, lifecycle, CommsBook(lifecycle, log=log, clock=clock))
+    board = Board(
+        run_dir / "board.sqlite", lifecycle=lifecycle, log=log, clock=clock
+    )
+    # TASKBOARD.md 4.3: every closing point of a node frees its board hold in one
+    # transaction; the hook itself never breaks the death path (lifecycle logs the miss).
+    lifecycle.set_death_hook(board.on_death)
     scan_seconds = float(scan_s if scan_s is not None else (env("HIVE_TTL_SCAN_S") or TTL_SCAN_S))
 
     # --- the network MCP (T-028): same port, two mounted servers ------------------------
@@ -271,6 +282,8 @@ def create_app(
                 " be open. Configure the slot keys or set NODE_DEV_OPEN=1 for a dev run."
             )
     last_order_key = lo_key if lo_key is not None else (env("HIVE_MCP_LO_KEY") or "")
+    operator_secret = operator_key if operator_key is not None else (env("HIVE_OPERATOR_KEY") or "")
+    stream_poll = float(stream_poll_s if stream_poll_s is not None else (env("BOARD_STREAM_POLL_S") or 1.0))
     now = lambda: clock().isoformat()  # noqa: E731 - one clock for every layer write
     proposals = ProposalBook(store, now=now)
     layers = CommonLayers(store, now=now)
@@ -287,6 +300,7 @@ def create_app(
             log=log,
             now=now,
             runner_keys=runner_keys,
+            board=board,
         )
     )
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the
@@ -333,6 +347,7 @@ def create_app(
     app = FastAPI(title="last-order hive", lifespan=lifespan)
     app.state.hive = service
     app.state.log = log
+    app.state.board = board
 
     def envelope(status: int, kind: str, message: str) -> JSONResponse:
         return JSONResponse(
@@ -349,6 +364,10 @@ def create_app(
 
     @app.exception_handler(ApiError)
     async def _api_error(_: Any, exc: ApiError) -> JSONResponse:
+        return envelope(exc.status, exc.kind, exc.message)
+
+    @app.exception_handler(BoardError)  # the board's refusals carry their own mapping
+    async def _board_error(_: Any, exc: BoardError) -> JSONResponse:
         return envelope(exc.status, exc.kind, exc.message)
 
     @app.exception_handler(StoreError)  # subclasses resolved by isinstance below
@@ -532,6 +551,133 @@ def create_app(
         serial = _serial(body)
         _require_runner_key_of(request, serial)
         return chatter_turn_to_json(service.chatter_turn(serial))
+
+    # --- the task board (TASKBOARD.md section 9; T-042) -----------------------------------
+    # The operator speaks with HIVE_OPERATOR_KEY in X-Operator-Key, agents with their
+    # X-Node-Key (a slot's live serial or Last Order's key), the environment's alarms
+    # with X-Runner-Key / the Last Order key as `admin`. `from` is always stamped here,
+    # never read from a body. The /board page itself is T-049; this is the API under it.
+
+    def _require_operator(request: Request) -> None:
+        if not operator_secret:
+            raise ApiError(401, "operator_key", "the board needs HIVE_OPERATOR_KEY configured")
+        if request.headers.get("x-operator-key", "").strip() != operator_secret:
+            raise ApiError(401, "operator_key", "X-Operator-Key does not open the board")
+
+    def _agent_actor(request: Request) -> str:
+        """X-Node-Key -> 'last-order' | the live serial, for feed/ack/entry reads."""
+        key = request.headers.get("x-node-key", "").strip()
+        if not key:
+            raise ApiError(401, "node_key", "identify with X-Node-Key")
+        if last_order_key and key == last_order_key:
+            return "last-order"
+        slot = keys.get(key)
+        if slot is None:
+            raise ApiError(401, "node_key", "unknown node key")
+        alive = [b for b in lifecycle.alive() if b.slot == slot]
+        live = [b for b in alive if not lifecycle.body_dead(b.serial)]
+        if not live:
+            raise ApiError(409, "no_live_node", f"slot {slot} has no live node")
+        return str(max(b.serial for b in live))
+
+    def _board_actor(request: Request) -> str:
+        """Operator or agent identity for the routes both may read."""
+        if request.headers.get("x-operator-key", "").strip():
+            _require_operator(request)
+            return OPERATOR
+        return _agent_actor(request)
+
+    def _alarm_author(request: Request) -> str:
+        """X-Runner-Key -> runner:<slot>; the Last Order key -> `admin` (the admin
+        process of the LO sandbox rides this key over HTTP, ADR-036); a node key ->
+        the node (delivery_failing alone, enforced by the board's rights table)."""
+        runner_key = request.headers.get("x-runner-key", "").strip()
+        if runner_key:
+            slot = runner_keys.get(runner_key) if runner_keys else None
+            if slot is None:
+                raise ApiError(401, "runner_key", "X-Runner-Key does not open any slot")
+            return f"runner:{slot}"
+        key = request.headers.get("x-node-key", "").strip()
+        if last_order_key and key == last_order_key:
+            return "admin"
+        return _agent_actor(request)
+
+    def _no_from_in(body: dict) -> None:
+        if "from" in body:
+            raise ApiError(422, "validation", "from is stamped by the server, not sent")
+
+    @app.get("/board/entries")
+    def board_entries(request: Request, to: str | None = None, kind: str | None = None,
+                      status: str | None = None, limit: int = 50) -> list:
+        _require_operator(request)
+        return board.entries(to=to, kind=kind, status=status, limit=limit)
+
+    @app.get("/board/entries/{entry_id}")
+    def board_entry(request: Request, entry_id: int) -> dict:
+        return board.entry_for(_board_actor(request), entry_id)
+
+    @app.post("/board/entries")
+    def board_post(request: Request, body: dict) -> dict:
+        _require_operator(request)
+        _no_from_in(body)
+        return board.post(
+            OPERATOR, kind=body.get("kind"), to=body.get("to"),
+            text=body.get("text"), request=body.get("request"),
+        )
+
+    @app.post("/board/entries/{entry_id}/transition")
+    def board_transition(request: Request, entry_id: int, body: dict) -> dict:
+        _require_operator(request)
+        _no_from_in(body)
+        return board.transition(
+            OPERATOR, entry_id, body.get("to_status"), text=body.get("text", ""),
+            args=body.get("args"),
+        )
+
+    @app.post("/board/entries/{entry_id}/reply")
+    def board_reply(request: Request, entry_id: int, body: dict) -> dict:
+        _require_operator(request)
+        _no_from_in(body)
+        return board.reply(OPERATOR, entry_id, body.get("text"))
+
+    @app.post("/board/alarms")
+    def board_alarms(request: Request, body: dict) -> dict:
+        _no_from_in(body)
+        author = _alarm_author(request)
+        serial = body.get("serial")
+        if serial is not None and (not isinstance(serial, int) or isinstance(serial, bool)):
+            raise ApiError(422, "validation", "serial must be an integer")
+        return board.alarm(
+            author, body.get("type"), body.get("text"),
+            slot=str(body.get("slot", "") or ""), serial=serial,
+        )
+
+    @app.get("/board/feed")
+    def board_feed(request: Request, since: int | None = None) -> dict:
+        who = _board_actor(request)
+        return board.feed(who, since)
+
+    @app.get("/board/stream")
+    async def board_stream(request: Request) -> StreamingResponse:
+        _require_operator(request)
+
+        async def events():
+            last = board.max_seq()
+            yield "retry: 3000\n\n"
+            while True:
+                if await request.is_disconnected():
+                    return
+                rows = await asyncio.to_thread(board.log_rows, last)
+                for row in rows:
+                    last = row["seq"]
+                    yield f"event: board\ndata: {json.dumps(row, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(stream_poll)
+
+        return StreamingResponse(events(), media_type="text/event-stream")
+
+    @app.post("/board/ack")
+    def board_ack(request: Request, body: dict) -> None:
+        board.ack(_agent_actor(request), body.get("seq"))
 
     # --- the network MCP mounts (T-028) ---------------------------------------------------
 

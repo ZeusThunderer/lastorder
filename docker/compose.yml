@@ -298,11 +298,18 @@ services:
       HIVE_MCP_NODE_KEYS: "${HIVE_MCP_NODE_KEYS:-}"
       HIVE_RUNNER_KEYS: "${HIVE_RUNNER_KEYS:-}"
       HIVE_MCP_LO_KEY: "${HIVE_MCP_LO_KEY:-}"
+      HIVE_OPERATOR_KEY: "${HIVE_OPERATOR_KEY:-}"
       NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
     command:
       - sh
       - -c
       - mkdir -p /hive-run/pending_wills && exec uvicorn runtime.hive.app:create_app --factory --host 0.0.0.0 --port 8000 --workers 1
+    ports:
+      # the operator's board API and page (T-042/T-049): loopback only, for the
+      # operator's browser on the host; the docker network stays the boundary for the rest.
+      # 8000 on the host is taken by a system service (checked 2026-10-26), so the
+      # loopback default is 18080; HIVE_BOARD_PORT overrides the number in .env.
+      - "127.0.0.1:${HIVE_BOARD_PORT:-18080}:8000"
     volumes:
       - knowledge:/knowledge
       - hive-run:/hive-run   # not over the image's system /run (review R1-6)
