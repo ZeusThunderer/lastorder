@@ -122,7 +122,24 @@ class Lifecycle:
         self._state_path = Path(run_dir) / "lifecycle.json"
         self._lock = threading.RLock()
         self._nodes: dict[int, NodeState] = {}
+        # The board's death sweep (T-042, TASKBOARD.md 4.3): set by create_app. A node's
+        # board hold is freed at every closing point — body-death mark, confirmed kill,
+        # retire, lost-close — so a stuck or restarted mind cannot leave tasks dangling.
+        self._on_death: Callable[[int], None] | None = None
         self._load_and_reconcile()
+
+    def set_death_hook(self, hook: Callable[[int], None]) -> None:
+        self._on_death = hook
+
+    def _notify_death(self, serial: int) -> None:
+        if self._on_death is None:
+            return
+        try:
+            self._on_death(serial)
+        except Exception as exc:  # the board sweep must never break a death path
+            self._log.event(
+                "life.death_hook_failed", {"serial": serial, "error": f"{type(exc).__name__}: {exc}"}
+            )
 
     # --- persistence -----------------------------------------------------------------
 
@@ -191,6 +208,7 @@ class Lifecycle:
         self._save()
 
     def _close_lost(self, node: NodeState) -> None:
+        self._notify_death(node.serial)
         naming = naming_preset(env("NAME_PRESET") or "lab")
         will = emergency_will(
             serial=node.serial,
@@ -268,6 +286,7 @@ class Lifecycle:
                 node.dead = True
                 self._save()
                 self._log.event("life.dead_mark", {"serial": serial, "slot": node.slot})
+                self._notify_death(serial)
 
     def body_dead(self, serial: int) -> bool:
         """True when hive knows this node's body is dead (the mark or a confirmed kill).
@@ -304,6 +323,7 @@ class Lifecycle:
                     effective = CAUSE_STUCK  # the RCON death looked like `game` to the mind
                 elif node.kill_reason == "ttl" and node.kill_confirmed:
                     effective = "ttl"
+            self._notify_death(serial)
             self._store.retire(serial, effective, will_text)
             self._nodes.pop(serial, None)
             self._save()
@@ -344,6 +364,7 @@ class Lifecycle:
                 "life.killed",
                 {"serial": node.serial, "slot": node.slot, "reason": node.kill_reason},
             )
+            self._notify_death(node.serial)
             return
         # Retried every scan, but logged once per failure and again only when the
         # failure changes — a 30-second event spam helps nobody (review R1-3).

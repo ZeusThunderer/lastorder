@@ -44,6 +44,7 @@ from mcp.server.mcpserver.context import Context
 from mcp.server.mcpserver.exceptions import ToolError as SdkToolError
 
 from runtime.comms.schema import MSG_MAX_CHARS
+from runtime.hive.board import Board, BoardError, LAST_ORDER
 from runtime.hive.client import (
     entry_to_json,
     inheritance_to_json,
@@ -125,6 +126,7 @@ class HiveMcp:
         log: HiveLog | None = None,
         now: Callable[[], str] | None = None,
         runner_keys: Mapping[str, str] | None = None,
+        board: Board | None = None,
     ):
         self._store = store
         self._lifecycle = lifecycle
@@ -138,6 +140,7 @@ class HiveMcp:
         # cannot forge her own will session from bash. Empty map (dev/tests) keeps the
         # header check of T-028 alone.
         self._runner_keys = dict(runner_keys) if runner_keys else {}
+        self._board = board
         self._wills_dir = Path(run_dir) / "pending_wills"
         self._log = log
         self._now = now or (lambda: datetime.now(timezone.utc).isoformat())
@@ -328,6 +331,50 @@ class HiveMcp:
             self._log.event("will.staged", {"serial": serial, "chars": len(body)})
         return {"staged": True, "serial": serial}
 
+    # --- the task board (TASKBOARD.md section 10; T-042) -----------------------------------
+
+    def _board_actor(self, ctx: Context, *, lo: bool) -> str:
+        """The board identity of the caller: a node's serial, or `last-order`."""
+        if lo:
+            self._require_last_order(ctx)
+            return LAST_ORDER
+        return str(self._node_serial(ctx))
+
+    def board_list(self, ctx: Context, filter_: Any, *, lo: bool) -> dict[str, Any]:
+        actor = self._board_actor(ctx, lo=lo)
+        if filter_ == "all" and not lo:  # the full board is Last Order's chronicle alone
+            _err("board: filter 'all' belongs to Last Order")
+        return self._board.glance(actor, filter_ or "mine")
+
+    def board_post(
+        self, ctx: Context, kind: Any, to: Any, text: Any, request: Any, *, lo: bool
+    ) -> dict[str, Any]:
+        actor = self._board_actor(ctx, lo=lo)
+        entry = self._board.post(actor, kind=kind, to=to, text=text, request=request)
+        return {"id": entry["id"]}
+
+    def board_claim(self, ctx: Context, entry_id: Any, *, lo: bool) -> dict[str, Any]:
+        actor = self._board_actor(ctx, lo=lo)
+        if not isinstance(entry_id, int) or isinstance(entry_id, bool) or entry_id < 1:
+            _err("claim: id must be an entry id")
+        return self._board.claim(actor, entry_id)
+
+    def board_update(
+        self, ctx: Context, entry_id: Any, status: Any, text: Any, *, lo: bool
+    ) -> dict[str, Any]:
+        actor = self._board_actor(ctx, lo=lo)
+        if not isinstance(entry_id, int) or isinstance(entry_id, bool) or entry_id < 1:
+            _err("update: id must be an entry id")
+        if not isinstance(status, str) or not status.strip():
+            _err("update: status must be the target status")
+        return self._board.transition(actor, entry_id, status.strip(), text=text or "")
+
+    def board_reply(self, ctx: Context, entry_id: Any, text: Any, *, lo: bool) -> dict[str, Any]:
+        actor = self._board_actor(ctx, lo=lo)
+        if not isinstance(entry_id, int) or isinstance(entry_id, bool) or entry_id < 1:
+            _err("reply: id must be an entry id")
+        return self._board.reply(actor, entry_id, text)
+
     # --- Last Order's tools (ADR-036) ---------------------------------------------------------
 
     def proposals(self, ctx: Context) -> dict[str, Any]:
@@ -388,6 +435,8 @@ async def _run(body: Callable[[], Any]) -> Any:
         return await asyncio.to_thread(body)
     except ToolError:
         raise
+    except BoardError as exc:
+        raise ToolError(f"{exc.kind}: {exc.message}") from exc
     except (StoreError, LifecycleError, ProposalError, SchemaError) as exc:
         raise ToolError(str(exc)) from exc
 
@@ -458,6 +507,34 @@ def build_mcp(
         session after your death, once."""
         return await _run(lambda: impl.submit_will(ctx, text))
 
+    async def board(filter: str = "mine", *, ctx: Context) -> dict[str, Any]:
+        """The task board as short lines: filter 'mine' (default), 'net', 'open' — or an
+        entry id for one full entry with the thread."""
+        return await _run(lambda: impl.board_list(ctx, filter, lo=False))
+
+    async def post(
+        kind: str, to: str, text: str, request: dict[str, Any] | None = None, *, ctx: Context
+    ) -> dict[str, Any]:
+        """Post to the board: kind 'task' (to: a sister's serial, 'net' or
+        'last-order'), 'request' (to: 'operator' or 'last-order', payload
+        {action, args, why, allowed?}) or 'message' (to: 'operator'). Returns the id."""
+        return await _run(lambda: impl.board_post(ctx, kind, to, text, request, lo=False))
+
+    async def claim(id: int, *, ctx: Context) -> dict[str, Any]:
+        """Take an open task addressed to you or to 'net'. One sister holds at most two
+        tasks at once."""
+        return await _run(lambda: impl.board_claim(ctx, id, lo=False))
+
+    async def update(id: int, status: str, text: str = "", *, ctx: Context) -> dict[str, Any]:
+        """Move an entry you own: task 'done'/'failed'/'needs_input' (a reason text),
+        release it back to 'open', answer 'needs_input' as the author, decline one
+        addressed to you; requests are answered by their addressee."""
+        return await _run(lambda: impl.board_update(ctx, id, status, text, lo=False))
+
+    async def reply(id: int, text: str, *, ctx: Context) -> dict[str, Any]:
+        """One thread reply on an entry you are part of, without a status change."""
+        return await _run(lambda: impl.board_reply(ctx, id, text, lo=False))
+
     sister.add_tool(knowledge, name="knowledge")
     sister.add_tool(inheritance, name="inheritance")
     sister.add_tool(propose, name="propose")
@@ -465,6 +542,37 @@ def build_mcp(
     sister.add_tool(send, name="send")
     sister.add_tool(inbox, name="inbox")
     sister.add_tool(submit_will, name="submit_will")
+    sister.add_tool(board, name="board")
+    sister.add_tool(post, name="post")
+    sister.add_tool(claim, name="claim")
+    sister.add_tool(update, name="update")
+    sister.add_tool(reply, name="reply")
+
+    async def lo_board(filter: str = "mine", *, ctx: Context) -> dict[str, Any]:
+        """The board as short lines: 'mine', 'net', 'open', 'all' (the whole board) — or
+        an entry id for one full entry with the thread."""
+        return await _run(lambda: impl.board_list(ctx, filter, lo=True))
+
+    async def lo_post(
+        kind: str, to: str, text: str, request: dict[str, Any] | None = None, *, ctx: Context
+    ) -> dict[str, Any]:
+        """Post to the board: kind 'task' (to: a sister's serial or 'net'), 'request'
+        (to: 'operator', payload {action, args, why, allowed?, grant?}) or 'message'
+        (to: 'operator' or 'net'). Returns the id."""
+        return await _run(lambda: impl.board_post(ctx, kind, to, text, request, lo=True))
+
+    async def lo_claim(id: int, *, ctx: Context) -> dict[str, Any]:
+        """Take an open task addressed to you or to 'net'."""
+        return await _run(lambda: impl.board_claim(ctx, id, lo=True))
+
+    async def lo_update(id: int, status: str, text: str = "", *, ctx: Context) -> dict[str, Any]:
+        """Move an entry you own: task 'done'/'failed'/'needs_input' (a reason text),
+        release it back to 'open', answer 'needs_input' as the author."""
+        return await _run(lambda: impl.board_update(ctx, id, status, text, lo=True))
+
+    async def lo_reply(id: int, text: str, *, ctx: Context) -> dict[str, Any]:
+        """One thread reply on an entry you are part of, without a status change."""
+        return await _run(lambda: impl.board_reply(ctx, id, text, lo=True))
 
     async def proposals(*, ctx: Context) -> dict[str, Any]:
         """The open proposal queue ({proposals}), oldest first."""
@@ -491,6 +599,11 @@ def build_mcp(
     lo.add_tool(decide, name="decide")
     lo.add_tool(set_goals, name="set_goals")
     lo.add_tool(chronicle, name="chronicle")
+    lo.add_tool(lo_board, name="board")
+    lo.add_tool(lo_post, name="post")
+    lo.add_tool(lo_claim, name="claim")
+    lo.add_tool(lo_update, name="update")
+    lo.add_tool(lo_reply, name="reply")
 
     return sister, lo
 

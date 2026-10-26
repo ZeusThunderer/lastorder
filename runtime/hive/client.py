@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -303,6 +304,7 @@ class HiveClient:
         backoff_s: float = 0.5,
         sleep: Callable[[float], None] = time.sleep,
         runner_key: str = "",
+        lo_key: str | None = None,
     ):
         self._http = transport if transport is not None else httpx.Client(
             base_url=base_url, timeout=timeout_s
@@ -311,6 +313,9 @@ class HiveClient:
         # (retire_stuck's request_death) must carry the slot's runner key too; empty
         # leaves the client as it was (review R2-3).
         self._runner_key = runner_key
+        # The admin variant of the board alarm (T-042) speaks with the Last Order key
+        # over plain HTTP; the sisters' clients never set it.
+        self._lo_key = lo_key if lo_key is not None else (env("HIVE_MCP_LO_KEY") or "")
         self._run_dir = Path(run_dir if run_dir is not None else (env("RUN_DIR") or "run"))
         self._outbox_path = self._run_dir / "hive_outbox.jsonl"
         self._events_path = self._run_dir / "hive_client_events.jsonl"
@@ -328,9 +333,18 @@ class HiveClient:
 
     _CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
-    def _request(self, method: str, path: str, payload: Any) -> httpx.Response:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: Any,
+        extra_headers: Mapping[str, str] | None = None,
+    ) -> httpx.Response:
         last = "hive unreachable"
-        headers = {"X-Runner-Key": self._runner_key} if self._runner_key else None
+        headers = {"X-Runner-Key": self._runner_key} if self._runner_key else {}
+        if extra_headers:
+            headers.update(extra_headers)
+        headers = headers or None
         for attempt in range(self._retries + 1):
             try:
                 response = (
@@ -426,6 +440,7 @@ class HiveClient:
         buffered: bool = False,
         offline: Any | None = None,
         direct: bool = False,
+        extra_headers: Mapping[str, str] | None = None,
     ) -> Any:
         with self._lock:
             flushed = self._flush_locked()
@@ -440,7 +455,7 @@ class HiveClient:
                 if direct or decode is None:
                     raise HiveUnavailable("hive outbox not flushed; write order preserved")
             try:
-                response = self._request(method, path, payload)
+                response = self._request(method, path, payload, extra_headers=extra_headers)
             except HiveUnavailable:
                 if buffered:
                     self._append_outbox(method, path, payload)
@@ -570,4 +585,29 @@ class HiveClient:
             {"serial": serial},
             decode=lambda r: chatter_turn_from_json(r.json()),
             offline=lambda: None,
+        )
+
+    # --- the board alarms (TASKBOARD.md section 7; T-042) ----------------------------------
+    # The runner and the admin process raise the environment's alarms; the callers
+    # themselves are wired by T-043 and T-045. Repeats fold into `count` on the hive.
+
+    def board_alarm(
+        self, alarm_type: str, text: str, *, slot: str = "", serial: int | None = None
+    ) -> None:
+        """Raise an environment alarm as this slot's runner (X-Runner-Key)."""
+        payload: dict[str, Any] = {"type": alarm_type, "text": text, "slot": slot}
+        if serial is not None:
+            payload["serial"] = serial
+        self._call("post", "/board/alarms", payload, buffered=True)
+
+    def board_alarm_admin(
+        self, alarm_type: str, text: str, *, slot: str = "", serial: int | None = None
+    ) -> None:
+        """Raise an environment alarm as the admin (the Last Order key over HTTP)."""
+        payload: dict[str, Any] = {"type": alarm_type, "text": text, "slot": slot}
+        if serial is not None:
+            payload["serial"] = serial
+        self._call(
+            "post", "/board/alarms", payload, buffered=True,
+            extra_headers={"X-Node-Key": self._lo_key},
         )

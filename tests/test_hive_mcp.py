@@ -38,8 +38,12 @@ KEY2 = "sk-node-two"  # slot LastOrder02
 KEY_LO = "sk-last-order"
 RKEY1 = "rk-runner-one"  # the node runner of slot LastOrder01 (T-027)
 
-SISTER_TOOLS = {"knowledge", "inheritance", "propose", "vote", "send", "inbox", "submit_will"}
-LO_TOOLS = {"proposals", "decide", "set_goals", "chronicle"}
+SISTER_TOOLS = {
+    "knowledge", "inheritance", "propose", "vote", "send", "inbox", "submit_will",
+    "board", "post", "claim", "update", "reply",  # the task board (T-042, TASKBOARD.md 10)
+}
+LO_TOOLS = {"proposals", "decide", "set_goals", "chronicle",
+            "board", "post", "claim", "update", "reply"}
 
 
 class FakeClock:
@@ -245,7 +249,9 @@ def test_sister_tool_set(stack: Stack) -> None:
 def test_last_order_tool_set_and_sister_lack(stack: Stack) -> None:
     stack.birth("LastOrder01")
     assert tool_names(stack, stack.lo_url(), KEY_LO) == LO_TOOLS
-    assert not (SISTER_TOOLS & LO_TOOLS)  # a sister never even sees the admin tools
+    # a sister never even sees the admin tools; the board set (T-042) is shared by design
+    board_tools = {"board", "post", "claim", "update", "reply"}
+    assert not ((SISTER_TOOLS - board_tools) & (LO_TOOLS - board_tools))
 
 
 def test_cross_key_refusals(stack: Stack) -> None:
