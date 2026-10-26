@@ -60,6 +60,7 @@ from runtime.hive.proposals import (
 from runtime.knowledge.schema import SchemaError, Will
 from runtime.knowledge.slice import format_serial
 from runtime.knowledge.store import KnowledgeStore, StoreError
+from runtime.lastorder.will import WillRejected, check_will_body
 from runtime.ports import NodeMessage, Vote
 
 NODE_KEY_HEADER = "x-node-key"  # the virtual key: a sister's or Last Order's
@@ -278,8 +279,10 @@ class HiveMcp:
         return {"messages": [message_to_json(m) for m in self._service.inbox(serial)]}
 
     def submit_will(self, ctx: Context, text: str) -> dict[str, Any]:
-        """Your will (will.md text, frontmatter with your serial). Only in the will
-        session of a dead sister, once; the runner files it with your death."""
+        """Your will: the 2-4 lines of text alone — the network fills the service
+        fields (serial, dates, traits). A full will.md (frontmatter + body) is
+        accepted too: only its body is taken. Only in the will session of a dead
+        sister, once; the runner files it with your death."""
         serial = self._node_serial(ctx)
         headers = self._headers(ctx)
         if headers.get(RUNNER_SESSION_HEADER, "").strip().lower() != WILL_SESSION:
@@ -295,25 +298,34 @@ class HiveMcp:
         if not self._lifecycle.body_dead(serial):
             _err("submit_will: the node is not dead")
         if not isinstance(text, str) or not text.strip():
-            _err("submit_will: text must be the will.md content")
+            _err("submit_will: text must be the will text (the 2-4 lines)")
+        body = text.strip()
+        if body.startswith("---"):
+            # a full will.md still works (T-040 keeps the old call shape valid): only
+            # the body rides on, but a stranger's serial in the frontmatter is refused
+            try:
+                will = Will.from_markdown(text)
+            except SchemaError as exc:
+                _err(f"submit_will: broken will: {exc}")
+            if will.meta.serial != serial:
+                _err(
+                    f"submit_will: the will names node {format_serial(will.meta.serial)}, "
+                    f"the caller is {format_serial(serial)}"
+                )
+            body = will.body
         try:
-            will = Will.from_markdown(text)
-        except SchemaError as exc:
-            _err(f"submit_will: broken will: {exc}")
-        if will.meta.serial != serial:
-            _err(
-                f"submit_will: the will names node {format_serial(will.meta.serial)}, "
-                f"the caller is {format_serial(serial)}"
-            )
+            check_will_body(body)
+        except WillRejected as exc:  # one plain sentence back to the sister (T-040)
+            _err(f"submit_will: {exc}")
         staged = self._wills_dir / f"{format_serial(serial)}.md"
         if staged.exists():
             _err(f"submit_will: node {format_serial(serial)} has already submitted a will")
         staged.parent.mkdir(parents=True, exist_ok=True)
         tmp = staged.with_name(staged.name + ".tmp")
-        tmp.write_text(text, encoding="utf-8")
+        tmp.write_text(body, encoding="utf-8")
         tmp.replace(staged)
         if self._log is not None:
-            self._log.event("will.staged", {"serial": serial, "chars": len(text)})
+            self._log.event("will.staged", {"serial": serial, "chars": len(body)})
         return {"staged": True, "serial": serial}
 
     # --- Last Order's tools (ADR-036) ---------------------------------------------------------

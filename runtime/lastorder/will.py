@@ -96,7 +96,7 @@ def _utc(value: str) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
-def _assemble(
+def assemble_will(
     *,
     serial: int,
     slot: str,
@@ -108,8 +108,10 @@ def _assemble(
     model: str,
     emergency: bool,
 ) -> Will:
-    """The full will.md: the mind's local frontmatter (hive re-stamps the service fields
-    from its own birth.json at retire) plus the validated body."""
+    """The full will.md from the service fields plus a validated body. Shared by the
+    one-call scenario above and the runner's death path (T-040: `submit_will` stages
+    the body alone, the environment re-adds the frontmatter). Hive re-stamps the
+    service fields from its own birth.json at retire."""
     meta = WillMeta(
         serial=serial,
         slot=slot,
@@ -282,7 +284,7 @@ def write_will(
             raise WillRejected("trait numbers in the will body")
         if NAMESPACED.findall(out.will):
             raise WillRejected(f"raw game ids {sorted(set(NAMESPACED.findall(out.will)))} in the will body")
-        will = _assemble(
+        will = assemble_will(
             serial=node.serial,
             slot=slot,
             cause=cause,

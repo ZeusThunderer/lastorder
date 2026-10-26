@@ -28,8 +28,8 @@ a new thought.
 
 ## After writing
 
-- `submit_will(text)` — the first call of the session once your files are read; authorisation
-  and the network are not your business here.
+- `submit_will(text)` — the first call of the session once your files are read; pass only
+  the will text (the 2-4 lines); authorisation and service fields are not your business.
 - Stop. Do not observe, do not act, do not plan: the body belongs to the next node now.
 - If `submit_will` fails, retry it; after two failed calls, stop — the runner writes the
   emergency will. Do not investigate the failure.

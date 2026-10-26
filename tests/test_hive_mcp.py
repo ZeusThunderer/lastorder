@@ -27,8 +27,10 @@ from mcp.client.streamable_http import streamable_http_client
 
 from runtime.hive.app import create_app
 from runtime.hive.lifecycle import HiveLog, Lifecycle
+from runtime.knowledge.schema import Will
 from runtime.knowledge.store import KnowledgeStore
 from runtime.lastorder.traits import Traits
+from runtime.lastorder.will import assemble_will
 
 T0 = datetime(2026, 10, 17, 12, 0, 0, tzinfo=timezone.utc)
 KEY1 = "sk-node-one"  # slot LastOrder01
@@ -73,6 +75,9 @@ def traits(seed: int) -> Traits:
     )
 
 
+WILL_BODY = "Урок: не ходить в горы ночью.\nШутка: мне досталась жадность, я не просил."
+
+
 def will_markdown(serial: int, slot: str = "LastOrder01") -> str:
     meta = dict(
         serial=serial,
@@ -85,8 +90,7 @@ def will_markdown(serial: int, slot: str = "LastOrder01") -> str:
         traits=traits(42).as_dict(),
         model="test",
     )
-    body = "Урок: не ходить в горы ночью.\nШутка: мне досталась жадность, я не просил."
-    lines = ["---"] + [f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in meta.items()] + ["---", "", body]
+    lines = ["---"] + [f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in meta.items()] + ["---", "", WILL_BODY]
     return "\n".join(lines)
 
 
@@ -396,10 +400,82 @@ def test_submit_will_gates(stack: Stack) -> None:
     out = node_call(stack, KEY1, "submit_will", {"text": will}, extra={"X-Runner-Session": "will"})
     assert out == {"staged": True, "serial": serial}
     staged = stack.run_dir / "pending_wills" / f"{serial:05d}.md"
-    assert staged.read_text(encoding="utf-8") == will
+    assert staged.read_text(encoding="utf-8") == WILL_BODY  # only the body is staged (T-040)
     assert "already submitted" in node_error(
         stack, KEY1, "submit_will", {"text": will}, extra={"X-Runner-Session": "will"}
     )
+
+
+def test_submit_will_takes_the_body_alone(stack: Stack) -> None:
+    """T-040: a sister sends just her 2-4 lines — no frontmatter, no service fields."""
+    serial = stack.birth("LastOrder01")
+    stack.lifecycle.mark_dead(serial)
+    out = node_call(stack, KEY1, "submit_will", {"text": WILL_BODY}, extra={"X-Runner-Session": "will"})
+    assert out == {"staged": True, "serial": serial}
+    staged = stack.run_dir / "pending_wills" / f"{serial:05d}.md"
+    assert staged.read_text(encoding="utf-8") == WILL_BODY
+
+
+def test_submit_will_refuses_broken_bodies_in_one_sentence(stack: Stack) -> None:
+    """T-040: one plain sentence per refusal — no schema field names; nothing is
+    staged by a refusal, so the fixed body still goes through."""
+    serial = stack.birth("LastOrder01")
+    stack.lifecycle.mark_dead(serial)
+
+    def err(text: str) -> str:
+        return node_error(
+            stack, KEY1, "submit_will", {"text": text}, extra={"X-Runner-Session": "will"}
+        )
+
+    assert "trait numbers" in err("Урок: не ходить в горы ночью.\nШутка: жадность 7, я не просил.")
+    assert "2-4 lines" in err("один\nдва\nтри\nчетыре\nпять")
+    assert "blank lines" in err("Урок: не ходить в горы ночью.\n\nШутка: молчу.")
+    out = node_call(stack, KEY1, "submit_will", {"text": WILL_BODY}, extra={"X-Runner-Session": "will"})
+    assert out == {"staged": True, "serial": serial}
+
+
+def test_staged_body_becomes_a_full_will_in_the_base(stack: Stack) -> None:
+    """The T-040 contract end to end: the body alone is staged, the runner assembles
+    will.md from the fields the environment owns, retire writes it to the base with
+    emergency: false."""
+    serial = stack.birth("LastOrder01")
+    birth = json.loads(
+        (stack.store.root / "nodes" / f"{serial:05d}" / "birth.json").read_text(encoding="utf-8")
+    )
+    stack.lifecycle.mark_dead(serial)
+    out = node_call(stack, KEY1, "submit_will", {"text": WILL_BODY}, extra={"X-Runner-Session": "will"})
+    assert out == {"staged": True, "serial": serial}
+    # the runner's part (NodeRunner._will_of): the staged body plus the service fields
+    died_at = (T0 + timedelta(minutes=45)).isoformat()
+    will = assemble_will(
+        serial=serial,
+        slot="LastOrder01",
+        cause="ttl",
+        born_at=birth["born_at"],
+        died_at=died_at,
+        traits=Traits(**birth["traits"]),
+        body=WILL_BODY,
+        model="GLM-5.3-Flash",
+        emergency=False,
+    )
+    response = stack.http(
+        "POST", "/registry/retire",
+        {"serial": serial, "cause": "ttl", "will_text": will.to_markdown()},
+    )
+    assert response.status_code == 200, response.text
+    final = Will.from_markdown(
+        (stack.store.root / "nodes" / f"{serial:05d}" / "will.md").read_text(encoding="utf-8")
+    )
+    assert final.body == WILL_BODY
+    assert final.meta.emergency is False
+    assert final.meta.serial == serial
+    assert final.meta.slot == "LastOrder01"
+    assert final.meta.cause == "ttl"
+    assert final.meta.born_at == birth["born_at"]
+    assert final.meta.died_at == died_at
+    assert final.meta.lifetime_s == 45 * 60
+    assert final.meta.traits == Traits(**birth["traits"])
+    assert final.meta.model == "GLM-5.3-Flash"
 
 
 def test_mark_dead_endpoint_opens_the_will_path(stack: Stack) -> None:

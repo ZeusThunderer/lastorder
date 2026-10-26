@@ -358,8 +358,8 @@ def test_death_with_the_agents_will(tmp_path: Path) -> None:
     def spawn_will(argv, cwd, env):
         rig.journal.append(("spawn", tuple(argv)))
         if argv[0] == "zcode" and argv[1] == "will":
-            will = Will.from_markdown(staged_markdown(state.serial))
-            staged.write_text(will.to_markdown(), encoding="utf-8")
+            # what submit_will stages since T-040: the body alone, no frontmatter
+            staged.write_text(STAGED_BODY, encoding="utf-8")
         return FakeProcess(code=0, output="will done")
 
     rig.runner._spawn = spawn_will
@@ -372,13 +372,50 @@ def test_death_with_the_agents_will(tmp_path: Path) -> None:
     assert len(rig.hive.retires) == 1
     serial, cause, text = rig.hive.retires[0]
     assert (serial, cause) == (state.serial, "ttl")
-    assert "serial: 1" in text and "не ходить" in text  # the agent's will, verbatim
+    # the environment assembled the service fields around the agent's body (T-040)
+    will = Will.from_markdown(text)
+    assert will.meta.emergency is False
+    assert will.meta.serial == state.serial
+    assert will.meta.model == "GLM-5.3-Flash"  # the harness model, from cfg
+    assert will.body == STAGED_BODY
     # the workplace left for the archive, read-only; the heir's clock not yet armed
     archive = rig.cfg.workplaces / "archive" / f"{state.serial:05d}"
     assert archive.is_dir() and not (rig.cfg.workplaces / "agent" / f"{state.serial:05d}").exists()
     with pytest.raises(PermissionError):
         (archive / "GOALS.md").write_text("x", encoding="utf-8")
     assert rig.mind.respawn_calls == 1
+
+
+def test_staged_full_will_markdown_still_yields_its_body(tmp_path: Path) -> None:
+    """A stage left by an older run — a whole will.md — is read through the parser:
+    the body is taken, the frontmatter comes from the environment (T-040)."""
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    staged = rig.cfg.pending_wills / f"{state.serial:05d}.md"
+    staged.parent.mkdir(parents=True)
+    staged.write_text(staged_markdown(state.serial), encoding="utf-8")
+    rig.script(FakeProcess(code=0, output="will done"))
+    rig.mind.kill()
+    rig.runner._death_path(state, "game", "x", "zcode")
+    will = Will.from_markdown(rig.hive.retires[0][2])
+    assert will.meta.emergency is False
+    assert will.meta.model == "GLM-5.3-Flash"  # cfg, not the stale frontmatter's "agent"
+    assert will.body == STAGED_BODY
+
+
+def test_staged_body_failing_the_checks_falls_back_to_emergency(tmp_path: Path) -> None:
+    """A stage that no longer passes the body checks (here: five lines) must not
+    reach the base — the emergency will covers it, no death without a will."""
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    staged = rig.cfg.pending_wills / f"{state.serial:05d}.md"
+    staged.parent.mkdir(parents=True)
+    staged.write_text("раз\nдва\nтри\nчетыре\nпять", encoding="utf-8")
+    rig.script(FakeProcess(code=0, output="silent"))
+    rig.mind.kill()
+    rig.runner._death_path(state, "game", "x", "zcode")
+    will = Will.from_markdown(rig.hive.retires[0][2])
+    assert will.meta.emergency is True
 
 
 def test_death_without_a_will_gets_the_emergency_one(tmp_path: Path) -> None:
@@ -994,6 +1031,9 @@ def test_hermes_home_config_is_runner_owned(tmp_path: Path) -> None:
     assert stat.S_IMODE((home / "config.yaml").stat().st_mode) & 0o777 == 0o444
 
 
+STAGED_BODY = "Урок: не ходить в горы ночью.\nШутка: жадность — наследство, я не просил."
+
+
 def staged_markdown(serial: int) -> str:
     meta = dict(
         serial=serial,
@@ -1006,10 +1046,9 @@ def staged_markdown(serial: int) -> str:
         traits=Traits(3, 7, 5, 4, 9, quirk="считает крипера родственником", seed=1).as_dict(),
         model="agent",
     )
-    body = "Урок: не ходить в горы ночью.\nШутка: жадность — наследство, я не просил."
-    lines = ["---"] + [f"{k}: {json.dumps(v, ensure_ascii=False)} for {k}, {v}" for k, v in []] + [
+    lines = ["---"] + [f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in []] + [
         f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in meta.items()
-    ] + ["---", "", body]
+    ] + ["---", "", STAGED_BODY]
     return "\n".join(lines)
 
 
