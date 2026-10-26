@@ -2,7 +2,7 @@
 id: T-041
 title: Pi в образе узла на Z.ai Coding Plan и выбор готовой веб-консоли
 stage: I
-status: ready
+status: in_progress
 criticality: critical
 after: []
 branch: z/T-041-pi-and-console
