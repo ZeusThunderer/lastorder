@@ -14,16 +14,42 @@
 | Диалоги подтверждения расширения (гранты) | [источник: docs] вопросники HITL заявлены | не найдено | [источник: README] права Pi — «нет (всё одобрено)» | не найдено |
 | Закрытая docker-сеть без интернета | [проверено: T-041] после установки работает; npm-установка и toolchain нужны при старте (ставятся при сборке/старте, ADR-033 допускает отдельный сервис) | [проверено: T-041] в контейнере не поднимается вовсе (systemd) | [источник: README] установка npx при старте; relay/egress — отдельный вопрос | [источник: README] один бинарник Go+Astro — проще всех по сети |
 | Авторизация | [источник: docs] опциональный общий токен `PI_WEB_TOKEN`; иначе нет | [источник: docs] нет, «trusted users», рекомендуют reverse proxy | [источник: README] QR-pairing, E2E-шифрование relay | не найдено |
-| Лицензия | MIT [источник: README] | MIT [источник: README] | **AGPL-3.0** [источник: README] | MIT [предположение: публичный репозиторий] |
+| Лицензия | MIT [источник: README] | MIT [источник: README] | **AGPL-3.0** [источник: README] | MIT [проверено: LICENSE в репо] |
 | Активность | [источник: pi.dev] пакет в официальном каталоге | [проверено: GitHub] активен (коммиты за дни до проверки) | [проверено: GitHub] 5.3k звёзд, сотни PR/issue — очень активен | [источник: pkg.go.dev] версии выходят (v1.21.4) |
+
+## Раунд 2 (review R1-1, R1-2)
+
+- **«Мысль» как реплика самого агента — НЕ достижима расширением (Pi 1.4.0):** оба
+  пути кладут `custom`-запись, модель читает её как внешнюю строку:
+  `pi.sendMessage({role:"assistant",…})` → в сессии `role: custom` [проверено:
+  session5]; возврат `{message:{role:"assistant",…}}` из обработчика
+  `before_agent_start` → тоже `role: custom`, модель: «they provide "Operator's
+  thought…"» [проверено: session6]. Расширение — `dev/console_spike/thought.ts`
+  (обе команды: `/thought`, `/thought2`). Вместо этого: событие
+  `before_provider_request` — расширение правит запрос к модели непосредственно
+  перед отправкой и может вставить настоящее assistant-сообщение [источник:
+  docs/extensions.md; не прогонял: лимит сессий 5/6]. Для «голоса извне»
+  (наблюдение) custom-строки достаточно, для «мысли» — нет.
+- **Путь оператора из консоли (R1-2):** сервис `console-pi-web-ui` несёт те же
+  конфиги узла (рендер `drop_pi_agent_dir` в `/root/.pi/agent` [проверено:
+  models.json/mcp.json/settings.json на месте, get_state → zai/glm-5.3-flash]),
+  сеть slot-1 (тело) + default (hive) и ключ Z.ai в env процесса [проверено:
+  entrypoint-материализация]. Беседа в UI спавнит pi с инструментами body/hive —
+  до границы консоли проверено, клик в браузере не автоматизировался (HTTP API
+  списков/отправки не публикуется: очевидные пути 404) [проверено].
+- **Сессия, запущенная не консолью:** консоль сканирует свой session-dir
+  (`/root/.pi/agent/sessions`); сессии, созданные нашим RPC-процессом в её
+  контейнере, попадают в тот же каталог, но оставшийся LLM-лимит не позволил
+  оставить валидную сессию-файл и увидеть её в UI — клетка остаётся
+  [источник: docs] + проверка оператором по рецепту ниже.
 
 ## Прогоны на стенде (T-041)
 
-- **pi-web-ui** — `[проверено]`: поднялся сервисом профиля `console-spike` (нужны
-  `make`/`g++` для node-pty — установлены при старте), `GET /` → 200, `GET /api/health`
-  → 200, внутри pi SDK v1.4.0, сессии в `~/.pi/agent/sessions`. Управление реальным
-  агентом не проверялось: без ключа Z.ai LLM-ходы не выполняются (квота — общая с
-  ZCode; лимит сессий потрачен на критерии 2–5).
+- **pi-web-ui** — `[проверено]`: поднялся сервисом профиля `console-spike`
+  (`console-pi-web-ui`, пин 0.111.0; нужны `make`/`g++` для node-pty — ставятся при
+  старте), `GET /` → 200, `GET /api/health` → 200, внутри pi SDK v1.4.0, сессии в
+  `~/.pi/agent/sessions`. Пакет пинится в compose (review R1-3), консоль сидит в
+  своей сети `console-spike` + slot-1 (тело) + default (только hive).
 - **pi-web (jmfederico)** — `[проверено]`: в контейнере не поднимается: `pi-web install`
   требует `systemd-run`, `pi-web start` — `systemctl --user` (лог в отчёте T-041).
   Сервис оставлен в compose для воспроизведения.
@@ -42,17 +68,16 @@ MIT-лицензии, опциональном токене и мультибе�
 ## Рецепт оператора (проверен исполнителем T-041)
 
 ```bash
-# стенд (hive/body-1/mind-1/zai-egress + node1-pi без раннера)
-bash dev/console_spike/up_spike.sh
-# консоль-кандидат
-docker compose -f docker/compose.yml --profile console-spike up -d console-pi-web-ui
+# стенд + консоль одним шагом (ключи поднимаются из .env как у up.sh)
+bash dev/console_spike/up_spike.sh console
 # UI: http://127.0.0.1:8787 (только localhost хоста)
-# внутри консоли: New conversation — pi SDK 1.4.0; ключа Z.ai нет, LLM-ход не пойдёт
-# одна RPC-сессия Pi в node-1 вручную (это тратит квоту Z.ai):
+# New conversation: pi SDK 1.4.0 с конфигами слота 1 — агенту видны инструменты
+# body/hive; один ход жжёт квоту Z.ai
+# одна RPC-сессия Pi в node-1 вручную (это тоже квота):
 MSYS_NO_PATHCONV=1 docker exec -i -e PI_TIMEOUT_S=120 \
   -e "PI_PROMPT=Ответь одним словом: связь" node1-pi \
   /app/.venv/bin/python - < dev/console_spike/pi_rpc.py
 ```
 
-Снять всё: `bash dev/console_spike/up_spike.sh down` (пилюли профиля console-spike
-убираются `docker rm -f lastorder-console-pi-web-ui-1 piui2 piweb2` при необходимости).
+Снять всё: `bash dev/console_spike/up_spike.sh down` (+ при необходимости
+`docker rm -f lastorder-console-pi-web-ui-1 node1-pi`).

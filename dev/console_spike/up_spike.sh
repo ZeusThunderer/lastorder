@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # T-041 stand: the spike profile of the task — mc-server, body-1, mind-1, hive,
 # zai-egress and node-1 WITHOUT its runner (the quota spender sleeps; the Pi
-# sessions of the spike are launched by hand through pi_rpc.sh). Keys are lifted
+# sessions of the spike are launched by hand through pi_rpc.py). Keys are lifted
 # from the repo root .env exactly like docker/node/up.sh does (values never echo).
 #
 #   bash dev/console_spike/up_spike.sh          # raise (idempotent)
@@ -50,3 +50,10 @@ fi
 # dependencies after the run container exists (mc-server healthy gates the rest)
 $COMPOSE up -d body-1 mind-1 hive
 echo "stand up: hive/body-1/mind-1/zai-egress + $SPIKE_CONTAINER (runner asleep)"
+
+# `console` also raises the pi-web-ui candidate WITH the lifted keys (the R1-2
+# proof path needs the slot's node key and the Z.ai key in the container env)
+if [ "${1:-}" = "console" ]; then
+  $COMPOSE --profile console-spike up -d console-pi-web-ui
+  echo "console up: http://127.0.0.1:8787 (loopback only)"
+fi

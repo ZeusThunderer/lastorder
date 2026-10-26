@@ -97,9 +97,12 @@ def main() -> int:
 
     send({"id": "state-1", "type": "get_state"})
     if os.environ.get("PI_THOUGHT"):
-        # extension commands execute immediately, no LLM turn: insert the agent's own
-        # line, then the real prompt checks whether the model sees it
+        # /thought: pi.sendMessage — lands as a "custom" entry (round-1 baseline)
         send({"id": "thought-1", "type": "prompt", "message": "/thought " + os.environ["PI_THOUGHT"]})
+        time.sleep(1.5)
+    if os.environ.get("PI_THOUGHT2"):
+        # /thought2: queued for the before_agent_start handler (dev/console_spike/thought.ts)
+        send({"id": "thought2-1", "type": "prompt", "message": "/thought2 " + os.environ["PI_THOUGHT2"]})
         time.sleep(1.5)
     if prompt:
         send({"id": "turn-1", "type": "prompt", "message": prompt})
