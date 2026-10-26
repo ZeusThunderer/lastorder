@@ -1,21 +1,29 @@
 #!/usr/bin/env bash
-# T-041 stand: the spike profile of the task — mc-server, body-1, mind-1, hive,
-# zai-egress and node-1 WITHOUT its runner (the quota spender sleeps; the Pi
-# sessions of the spike are launched by hand through pi_rpc.py). Keys are lifted
-# from the repo root .env exactly like docker/node/up.sh does (values never echo).
+# T-044 stand: the HAPI console spike — hapi-hub plus the slot-1 stack
+# (mc-server, body-1, mind-1, hive, zai-egress) and TWO agent sandboxes with
+# their runners asleep: node1-pi (the slot 1 sister's `hapi pi`, ADR-042) and
+# lo-pi (a minimal test agent in the last-order sandbox). The agents are
+# launched by hand through hapi_agent.py — the runner/admin integration is
+# T-045/T-043, not this spike. Keys are lifted from the repo root .env exactly
+# like docker/node/up.sh does (values never echo).
 #
 #   bash dev/console_spike/up_spike.sh          # raise (idempotent)
 #   bash dev/console_spike/up_spike.sh down     # take the stand down
+#
+# Parallel with another stand: HAPI_PROJECT=t044 MC_HOST_PORT=25575
+# HIVE_BOARD_PORT=18081 HAPI_PORT=3007 up_spike.sh (compose -p wins over the
+# file's name:, ports move; volumes separate per project).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/../.." && pwd)"
 ROOT="$(git -C "$HERE" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
 [ -n "${ROOT:-}" ] || ROOT="$HERE"
-COMPOSE="docker compose -f $HERE/docker/compose.yml"
-SPIKE_CONTAINER=node1-pi
+COMPOSE="docker compose -p ${HAPI_PROJECT:-lastorder} -f $HERE/docker/compose.yml"
+PI_CONTAINER=node1-pi
+LO_CONTAINER=lo-pi
 
 if [ "${1:-}" = "down" ]; then
-  docker rm -f "$SPIKE_CONTAINER" 2>/dev/null || true
+  docker rm -f "$PI_CONTAINER" "$LO_CONTAINER" 2>/dev/null || true
   exec $COMPOSE down
 fi
 
@@ -30,30 +38,35 @@ lift() { # lift <var> [file key]: env wins, then the root .env; never echoes the
 }
 lift ZCODE_API_KEY ZAI_API_KEY
 for key in GATEWAY_KEY_NODE_1 HIVE_NODE_KEY_1 HIVE_RUNNER_KEY_1 \
-           GATEWAY_KEY_MIND_1 GATEWAY_KEY_HIVE RCON_PASSWORD; do
+           GATEWAY_KEY_MIND_1 GATEWAY_KEY_HIVE RCON_PASSWORD HAPI_CLI_API_TOKEN; do
   lift "$key"
 done
 if [ -z "${HIVE_RUNNER_KEY_1:-}" ] && [ -z "${HIVE_NODE_KEY_1:-}" ]; then
   echo "up_spike.sh: slot 1 has no keys in env or $ROOT/.env (R2-6); aborting" >&2
   exit 1
 fi
+if [ -z "${HAPI_CLI_API_TOKEN:-}" ]; then
+  echo "up_spike.sh: no HAPI_CLI_API_TOKEN (uv run python dev/stand_keys.py init); aborting" >&2
+  exit 1
+fi
 export HIVE_MCP_NODE_KEYS="${HIVE_MCP_NODE_KEYS:-LastOrder01=${HIVE_NODE_KEY_1:-}}"
 export HIVE_RUNNER_KEYS="${HIVE_RUNNER_KEYS:-LastOrder01=${HIVE_RUNNER_KEY_1:-}}"
 
-# The dependency chain of node-1 covers everything the task names: zai-egress,
-# mind-1 -> body-1 -> mc-server, hive. `compose run` honors depends_on, replaces
-# the runner command with a sleep, and keeps the spike off the quota.
+# The hub first: raising it early also fails fast on a taken host port
+# (HAPI_PORT moves it) before anything quota-bearing starts.
+$COMPOSE up -d --build hapi-hub
 $COMPOSE up -d zai-egress
-if ! docker ps --format '{{.Names}}' | grep -q "^$SPIKE_CONTAINER$"; then
-  $COMPOSE run -d --no-deps --name "$SPIKE_CONTAINER" node-1 sleep infinity
+# The dependency chain covers the task's stand list: mind-1 -> body-1 ->
+# mc-server, hive. `compose run` replaces the runner command with a sleep and
+# keeps both quota spenders (the node runner, the hive admin) off the meter.
+if ! docker ps --format '{{.Names}}' | grep -q "^$PI_CONTAINER$"; then
+  $COMPOSE run -d --no-deps --name "$PI_CONTAINER" node-1 sleep infinity
 fi
-# dependencies after the run container exists (mc-server healthy gates the rest)
+if ! docker ps --format '{{.Names}}' | grep -q "^$LO_CONTAINER$"; then
+  $COMPOSE run -d --no-deps --name "$LO_CONTAINER" last-order sleep infinity
+fi
 $COMPOSE up -d body-1 mind-1 hive
-echo "stand up: hive/body-1/mind-1/zai-egress + $SPIKE_CONTAINER (runner asleep)"
-
-# `console` also raises the pi-web-ui candidate WITH the lifted keys (the R1-2
-# proof path needs the slot's node key and the Z.ai key in the container env)
-if [ "${1:-}" = "console" ]; then
-  $COMPOSE --profile console-spike up -d console-pi-web-ui
-  echo "console up: http://127.0.0.1:8787 (loopback only)"
-fi
+echo "stand up: hapi-hub (http://127.0.0.1:${HAPI_PORT:-3006}) + hive/body-1/mind-1/zai-egress"
+echo "agent sandboxes: $PI_CONTAINER, $LO_CONTAINER (runners asleep)"
+echo "agents:   docker exec -i -e HAPI_AGENT_MODE=slot  -e HAPI_ACTION=start $PI_CONTAINER /app/.venv/bin/python - < dev/console_spike/hapi_agent.py"
+echo "          docker exec -i -e HAPI_AGENT_MODE=lo    -e HAPI_ACTION=start $LO_CONTAINER /app/.venv/bin/python - < dev/console_spike/hapi_agent.py"
