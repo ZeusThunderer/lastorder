@@ -39,7 +39,13 @@ from runtime.knowledge.schema import CAUSES, SchemaError, Will, emergency_will
 from runtime.lastorder.naming import NamingPreset, node_name
 from runtime.lastorder.persona import Node, PersonaProvider
 from runtime.lastorder.traits import Traits, roll
-from runtime.lastorder.will import HEIR_ADDRESSES, HEIR_NEUTRAL
+from runtime.lastorder.will import (
+    HEIR_ADDRESSES,
+    HEIR_NEUTRAL,
+    WillRejected,
+    assemble_will,
+    check_will_body,
+)
 from runtime.node import workplace
 from runtime.node.adapters import Command, quota_exhausted
 from runtime.node.remotes import HiveApi, MindApi
@@ -536,7 +542,7 @@ class NodeRunner:
             self.run_will_session(state, adapter_name)
         else:
             self._log("will.session_skipped", {"serial": serial, "harness": adapter_name})
-        will_text, will_origin = self._will_of(state, cause, text, died_at)
+        will_text, will_origin = self._will_of(state, cause, text, died_at, self._harness_model(adapter_name))
         self._log(
             "will.written" if will_origin == "agent" else "will.emergency",
             {"serial": serial, "origin": will_origin},
@@ -565,12 +571,27 @@ class NodeRunner:
         # emergency will below covers exactly that (section 9)
 
     def _will_of(
-        self, state: LifeState, cause: str, text: str, died_at: str
+        self, state: LifeState, cause: str, text: str, died_at: str, model: str
     ) -> tuple[str, str]:
-        """The agent's staged will, else the emergency template — never nothing."""
+        """The agent's staged will body with the service fields filled by the
+        environment (T-040), else the emergency template — never nothing."""
         staged = self._staged_will(state.serial)
         if staged is not None:
-            return staged, "agent"
+            try:
+                will = assemble_will(
+                    serial=state.serial,
+                    slot=self.cfg.slot,
+                    cause=cause,
+                    born_at=state.born_at or died_at,
+                    died_at=died_at,
+                    traits=self._traits_of(state),
+                    body=staged,
+                    model=model,
+                    emergency=False,
+                )
+                return will.to_markdown(), "agent"
+            except SchemaError:
+                pass  # broken life state: the emergency template below still speaks
         traits = self._traits_of(state)
         will = emergency_will(
             serial=state.serial,
@@ -586,6 +607,11 @@ class NodeRunner:
         )
         return will.to_markdown(), "emergency"
 
+    def _harness_model(self, adapter_name: str) -> str:
+        """The adapter's model for the will frontmatter — the same cfg fields
+        `__main__` wires into the adapters (the adapters keep their model private)."""
+        return str(getattr(self.cfg, f"{adapter_name}_model", "") or adapter_name)
+
     def _traits_of(self, state: LifeState) -> Traits:
         try:
             return Traits(**state.traits)
@@ -593,17 +619,30 @@ class NodeRunner:
             return Traits(5, 5, 5, 5, 5, quirk="черты утеряны вместе с состоянием", seed=0)
 
     def _staged_will(self, serial: int) -> str | None:
+        """The staged will body, or None. Since T-040 `submit_will` stages the text
+        alone; a stage left by an older run (a whole will.md) is read through the
+        parser. Unusable content — unparseable, a stranger's serial, a body that
+        fails the checks — leaves the stage to the emergency will."""
         if self.cfg.pending_wills is None:
             return None
         path = self.cfg.pending_wills / f"{workplace.serial_dir(serial)}.md"
         try:
-            text = path.read_text(encoding="utf-8")
-            will = Will.from_markdown(text)
-        except (OSError, SchemaError):
+            body = path.read_text(encoding="utf-8").strip()
+        except OSError:
             return None
-        if will.meta.serial != serial:
+        if body.startswith("---"):
+            try:
+                will = Will.from_markdown(body)
+            except SchemaError:
+                return None
+            if will.meta.serial != serial:
+                return None
+            body = will.body
+        try:
+            check_will_body(body)
+        except WillRejected:
             return None
-        return text
+        return body
 
     def _retire(self, state: LifeState, cause: str, will_text: str) -> str:
         delivery = PARKED
