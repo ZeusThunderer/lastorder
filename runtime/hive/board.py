@@ -56,6 +56,7 @@ WHY_MAX = 400  # request why
 OPERATOR_MSGS_PER_LIFE = 5  # sister -> operator messages (per serial)
 LO_MSGS_PER_HOUR = 20  # Last Order -> operator messages (rolling hour)
 AGENT_MUTATIONS_PER_LIFE = 30  # every board write of one agent life, replies included
+LO_MUTATIONS_PER_HOUR = 30  # Last Order's cap is a sliding hour: she never dies (R1-3)
 HELD_TASKS_MAX = 2  # tasks one sister may hold (taken + needs_input)
 ALARM_REPEAT_WINDOW_S = 600  # same (type, from) repeats fold into `count` for 10 min
 FEED_LIMIT = 500  # one feed read; the rest waits for the next poll
@@ -75,14 +76,16 @@ ALARM_TYPES = (
 _TERMINAL = {"done", "failed", "declined", "canceled", "approved", "denied", "answered", "acked"}
 
 # section 3.2: (from, to) -> who may, text mandatory. Missing pairs are `bad_transition`.
+# "may-take" and "claimer" are different rights (review R1-1): the first is about the
+# open pool (the addressee, or anyone on `net`), the second about the one holding it.
 _TASK_MOVES: dict[tuple[str, str], str] = {
-    ("open", "taken"): "taker",
+    ("open", "taken"): "may-take",
     ("open", "declined"): "addressee",
-    ("taken", "done"): "taker",
-    ("taken", "failed"): "taker",
-    ("taken", "needs_input"): "taker",
-    ("needs_input", "taken"): "author",
-    ("taken", "open"): "taker",
+    ("taken", "done"): "claimer",
+    ("taken", "failed"): "claimer",
+    ("taken", "needs_input"): "claimer",
+    ("needs_input", "taken"): "author-or-answerer",  # the taker KEEPS the task (R1-2)
+    ("taken", "open"): "claimer",
     ("open", "canceled"): "author-or-operator",
     ("taken", "canceled"): "author-or-operator",
     ("needs_input", "canceled"): "author-or-operator",
@@ -296,6 +299,13 @@ class Board:
             raise BoardError(422, "validation", f"{what}: raw game ids {leaked} never enter the board")
         return text
 
+    @staticmethod
+    def _refuse_raw_ids(text: str, what: str) -> None:
+        """The raw-id rule of `text` for already-validated strings (why, args values)."""
+        leaked = sorted(set(NAMESPACED.findall(text)))
+        if leaked:
+            raise BoardError(422, "validation", f"{what}: raw game ids {leaked} never enter the board")
+
     def _entry_row(self, cur: sqlite3.Cursor, entry_id: int) -> sqlite3.Row | None:
         return cur.execute("SELECT * FROM board_entry WHERE id=?", (entry_id,)).fetchone()
 
@@ -373,18 +383,33 @@ class Board:
     # --- caps (section 6) -----------------------------------------------------------------
 
     def _cap_write(self, cur: sqlite3.Cursor, actor: str) -> None:
-        """The per-life mutation cap of an agent (posts, replies, moves, claims)."""
+        """The mutation cap of an agent (posts, replies, moves, claims).
+
+        A sister's "life" is her serial — all her writes ever. Last Order never dies
+        (section 4.3), so a per-life cap would be a lifetime lockout after a restart;
+        hers is a sliding hour window instead [предположение: подобрать по T-045] (R1-3).
+        """
         if actor_role(actor) != "node" and actor != LAST_ORDER:
             return  # operator, runners, admin, system: no agent caps
-        used = cur.execute(
-            "SELECT COUNT(*) FROM board_log WHERE actor=? AND op IN (?,?,?,?)",
-            (actor, *_MUTATION_OPS),
-        ).fetchone()[0]
-        if used >= AGENT_MUTATIONS_PER_LIFE:
+        if actor == LAST_ORDER:
+            cutoff = (self._clock() - timedelta(hours=1)).isoformat()
+            used = cur.execute(
+                "SELECT COUNT(*) FROM board_log WHERE actor=? AND op IN (?,?,?,?) AND at>=?",
+                (actor, *_MUTATION_OPS, cutoff),
+            ).fetchone()[0]
+            limit = LO_MUTATIONS_PER_HOUR
+            scope = "this hour"
+        else:
+            used = cur.execute(
+                "SELECT COUNT(*) FROM board_log WHERE actor=? AND op IN (?,?,?,?)",
+                (actor, *_MUTATION_OPS),
+            ).fetchone()[0]
+            limit = AGENT_MUTATIONS_PER_LIFE
+            scope = "this life"
+        if used >= limit:
             raise BoardError(
-                429,
-                "record_cap",
-                f"{used} board writes this life, over the {AGENT_MUTATIONS_PER_LIFE} cap",
+                429, "record_cap",
+                f"{used} board writes {scope}, over the {limit} cap",
             )
 
     def _cap_operator_message(self, cur: sqlite3.Cursor, actor: str) -> None:
@@ -509,6 +534,10 @@ class Board:
         why = request.get("why", "")
         if not isinstance(why, str) or len(why) > WHY_MAX:
             raise BoardError(422, "validation", f"request.why must be a string of at most {WHY_MAX} characters")
+        # agent text on the board, same rule as `text` (R1-7)
+        self._refuse_raw_ids(why, "request.why")
+        for key, value in args.items():
+            self._refuse_raw_ids(value, f"request.args[{key!r}]")
         allowed = request.get("allowed", list(_REQUEST_ANSWERS))
         if not isinstance(allowed, list) or not allowed or any(a not in _REQUEST_ANSWERS for a in allowed):
             raise BoardError(
@@ -649,11 +678,11 @@ class Board:
                     )
             self._cap_write(cur, actor)
             sets = {"status": to_status, "updated_at": self._now()}
-            if kind == "task":
-                if to_status == "taken":
-                    sets["claimed_by"] = actor
-                elif to_status == "open":  # released: back to the pool
-                    sets["claimed_by"] = None
+            if kind == "task" and status == "open" and to_status == "taken":
+                sets["claimed_by"] = actor  # taking the open pool
+            elif kind == "task" and to_status == "open":
+                sets["claimed_by"] = None  # released: back to the pool
+            # needs_input -> taken (the author's answer) keeps the claimer as-is (R1-2)
             if new_request is not None:
                 sets["request_json"] = new_request
             before = {"status": status, "claimed_by": row["claimed_by"]}
@@ -691,20 +720,29 @@ class Board:
 
     def _check_move_rights(self, row: sqlite3.Row, actor: str, who: str) -> None:
         role = actor_role(actor)
-        me = actor in (row["from_"], row["claimed_by"])
         addressee = actor == row["to_"]
         ok = {
-            "taker": (role in ("node", "last-order")) and (
-                addressee or (row["to_"] == NET)
-            ),
+            "may-take": (role in ("node", "last-order"))
+            and (addressee or (row["to_"] == NET)),
+            "claimer": actor == row["claimed_by"],  # the one holding it, alone (R1-1)
             "addressee": addressee,
-            "author": actor == row["from_"],
+            "author": actor == row["from_"],  # request cancel: the author alone
+            # 4.3: the author answers; a DEAD author's question is answered by the
+            # operator or Last Order — the author record is a fact, not a respondent
+            "author-or-answerer": actor == row["from_"]
+            or self._author_gone(row["from_"], actor),
             "author-or-operator": actor == row["from_"] or role == "operator",
             "addressee-or-operator": addressee or role == "operator",
             "operator": role == "operator",
         }[who]
         if not ok:
             raise BoardError(403, "forbidden", f"{actor} may not move #{row['id']} this way")
+
+    def _author_gone(self, author: str, actor: str) -> bool:
+        """True when `actor` (operator/Last Order) may speak for a gone node author."""
+        if actor_role(actor) not in ("operator", "last-order"):
+            return False
+        return author.isdigit() and author not in map(str, self._live_serials())
 
     # --- replies -------------------------------------------------------------------------------
 
@@ -886,7 +924,7 @@ class Board:
     # --- the feed and cursors (section 9) ----------------------------------------------------------------
 
     def feed(self, who: str, since: Any = None) -> dict:
-        """Events after `since` for one reader; the first read of a life is the snapshot."""
+        """Events after `since` for one reader; an unacked life keeps getting its snapshot."""
         if not isinstance(since, int) or isinstance(since, bool) or since < 0:
             try:
                 since = int(since)
@@ -897,18 +935,20 @@ class Board:
                 "SELECT seq FROM board_cursor WHERE who=?", (who,)
             ).fetchone()
             if cursor is None and who != OPERATOR:
+                # no ack yet: the snapshot repeats (at-least-once) until it is acked,
+                # whatever `since` the caller claims — the ack is the only cursor move
                 return self._first_feed(who)
             effective = since if since is not None else (cursor[0] if cursor else 0)
             return {"events": self._feed_events(who, effective), "cursor": effective, "snapshot": False}
 
     def _first_feed(self, who: str) -> dict:
-        """A new life starts at "now": open net (and own) tasks once, no backlog."""
+        """A new life starts at "now": the open net (and own) tasks, no backlog.
+
+        Delivery is at-least-once (R1-6): the cursor is NOT moved here — only `ack`
+        after a delivered snapshot creates it, so a lost first batch is re-sent on the
+        next poll instead of vanishing for the whole life.
+        """
         top = self._conn.execute("SELECT COALESCE(MAX(seq), 0) FROM board_log").fetchone()[0]
-        self._conn.execute(
-            "INSERT INTO board_cursor (who, seq) VALUES (?, ?)"
-            " ON CONFLICT(who) DO UPDATE SET seq=MAX(seq, excluded.seq)",
-            (who, top),
-        )
         rows = self._conn.execute(
             "SELECT * FROM board_entry WHERE kind='task' AND status='open'"
             " AND to_ IN (?, ?) AND from_<>? ORDER BY id",

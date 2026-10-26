@@ -342,6 +342,8 @@ class HiveMcp:
 
     def board_list(self, ctx: Context, filter_: Any, *, lo: bool) -> dict[str, Any]:
         actor = self._board_actor(ctx, lo=lo)
+        if isinstance(filter_, str):
+            filter_ = filter_.strip()  # the rights check and the glance see one value (R1-4)
         if filter_ == "all" and not lo:  # the full board is Last Order's chronicle alone
             _err("board: filter 'all' belongs to Last Order")
         return self._board.glance(actor, filter_ or "mine")
@@ -360,14 +362,14 @@ class HiveMcp:
         return self._board.claim(actor, entry_id)
 
     def board_update(
-        self, ctx: Context, entry_id: Any, status: Any, text: Any, *, lo: bool
+        self, ctx: Context, entry_id: Any, status: Any, text: Any, args: Any, *, lo: bool
     ) -> dict[str, Any]:
         actor = self._board_actor(ctx, lo=lo)
         if not isinstance(entry_id, int) or isinstance(entry_id, bool) or entry_id < 1:
             _err("update: id must be an entry id")
         if not isinstance(status, str) or not status.strip():
             _err("update: status must be the target status")
-        return self._board.transition(actor, entry_id, status.strip(), text=text or "")
+        return self._board.transition(actor, entry_id, status.strip(), text=text or "", args=args)
 
     def board_reply(self, ctx: Context, entry_id: Any, text: Any, *, lo: bool) -> dict[str, Any]:
         actor = self._board_actor(ctx, lo=lo)
@@ -529,7 +531,7 @@ def build_mcp(
         """Move an entry you own: task 'done'/'failed'/'needs_input' (a reason text),
         release it back to 'open', answer 'needs_input' as the author, decline one
         addressed to you; requests are answered by their addressee."""
-        return await _run(lambda: impl.board_update(ctx, id, status, text, lo=False))
+        return await _run(lambda: impl.board_update(ctx, id, status, text, None, lo=False))
 
     async def reply(id: int, text: str, *, ctx: Context) -> dict[str, Any]:
         """One thread reply on an entry you are part of, without a status change."""
@@ -565,10 +567,13 @@ def build_mcp(
         """Take an open task addressed to you or to 'net'."""
         return await _run(lambda: impl.board_claim(ctx, id, lo=True))
 
-    async def lo_update(id: int, status: str, text: str = "", *, ctx: Context) -> dict[str, Any]:
+    async def lo_update(
+        id: int, status: str, text: str = "", args: dict[str, Any] | None = None, *, ctx: Context
+    ) -> dict[str, Any]:
         """Move an entry you own: task 'done'/'failed'/'needs_input' (a reason text),
-        release it back to 'open', answer 'needs_input' as the author."""
-        return await _run(lambda: impl.board_update(ctx, id, status, text, lo=True))
+        release it back to 'open', answer 'needs_input' as the author. Answering a
+        request 'approved' with `args` is the edit-and-approve of section 5.2."""
+        return await _run(lambda: impl.board_update(ctx, id, status, text, args, lo=True))
 
     async def lo_reply(id: int, text: str, *, ctx: Context) -> dict[str, Any]:
         """One thread reply on an entry you are part of, without a status change."""

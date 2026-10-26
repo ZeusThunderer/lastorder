@@ -260,6 +260,9 @@ def test_task_move_set_allowed(stack: Stack) -> None:
         actor = {"taker": str(doer), "author": "operator", "operator": "operator"}[who]
         moved = stack.board.transition(actor, task["id"], move, text=text)
         assert moved["status"] == move, (start, move)
+        if (start, move) == ("needs_input", "taken"):
+            # the author's answer returns the task to the taker, not to the author (R1-2)
+            assert moved["claimed_by"] == str(doer)
 
 
 def test_task_move_set_refused(stack: Stack) -> None:
@@ -313,6 +316,68 @@ def test_declining_a_net_task_is_a_reply_not_a_move(stack: Stack, sister: int) -
     assert reply["seq"] == 1
     fresh = stack.board.entry_for(str(sister), task["id"])
     assert fresh["status"] == "open"  # still open: others may claim
+
+
+# --- review round 1: who may move a held task ---------------------------------------------------
+
+
+def test_r1_1_only_the_claimer_moves_a_taken_task(stack: Stack) -> None:
+    one, two = stack.birth(), stack.birth("LastOrder02")
+    task = stack.op_task(to="net")
+    stack.board.claim(str(one), task["id"])
+    for move, text in (("done", "итог"), ("failed", "причина"),
+                       ("needs_input", "вопрос"), ("open", "отпускаю")):
+        with pytest.raises(Exception) as caught:
+            stack.board.transition(str(two), task["id"], move, text=text)
+        assert caught.value.status == 403, move
+    with pytest.raises(Exception) as caught:  # Last Order neither: she did not take it
+        stack.board.transition("last-order", task["id"], "done", text="итог")
+    assert caught.value.status == 403
+    assert stack.board.transition(str(one), task["id"], "done", text="итог")["status"] == "done"
+
+
+def test_r1_2_answer_returns_the_task_to_the_taker(stack: Stack) -> None:
+    one, two = stack.birth(), stack.birth("LastOrder02")
+    task = stack.op_task(to="net")
+    stack.board.claim(str(one), task["id"])
+    stack.board.transition(str(one), task["id"], "needs_input", text="где копать?")
+    answered = stack.board.transition("operator", task["id"], "taken", text="у реки")
+    assert answered["status"] == "taken" and answered["claimed_by"] == str(one)
+
+
+def test_r1_2_dead_author_is_answered_by_operator_or_last_order(stack: Stack) -> None:
+    author, taker = stack.birth(), stack.birth("LastOrder02")
+    task = stack.board.post(str(author), kind="task", to=str(taker), text="Наведи порядок.")
+    stack.board.claim(str(taker), task["id"])
+    stack.board.transition(str(taker), task["id"], "needs_input", text="что с сундуком?")
+    # the author is alive: the answer is his alone — not the taker's, not the operator's
+    with pytest.raises(Exception) as caught:
+        stack.board.transition(str(taker), task["id"], "taken", text="жду ответа")
+    assert caught.value.status == 403
+    with pytest.raises(Exception) as caught:
+        stack.board.transition("operator", task["id"], "taken", text="сундук общий")
+    assert caught.value.status == 403
+    answered = stack.board.transition(str(author), task["id"], "taken", text="сундук общий")
+    assert answered["claimed_by"] == str(taker)
+    # the author dies mid-question: the operator and Last Order speak for him (4.3)
+    stack.board.transition(str(taker), task["id"], "needs_input", text="ещё вопрос")
+    stack.client.post("/registry/mark_dead", json={"serial": author})
+    for actor in ("operator", "last-order"):
+        answered = stack.board.transition(actor, task["id"], "taken", text="сундук общий")
+        assert answered["claimed_by"] == str(taker)
+        stack.board.transition(str(taker), task["id"], "needs_input", text="ещё вопрос")
+
+
+def test_r1_3_last_order_cap_is_a_sliding_hour(stack: Stack) -> None:
+    from runtime.hive.board import LO_MUTATIONS_PER_HOUR
+
+    for i in range(LO_MUTATIONS_PER_HOUR):
+        stack.board.post("last-order", kind="task", to="net", text=f"задача {i}")
+    with pytest.raises(Exception) as caught:
+        stack.board.post("last-order", kind="task", to="net", text="сверх часа")
+    assert caught.value.status == 429 and caught.value.kind == "record_cap"
+    stack.clock.advance(minutes=61)  # the window slides: the board opens again
+    assert stack.board.post("last-order", kind="task", to="net", text="новый час")["status"] == "open"
 
 
 # --- atomic claim (section 4) ----------------------------------------------------------------------
@@ -609,9 +674,12 @@ def test_new_life_gets_open_net_tasks_once(stack: Stack) -> None:
     feed = stack.node("GET", "/board/feed", key=KEY1).json()
     assert feed["snapshot"] is True
     assert {e["entry_id"] for e in feed["events"]} == {readdressed["id"], fresh["id"]}
-    stack.node("POST", "/board/ack", {"seq": feed["cursor"]}, key=KEY1)
+    # at-least-once (R1-6): until the snapshot is acked, it is re-sent, not lost
     again = stack.node("GET", "/board/feed", key=KEY1).json()
-    assert again["events"] == []  # the snapshot is once, the cursor moved
+    assert again["snapshot"] is True and again["events"]
+    stack.node("POST", "/board/ack", {"seq": feed["cursor"]}, key=KEY1)
+    settled = stack.node("GET", "/board/feed", key=KEY1).json()
+    assert settled["events"] == []  # the ack moved the cursor; the snapshot is done
 
 
 def test_operator_feed_sees_everything(stack: Stack) -> None:
@@ -633,4 +701,13 @@ def test_raw_game_ids_never_enter_the_board(stack: Stack, sister: int) -> None:
     task = stack.op_task(to="net")
     with pytest.raises(Exception) as caught:
         stack.board.reply(str(sister), task["id"], "вижу minecraft:zombie")
+    assert caught.value.status == 422
+    # the request payload is agent text too (R1-7): why and args values, same rule
+    with pytest.raises(Exception) as caught:
+        stack.board.post(str(sister), kind="request", to="operator", text="х",
+                         request={"action": "a_thing", "why": "вижу minecraft:spider"})
+    assert caught.value.status == 422
+    with pytest.raises(Exception) as caught:
+        stack.board.post(str(sister), kind="request", to="operator", text="х",
+                         request={"action": "a_thing", "args": {"where": "minecraft:chest"}})
     assert caught.value.status == 422

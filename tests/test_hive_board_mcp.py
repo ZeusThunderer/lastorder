@@ -176,9 +176,27 @@ def test_board_all_is_last_order_alone(stack: Stack) -> None:
     stack.birth("LastOrder01")
     message = node_error(stack, KEY1, "board", {"filter": "all"})
     assert "Last Order" in message
+    padded = node_error(stack, KEY1, "board", {"filter": " all"})  # spaces change nothing (R1-4)
+    assert "Last Order" in padded
     stack.http("POST", "/board/entries", {"kind": "task", "to": "net", "text": "летопись"})
     chronicle = lo_call(stack, "board", {"filter": "all"})
     assert any("летопись" in line for line in chronicle["entries"])
+
+
+def test_r1_5_last_order_edits_and_approves_through_update(stack: Stack) -> None:
+    stack.birth("LastOrder01")
+    # a request ADDRESSED to Last Order: she is the addressee and may rule on it (3.2)
+    posted = node_call(stack, KEY1, "post", {
+        "kind": "request", "to": "last-order", "text": "Копать у деревни?",
+        "request": {"action": "dig_where", "args": {"where": "village"}},
+    })
+    moved = lo_call(stack, "update", {
+        "id": posted["id"], "status": "approved", "text": "",
+        "args": {"where": "x=120 z=-40"},
+    })
+    assert moved["status"] == "approved"
+    assert moved["request"]["args"] == {"where": "x=120 z=-40"}  # what the agent receives
+    assert moved["request"]["action"] == "dig_where"
 
 
 def test_board_by_id_is_the_full_entry(stack: Stack) -> None:
@@ -213,12 +231,16 @@ def test_mcp_board_roundtrip(stack: Stack) -> None:
                      {"id": entry_id, "status": "done", "text": "собрано два стака"})
     assert done["status"] == "done"
 
-    # the author's feed carries the claim and the done move: her cursor was set by the
-    # first read (the snapshot of a new life — her own post is not in it, by design)
+    # the author's feed carries the claim and the done move: her cursor appears only
+    # after she acks the first snapshot (R1-6) — the ack is the cursor move
     first = httpx.get(f"http://127.0.0.1:{stack.port}/board/feed",
                       headers={"X-Node-Key": KEY1}, timeout=30.0)
     assert first.status_code == 200, first.text
     assert first.json()["snapshot"] is True and first.json()["events"] == []
+    acked = httpx.post(f"http://127.0.0.1:{stack.port}/board/ack",
+                       json={"seq": first.json()["cursor"]},
+                       headers={"X-Node-Key": KEY1}, timeout=30.0)
+    assert acked.status_code == 200
     feed = httpx.get(f"http://127.0.0.1:{stack.port}/board/feed",
                      headers={"X-Node-Key": KEY1}, timeout=30.0)
     ops = [e["op"] for e in feed.json()["events"] if e["entry_id"] == entry_id]
