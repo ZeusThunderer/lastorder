@@ -2,7 +2,7 @@
 id: T-040
 title: Контракт воли — submit_will принимает текст, служебные поля заполняет среда
 stage: I
-status: ready
+status: in_progress
 criticality: critical
 after: []
 branch: z/T-040-will-contract
