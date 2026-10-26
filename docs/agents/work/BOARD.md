@@ -43,7 +43,7 @@
 | T-037 | Стенд — память node-N, zai-egress в зависимостях, без автозапуска при старте Docker | E3 | done | normal | z/T-037-stand-compose |
 | T-038 | Инструкции сестры — первая реплика в линии, нет инструмента — находка, воля без расследований | E3 | done | normal | z/T-038-sister-line-and-will |
 | T-039 | Повтор 2-часового прогона MVP на стенде с ключами, шлюзом и Last Order | E3 | done | normal | z/T-039-mvp-run-2 |
-| T-040 | Контракт воли — submit_will принимает текст, служебные поля заполняет среда | I | ready | critical | z/T-040-will-contract |
+| T-040 | Контракт воли — submit_will принимает текст, служебные поля заполняет среда | I | done | critical | z/T-040-will-contract |
 | T-041 | Pi в образе узла на Z.ai Coding Plan и выбор готовой веб-консоли | I | ready | critical | z/T-041-pi-and-console |
 | T-042 | misaka-link — расширение Pi и канал оператора в hive (голос, мысль, сеть, тревоги) | I | ready | critical | z/T-042-misaka-link |
 | T-043 | Last Order на Pi — одна долгая сессия, события сети сообщениями, запасной OpenCode с тревогой | I | ready | critical | z/T-043-lo-long-session |
