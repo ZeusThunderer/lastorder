@@ -379,8 +379,11 @@ services:
   # hapi-web exists ONLY to carry the published port: a container on internal-
   # only networks cannot publish at all (the host has no route into an internal
   # bridge — the mapping silently goes inert [проверено: T-044]; nginx on a
-  # normal bridge publishes fine). The network is empty besides the hub, and
-  # the hub initiates nothing outward (no relay, no push configured).
+  # normal bridge publishes fine). CONSCIOUS DEVIATION from "the hub needs no
+  # internet" (review R1-2): the empty network gives the hub a NAT route it
+  # never uses — no relay, no push, the hub initiates nothing outward; the
+  # operator's ingress stays the loopback publish only. To be folded into the
+  # R1-1 ADR.
   hapi-hub:
     build: ./hapi
     image: lastorder-hapi:dev

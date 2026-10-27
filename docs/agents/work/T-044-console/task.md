@@ -2,7 +2,7 @@
 id: T-044
 title: HAPI на стенде — хаб, `hapi pi` в node-1 и рядом с Last Order, чат оператора, граница токена
 stage: I
-status: blocked
+status: review
 criticality: critical
 after: [T-041]
 branch: z/T-044-console
@@ -11,7 +11,6 @@ created: 2026-10-26
 
 # T-044. HAPI на стенде — хаб, `hapi pi` в node-1 и рядом с Last Order, чат оператора, граница токена
 
-Blocked: нужен оператор — токен HAPI из bash сестры даёт читать и писать в чужие сессии от имени оператора (ADR-033/042); выбор схемы изоляции — новый ADR (review.md R1-1)
 
 ## Цель
 На стенде работает хаб HAPI. В `node-1` скрипт запускает тестового агента командой `hapi pi`,
