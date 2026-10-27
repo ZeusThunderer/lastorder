@@ -2,7 +2,7 @@
 id: T-044
 title: HAPI на стенде — хаб, `hapi pi` в node-1 и рядом с Last Order, чат оператора, граница токена
 stage: I
-status: review
+status: accepted
 criticality: critical
 after: [T-041]
 branch: z/T-044-console
