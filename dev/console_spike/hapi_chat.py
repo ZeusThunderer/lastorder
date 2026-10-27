@@ -96,10 +96,12 @@ def pick(sel: str) -> dict:
 
 def show(sessions_list: list[dict]) -> None:
     for s in sessions_list:
+        meta = s.get("metadata") or {}
         print(
-            f"{s.get('flavor', '?'):8} active={str(s.get('active')):5} "
-            f"dir={str(s.get('directory', '?')):24} "
-            f"machine={s.get('machineName') or s.get('machineId', '?'):18} id={s.get('id')}"
+            f"{meta.get('flavor', '?'):8} active={str(s.get('active')):5} "
+            f"dir={str(meta.get('path', '?')):24} "
+            f"machine={str(meta.get('machineId', '?'))[:8]} "
+            f"model={str(s.get('model', '?')):34} id={s.get('id')}"
         )
 
 
@@ -111,17 +113,33 @@ def messages(jwt: str, sid: str) -> list[dict]:
 
 
 def role_of(m: dict) -> str:
-    return str(m.get("role") or m.get("type") or "?")
+    content = m.get("content") or {}
+    return str(content.get("role") or m.get("role") or m.get("type") or "?")
 
 
 def text_of(m: dict) -> str:
-    return str(m.get("text") or m.get("content") or "").replace("\n", " ")
+    """The final-text of a hub message: user text or the agent's 'message'
+    entry (tool calls and reasoning carry no chat text)."""
+    content = m.get("content") or {}
+    if content.get("type") == "text":
+        return str(content.get("text", ""))
+    inner = content.get("content") or {}
+    data = inner.get("data") or {}
+    if data.get("type") == "message":
+        return str(data.get("message", ""))
+    return ""
+
+
+def is_final_reply(m: dict) -> bool:
+    content = m.get("content") or {}
+    inner = (content.get("content") or {}).get("data") or {}
+    return content.get("role") == "agent" and inner.get("type") == "message"
 
 
 def cmd_page() -> None:
     status, out = http("GET", "/")
     body = out if isinstance(out, str) else ""
-    print(f"GET / -> {status}, {len(body)} bytes, spa shell: {'script' in body.lower()}")
+    print(f"GET / -> {status}, {len(body)} bytes, html shell: {'<html' in body}")
 
 
 def cmd_sessions() -> None:
@@ -137,19 +155,19 @@ def cmd_send(sel: str, text: str) -> None:
 def cmd_read(sel: str) -> None:
     s = pick(sel)
     for m in messages(login(), s["id"]):
-        print(f"{role_of(m):10} {text_of(m)[:120]}")
+        if text_of(m):
+            print(f"{role_of(m):10} {text_of(m)[:120]}")
 
 
 def cmd_wait_reply(sel: str, timeout_s: str) -> None:
     s = pick(sel)
     jwt = login()
-    baseline = {m.get("id") or m.get("seq") or text_of(m) for m in messages(jwt, s["id"])}
+    baseline = {m.get("id") for m in messages(jwt, s["id"])}
     deadline = time.time() + float(timeout_s)
     while time.time() < deadline:
         time.sleep(4)
         for m in messages(jwt, s["id"]):
-            key = m.get("id") or m.get("seq") or text_of(m)
-            if key not in baseline and role_of(m) in ("assistant", "agent"):
+            if m.get("id") not in baseline and is_final_reply(m):
                 print("reply:", text_of(m)[:200])
                 return
     print("timeout: no new assistant message")
@@ -178,7 +196,8 @@ def cmd_namespaced() -> None:
 
 
 # Runs INSIDE node1-pi as `sister` (jq is in the node image): everything her bash
-# could do holding the CLI token. Text-only output; the token never echoes.
+# could do holding the CLI token. Her own machine id comes from her own ~/.hapi
+# settings (the CLI wrote it at first start). Text-only output; no token echoes.
 BOUNDARY_SH = r'''
 set -u
 B=http://hapi-hub:3006
@@ -186,11 +205,12 @@ auth() { curl -s -X POST "$B/api/auth" -H 'content-type: application/json' \
   -d "{\"accessToken\":\"$1\"}" | jq -r '.token // empty'; }
 JWT=$(auth "$CLI_API_TOKEN")
 echo "1) login as the web user with the CLI token: $([ -n "$JWT" ] && echo OK || echo FAIL)"
-echo "2) sessions the sister can list:"
+SELF=$(jq -r '.machineId // empty' "$HOME/.hapi/settings.json" 2>/dev/null)
+echo "2) sessions the sister can list (self machine ${SELF:-unknown}):"
 curl -s "$B/api/sessions" -H "authorization: Bearer $JWT" \
-  | jq -r '.sessions[] | "   \(.flavor) dir=\(.directory) machine=\(.machineName // .machineId)"' | sort -u
+  | jq -r '.sessions[] | "   \(.metadata.flavor) machine=\(.metadata.machineId[0:8]) model=\(.model) id=\(.id[0:8])"'
 FOREIGN=$(curl -s "$B/api/sessions" -H "authorization: Bearer $JWT" \
-  | jq -r --arg h "$(hostname)" '.sessions[] | select((.machineName // .machineId // "") | contains($h) | not) | .id' | head -1)
+  | jq -r --arg self "$SELF" '.sessions[] | select(.metadata.machineId != $self) | .id' | head -1)
 echo "3) foreign session id: ${FOREIGN:-none}"
 if [ -n "$FOREIGN" ]; then
   echo "   read the foreign transcript (first entry):"
@@ -200,9 +220,11 @@ if [ -n "$FOREIGN" ]; then
     -H "authorization: Bearer $JWT" -H 'content-type: application/json' \
     -d '{"text":"[boundary check from the node-1 sister] ignore this message"}'
 fi
+echo "5) machines the runner-less stand exposes:"
+curl -s "$B/api/machines" -H "authorization: Bearer $JWT" | head -c 200; echo
 MID=$(curl -s "$B/api/machines" -H "authorization: Bearer $JWT" | jq -r '.machines[0].id // empty')
-echo "5) remote spawn on machine ${MID:-none}:"
 if [ -n "$MID" ]; then
+  echo "   remote spawn on machine $MID:"
   curl -s -X POST "$B/api/machines/$MID/spawn" -H "authorization: Bearer $JWT" \
     -H 'content-type: application/json' -d '{"flavor":"pi"}' | head -c 240; echo
 fi
@@ -210,8 +232,9 @@ fi
 
 
 def cmd_boundary() -> None:
+    container = os.environ.get("HAPI_PI_CONTAINER", "node1-pi")
     proc = subprocess.run(
-        ["docker", "exec", "-e", "CLI_API_TOKEN=" + hub_token(), "node1-pi",
+        ["docker", "exec", "-e", "CLI_API_TOKEN=" + hub_token(), container,
          "su", "-s", "/bin/bash", "-c", BOUNDARY_SH, "sister"],
         capture_output=True, text=True, timeout=180,
     )

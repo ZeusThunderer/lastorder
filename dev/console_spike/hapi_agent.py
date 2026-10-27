@@ -81,10 +81,16 @@ def render_lo() -> dict[str, str]:
     by hand (drop_pi_agent_dir is the SLOT's renderer — MCP and the node key
     would be wrong here); same 0444-not-needed shape as any pi agent dir."""
     model = os.environ.get("LO_MODEL", "openrouter/qwen/qwen3.7-flash")
-    auth = json.loads(
-        (HOME / ".local/share/opencode/auth.json").read_text(encoding="utf-8")
-    )
-    key = auth["llm-gateway"]["key"]
+    # A parallel stand's gateway has its own key table: HAPI_LO_GATEWAY_KEY
+    # (issued for THIS gateway) wins over the entrypoint's auth.json key.
+    env_key = os.environ.get("HAPI_LO_GATEWAY_KEY", "")
+    if env_key:
+        key = env_key
+    else:
+        auth = json.loads(
+            (HOME / ".local/share/opencode/auth.json").read_text(encoding="utf-8")
+        )
+        key = auth["llm-gateway"]["key"]
     AGENT_DIR.mkdir(parents=True, exist_ok=True)
     for name, config in {
         "models.json": {
@@ -182,16 +188,27 @@ def stop() -> int:
     pid = read_pid()
     if not alive(pid):
         print(f"pid={pid} already dead")
-        tail(LOG)
-        return 0
-    os.kill(pid, signal.SIGTERM)  # hapi's own handler kills pi and exits cleanly
+    else:
+        # the pid is the session leader (start_new_session): su -> bash -> exec
+        # hapi share the group, so killpg reaches them; the platform binary
+        # re-detaches, so a pattern sweep follows (a bare kill only hits su and
+        # the orphaned hapi keeps the hub session alive [проверено: T-044])
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except OSError:
+            os.kill(pid, signal.SIGTERM)
+        for _ in range(20):
+            time.sleep(0.5)
+            if not alive(pid):
+                break
+    subprocess.run(["pkill", "-TERM", "-f", "[h]api pi"], check=False)
     for _ in range(20):
         time.sleep(0.5)
-        if not alive(pid):
-            print(f"pid={pid} exited after SIGTERM")
+        if subprocess.run(["pgrep", "-f", "[h]api pi"], capture_output=True).returncode != 0:
+            print(f"pid={pid} stopped, no hapi pi left")
             tail(LOG)
             return 0
-    os.kill(pid, signal.SIGKILL)
+    subprocess.run(["pkill", "-KILL", "-f", "[h]api pi"], check=False)
     print(f"pid={pid} needed SIGKILL")
     return 1
 

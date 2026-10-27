@@ -376,6 +376,11 @@ services:
   # T-044]. Internal networks: every node slot's svc-N plus svc-lo, so both the
   # sisters and Last Order reach it as http://hapi-hub:3006 and nothing else
   # does (ADR-033/042: the hub needs no internet and no other service).
+  # hapi-web exists ONLY to carry the published port: a container on internal-
+  # only networks cannot publish at all (the host has no route into an internal
+  # bridge — the mapping silently goes inert [проверено: T-044]; nginx on a
+  # normal bridge publishes fine). The network is empty besides the hub, and
+  # the hub initiates nothing outward (no relay, no push configured).
   hapi-hub:
     build: ./hapi
     image: lastorder-hapi:dev
@@ -389,7 +394,7 @@ services:
       - "127.0.0.1:${HAPI_PORT:-3006}:3006"
     volumes:
       - hapi-data:/data
-    networks: [svc-1, svc-2, svc-3, svc-lo]
+    networks: [hapi-web, svc-1, svc-2, svc-3, svc-lo]
 
   # FastJev decision server for C1 (T-005, ADR-004/023). Raises only under --profile jev.
   # GPU 0 is the RTX 2070 (5070 Ti stays free); model checkpoints live in the named volume,
@@ -522,6 +527,8 @@ volumes:
 
 networks:
   gateway-internal: {}
+  # carries only the hub's loopback port publish (see hapi-hub above)
+  hapi-web: {}
   # body-N + node-N of one slot: the mind's MCP and runner endpoints, nothing else
   slot-1: {internal: true}
   slot-2: {internal: true}
