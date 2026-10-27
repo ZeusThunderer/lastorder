@@ -47,7 +47,7 @@
 | T-041 | Pi в образе узла на Z.ai Coding Plan и выбор готовой веб-консоли | I | done | critical | z/T-041-pi-and-console |
 | T-042 | Доска задач в hive — хранилище, переходы, смерть, HTTP, лента, MCP-инструменты | I | done | critical | z/T-042-board |
 | T-043 | Last Order на Pi — одна долгая сессия, события сети сообщениями, запасной OpenCode с тревогой | I | ready | critical | z/T-043-lo-long-session |
-| T-044 | HAPI на стенде — хаб, `hapi pi` в node-1 и рядом с Last Order, чат оператора, граница токена | I | blocked | critical | z/T-044-console |
+| T-044 | HAPI на стенде — хаб, `hapi pi` в node-1 и рядом с Last Order, чат оператора, граница токена | I | done | critical | z/T-044-console |
 | T-045 | Сёстры на Pi — адаптер раннера, жизнь и воля в Pi, запасной OpenCode с тревогой | I | ready | critical | z/T-045-sisters-on-pi |
 | T-046 | Гранты — запрос выхода наружу и секрета, одобрение оператора, хранилище hive, egress-прокси | I | ready | critical | z/T-046-grants |
 | T-047 | Мастерская Last Order — свои расширения Pi, перезагрузка, публикация инструментов сёстрам | I | draft | critical | z/T-047-workshop |
