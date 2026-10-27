@@ -52,15 +52,19 @@ WSL2, 24 ГБ / 18 CPU. До T-003 (замер E1 и baseline T-003, серве�
 порта: в internal-сетях публикация не работает).
 
 - Страница: `http://127.0.0.1:3006` (только loopback хоста; номер двигает
-  `HAPI_PORT` в `.env`). Вход — токен: значение `HAPI_CLI_API_TOKEN` из `.env`
-  (`uv run python dev/stand_keys.py init` создаёт; то же значение лежит в
-  `settings.json` внутри тома `hapi-data`).
+  `HAPI_PORT` в `.env`). Вход — токен: значение `HAPI_CLI_KEY` из `.env`
+  (`uv run python dev/stand_keys.py init` создаёт; то же значение хаб
+  переписывает себе в `settings.json` внутри тома `hapi-data`).
+- `docker/node/up.sh` ключ `HAPI_CLI_KEY` пока НЕ поднимает (вне зоны T-044):
+  полный стек получит хаб с пустым env-токеном, и хаб сгенерирует свой — вход
+  тогда по `docker compose exec hapi-hub cat /data/settings.json`. Подъём ключа
+  в up.sh — за T-043/T-045 [предположение: надзор согласует].
 - Агентов запускает CLI (`hapi pi`) в песочницах — на стенде руками через
   `dev/console_spike/hapi_agent.py`, в бою раннер и admin (T-045/T-043).
 - Квота: страница и список сессий бесплатны, платит только ход агента.
 - Спайк-стенд целиком (без раннеров, слот 1): `bash dev/console_spike/up_spike.sh`
   (`down` — снять). Параллельный стенд: `HAPI_PROJECT=t044 MC_HOST_PORT=25575
-  HIVE_BOARD_PORT=18081 HAPI_PORT=3006 …`.
+  HIVE_BOARD_PORT=18081 HAPI_PORT=3006 …`. [проверено: T-044, оба подъёма]
 
 ## Запуск (E1)
 - `docker compose -f docker/compose.yml up -d mc-server body-1`, затем `up mind-1` — проба `tools/body_probe.py`.

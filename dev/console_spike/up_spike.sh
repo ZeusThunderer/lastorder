@@ -40,7 +40,7 @@ lift() { # lift <var> [file key]: env wins, then the root .env; never echoes the
 }
 lift ZCODE_API_KEY ZAI_API_KEY
 for key in GATEWAY_KEY_NODE_1 HIVE_NODE_KEY_1 HIVE_RUNNER_KEY_1 \
-           GATEWAY_KEY_MIND_1 GATEWAY_KEY_HIVE RCON_PASSWORD HAPI_CLI_API_TOKEN \
+           GATEWAY_KEY_MIND_1 GATEWAY_KEY_HIVE RCON_PASSWORD HAPI_CLI_KEY \
            OPENROUTER_API_KEY GATEWAY_MASTER_KEY GATEWAY_DB_PASSWORD GATEWAY_KEY_LO; do
   lift "$key"
 done
@@ -48,8 +48,8 @@ if [ -z "${HIVE_RUNNER_KEY_1:-}" ] && [ -z "${HIVE_NODE_KEY_1:-}" ]; then
   echo "up_spike.sh: slot 1 has no keys in env or $ROOT/.env (R2-6); aborting" >&2
   exit 1
 fi
-if [ -z "${HAPI_CLI_API_TOKEN:-}" ]; then
-  echo "up_spike.sh: no HAPI_CLI_API_TOKEN (uv run python dev/stand_keys.py init); aborting" >&2
+if [ -z "${HAPI_CLI_KEY:-}" ]; then
+  echo "up_spike.sh: no HAPI_CLI_KEY (uv run python dev/stand_keys.py init); aborting" >&2
   exit 1
 fi
 export HIVE_MCP_NODE_KEYS="${HIVE_MCP_NODE_KEYS:-LastOrder01=${HIVE_NODE_KEY_1:-}}"

@@ -38,14 +38,14 @@ DEFAULT_ENV = ROOT / ".env"
 # GATEWAY_MASTER_KEY gets the sk- prefix LiteLLM requires (the recipe docker/gateway/up.sh
 # prints when it is missing); GATEWAY_DB_PASSWORD is interpolated into DATABASE_URL as-is, and
 # token_urlsafe's alphabet (A-Za-z0-9_-) has none of the @:/#? that break that URL.
-# HAPI_CLI_API_TOKEN rides as CLI_API_TOKEN into the hapi-hub container (T-044): the hub
+# HAPI_CLI_KEY rides as CLI_API_TOKEN into the hapi-hub container (T-044): the hub
 # accepts a preset token from env (env > settings.json > generate), the sandboxes' `hapi`
 # CLI authenticates with it and the operator logs into the HAPI web page with the same
 # value — the web login token never exists as a separate secret.
 LOCAL_TOKENS = [
     "GATEWAY_MASTER_KEY",
     "GATEWAY_DB_PASSWORD",
-    "HAPI_CLI_API_TOKEN",
+    "HAPI_CLI_KEY",
     "HIVE_MCP_LO_KEY",
     "HIVE_OPERATOR_KEY",
     "HIVE_NODE_KEY_1", "HIVE_NODE_KEY_2", "HIVE_NODE_KEY_3",

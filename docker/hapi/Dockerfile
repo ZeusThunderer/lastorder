@@ -6,7 +6,7 @@
 # The hub holds NO provider keys: agent LLM traffic never passes through it, it
 # only brokers session UI/events (ADR-042). Data (settings.json + hapi.db)
 # lives in HAPI_HOME=/data, a named volume. CLI_API_TOKEN comes from the env
-# (dev/stand_keys.py generates HAPI_CLI_API_TOKEN) and is persisted into
+# (dev/stand_keys.py generates HAPI_CLI_KEY) and is persisted into
 # settings.json on first start [проверено: T-044]. --no-relay keeps it off the
 # public relay tunnel; the operator reaches the web page through the
 # loopback-only published port, sandboxes through the internal docker networks.

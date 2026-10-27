@@ -45,13 +45,13 @@ def main_root() -> "os.PathLike[str]":
 
 
 def hub_token(suffix: str = "") -> str:
-    env = os.environ.get("HAPI_CLI_API_TOKEN", "")
+    env = os.environ.get("HAPI_CLI_KEY", "")
     if not env:
         text = open(os.path.join(main_root(), ".env"), encoding="utf-8").read()
-        env = next((m.group(1) for m in re.finditer(r"^HAPI_CLI_API_TOKEN=(.+)$", text, re.M)), "")
+        env = next((m.group(1) for m in re.finditer(r"^HAPI_CLI_KEY=(.+)$", text, re.M)), "")
         env = env.strip().strip('"').strip("'")
     if not env:
-        sys.exit("no HAPI_CLI_API_TOKEN in env or .env")
+        sys.exit("no HAPI_CLI_KEY in env or .env")
     return env + suffix
 
 

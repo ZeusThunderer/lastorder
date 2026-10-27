@@ -370,7 +370,7 @@ services:
   # no relay — the only ingress is the loopback-published web page and the
   # internal docker networks below. The hub holds no provider keys: agent LLM
   # traffic goes node-N -> api.z.ai directly, the hub only brokers session
-  # UI/events. CLI_API_TOKEN is the stand's HAPI_CLI_API_TOKEN (stand_keys):
+  # UI/events. CLI_API_TOKEN is the stand's HAPI_CLI_KEY (stand_keys):
   # the sandboxes' `hapi` CLI authenticates with it and the operator logs into
   # the web page with the same token (POST /api/auth -> 4h JWT) [проверено:
   # T-044]. Internal networks: every node slot's svc-N plus svc-lo, so both the
@@ -387,7 +387,7 @@ services:
     restart: on-failure
     mem_limit: 256m
     environment:
-      CLI_API_TOKEN: "${HAPI_CLI_API_TOKEN:-}"
+      CLI_API_TOKEN: "${HAPI_CLI_KEY:-}"
     ports:
       # the operator's browser on the host only; HAPI_PORT moves it if 3006
       # is taken (the hub itself always listens on 3006 inside)
