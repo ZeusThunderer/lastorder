@@ -9,6 +9,7 @@ ARG OPENCODE_VERSION=1.19.3
 ARG ZCODE_APP_CLI_VERSION=3.15.3-36
 ARG HERMES_AGENT_VERSION=v0.22.4
 ARG PI_CODING_AGENT_VERSION=1.4.0
+ARG HAPI_VERSION=0.30.7
 ARG SISTER_UID=1001
 ARG SISTER_GID=1001
 
@@ -36,6 +37,17 @@ RUN npm install -g --no-fund --no-audit \
       "@earendil-works/pi-coding-agent@${PI_CODING_AGENT_VERSION}" \
     && npm cache clean --force \
     && pi --version
+
+# HAPI CLI (ADR-042 console): `hapi pi` wraps `pi --mode rpc` and publishes the
+# session to the hub for the operator's web chat. Same pin as the hub image
+# (docker/hapi), same launcher-plus-platform-binary npm layout. The CLI is
+# env-driven and headless: HAPI_API_URL + CLI_API_TOKEN, no TTY and no
+# interactive auth [проверено: T-044]. `hapi runner` is NOT installed as a
+# service: a dead sister's session must not resurrect (ADR-042).
+RUN npm install -g --no-fund --no-audit \
+      "@twsxtd/hapi@${HAPI_VERSION}" \
+    && npm cache clean --force \
+    && hapi --version
 
 # Hermes Agent (ADR-032 third harness), pinned to the upstream git tag: PyPI lags
 # behind (0.19.0 at build time) and upstream blocks wheel builds outright — the

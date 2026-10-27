@@ -44,6 +44,29 @@ WSL2, 24 ГБ / 18 CPU. До T-003 (замер E1 и baseline T-003, серве�
 Куча 768M — впритык для длинных сессий с большой базой: ручка `BODY_XMX` в compose перекрывает
 дефолт без пересборки.
 
+## Консоль (HAPI, T-044)
+
+Стек поднимается как обычно (`bash docker/node/up.sh`); консоль — сервис `hapi-hub`
+(образ `docker/hapi/`, пин `@twsxtd/hapi` 0.30.7, `hapi hub --no-relay`, том
+`hapi-data`, сети svc-1..3 + svc-lo + пустая `hapi-web` только для публикации
+порта: в internal-сетях публикация не работает).
+
+- Страница: `http://127.0.0.1:3006` (только loopback хоста; номер двигает
+  `HAPI_PORT` в `.env`). Вход — токен: значение `HAPI_CLI_KEY` из `.env`
+  (`uv run python dev/stand_keys.py init` создаёт; то же значение хаб
+  переписывает себе в `settings.json` внутри тома `hapi-data`).
+- `docker/node/up.sh` ключ `HAPI_CLI_KEY` пока НЕ поднимает (вне зоны T-044):
+  полный стек получит хаб с пустым env-токеном, и хаб сгенерирует свой и
+  перепишет в `settings.json` [проверено: T-044 r2, одноразовый контейнер] —
+  вход тогда по `docker compose exec hapi-hub cat /data/settings.json`. Подъём
+  ключа в up.sh — за T-043/T-045 (вписать в их задачи: файлы надзора).
+- Агентов запускает CLI (`hapi pi`) в песочницах — на стенде руками через
+  `dev/console_spike/hapi_agent.py`, в бою раннер и admin (T-045/T-043).
+- Квота: страница и список сессий бесплатны, платит только ход агента.
+- Спайк-стенд целиком (без раннеров, слот 1): `bash dev/console_spike/up_spike.sh`
+  (`down` — снять). Параллельный стенд: `HAPI_PROJECT=t044 MC_HOST_PORT=25575
+  HIVE_BOARD_PORT=18081 HAPI_PORT=3006 …`. [проверено: T-044, оба подъёма]
+
 ## Запуск (E1)
 - `docker compose -f docker/compose.yml up -d mc-server body-1`, затем `up mind-1` — проба `tools/body_probe.py`.
 - Первый старт тела качает около 540 МБ ассетов и библиотек, это занимает 4 минуты. Всё ложится в volume

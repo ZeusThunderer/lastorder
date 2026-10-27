@@ -365,59 +365,39 @@ services:
       - knowledge:/knowledge:ro
     networks: [svc-lo]
 
-  # T-041 console spike (ADR-041): ready-made web consoles for Pi, raised only under
-  # `--profile console-spike` — never with the live stack. Both ride the node image
-  # (pi is inside) and install their PINNED npm package at container start; the
-  # published ports are loopback-only (the operator's browser on the host).
-  # Networks (review R1-3): `console-spike` is their own (egress for the install
-  # step), `slot-1` carries the body MCP and `default` only hive — a console that
-  # never sees hive would need a hive-side change, out of this task's scope.
-  # The pi-web-ui service also carries the R1-2 proof path: the entrypoint leaves
-  # the slot's secrets as 0400 root files, the command renders the SAME agent-dir
-  # configs as node-1 (models.json zai + mcp.json body/hive, drop_pi_agent_dir)
-  # into /root/.pi/agent and re-exports the Z.ai key into the console process env
-  # (never argv, never a file) — so the pi it spawns talks to the body and hive of
-  # slot 1. No quota burn while idle: a conversation costs nothing until sent.
-  console-pi-web-ui:
-    image: lastorder-node:dev
-    profiles: ["console-spike"]
-    command:
-      - sh
-      - -c
-      - apt-get update -qq && apt-get install -y -qq --no-install-recommends make g++
-        && npm install -g --no-fund --no-audit --allow-scripts=node-pty,@google/genai,protobufjs pi-web-ui@0.111.0
-        && ZAI_API_KEY_FILE=/run/node/secrets/zai_api_key NODE_MCP_KEY_FILE=/run/node/secrets/node_mcp_key
-        /app/.venv/bin/python -c "import os; from pathlib import Path; from runtime.node.workplace import drop_pi_agent_dir; drop_pi_agent_dir(Path('/root/.pi/agent'), model=os.environ.get('ZCODE_MODEL', 'GLM-5.3-Flash'), body_base='http://body-1:8700', hive_url='http://hive:8000', node_key=Path(os.environ['NODE_MCP_KEY_FILE']).read_text(encoding='utf-8').strip())"
-        && export ZAI_API_KEY="$(cat /run/node/secrets/zai_api_key)"
-        && exec pi-web-ui --host 0.0.0.0 --port 8787 --no-browser
+
+  # The HAPI hub (ADR-042, T-044): the operator's console. Upstream, unmodified,
+  # no relay — the only ingress is the loopback-published web page and the
+  # internal docker networks below. The hub holds no provider keys: agent LLM
+  # traffic goes node-N -> api.z.ai directly, the hub only brokers session
+  # UI/events. CLI_API_TOKEN is the stand's HAPI_CLI_KEY (stand_keys):
+  # the sandboxes' `hapi` CLI authenticates with it and the operator logs into
+  # the web page with the same token (POST /api/auth -> 4h JWT) [проверено:
+  # T-044]. Internal networks: every node slot's svc-N plus svc-lo, so both the
+  # sisters and Last Order reach it as http://hapi-hub:3006 and nothing else
+  # does (ADR-033/042: the hub needs no internet and no other service).
+  # hapi-web exists ONLY to carry the published port: a container on internal-
+  # only networks cannot publish at all (the host has no route into an internal
+  # bridge — the mapping silently goes inert [проверено: T-044]; nginx on a
+  # normal bridge publishes fine). CONSCIOUS DEVIATION from "the hub needs no
+  # internet" (review R1-2): the empty network gives the hub a NAT route it
+  # never uses — no relay, no push, the hub initiates nothing outward; the
+  # operator's ingress stays the loopback publish only. To be folded into the
+  # R1-1 ADR.
+  hapi-hub:
+    build: ./hapi
+    image: lastorder-hapi:dev
+    restart: on-failure
+    mem_limit: 256m
     environment:
-      ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"
-      ZAI_API_KEY: "${ZCODE_API_KEY:-}"
-      HIVE_NODE_KEY: "${HIVE_NODE_KEY_1:-}"
+      CLI_API_TOKEN: "${HAPI_CLI_KEY:-}"
     ports:
-      - "127.0.0.1:8787:8787"
-    networks: [console-spike, slot-1, default]
-    mem_limit: 1g
-    restart: on-failure
-
-  # [проверено: T-041] this one does NOT come up in a container: `pi-web install`
-  # demands systemd-run user services and `pi-web start` runs `systemctl --user
-  # start` — a plain container has neither. Kept for reproducing the finding; on a
-  # systemd host (VM) it is the documented path.
-  console-pi-web:
-    image: lastorder-node:dev
-    profiles: ["console-spike"]
-    command:
-      - sh
-      - -c
-      - npm install -g --no-fund --no-audit --allow-scripts=node-pty @jmfederico/pi-web@1.202609.1
-        && pi-web install && exec pi-web start --host 0.0.0.0 --port 8504
-    ports:
-      - "127.0.0.1:8504:8504"
-    networks: [console-spike]
-    mem_limit: 1g
-    restart: on-failure
-
+      # the operator's browser on the host only; HAPI_PORT moves it if 3006
+      # is taken (the hub itself always listens on 3006 inside)
+      - "127.0.0.1:${HAPI_PORT:-3006}:3006"
+    volumes:
+      - hapi-data:/data
+    networks: [hapi-web, svc-1, svc-2, svc-3, svc-lo]
 
   # FastJev decision server for C1 (T-005, ADR-004/023). Raises only under --profile jev.
   # GPU 0 is the RTX 2070 (5070 Ti stays free); model checkpoints live in the named volume,
@@ -543,15 +523,15 @@ volumes:
   hive-work:
   gateway-db:
   jev-hf:
+  hapi-data:
   workplaces-1:
   workplaces-2:
   workplaces-3:
 
 networks:
   gateway-internal: {}
-  # the console-spike candidates' own net (T-041 R1-3): egress for their npm install,
-  # separated from the project's internal traffic
-  console-spike: {}
+  # carries only the hub's loopback port publish (see hapi-hub above)
+  hapi-web: {}
   # body-N + node-N of one slot: the mind's MCP and runner endpoints, nothing else
   slot-1: {internal: true}
   slot-2: {internal: true}
