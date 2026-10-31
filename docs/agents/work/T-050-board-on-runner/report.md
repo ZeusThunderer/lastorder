@@ -56,7 +56,7 @@ $ uv run pytest tests/test_node_boardlink.py tests/test_mcp_body.py tests/test_e
 - нет
 
 ## Раунд 2 · 2026-10-31
-Коммиты: <sha фикс-коммита ниже>
+Коммиты: f0a619f
 
 ### Ответ на ревью
 - R1-1 · fixed: пустой снимок подтверждается — `poll_once` при `snapshot: true` и
