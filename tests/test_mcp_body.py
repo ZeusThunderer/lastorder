@@ -618,3 +618,46 @@ def test_runner_commands_need_the_runner_key() -> None:
         )
     finally:
         s.close()
+
+
+def test_runner_event_boards_the_queue_behind_the_runner_key() -> None:
+    """T-050: the board bridge's batch — one `board` event into the queue; the key
+    gates it, and the sister reads the lines out of `wait_events` like any event."""
+    s = Stack(runner_key="rk-mind-one")
+    try:
+        lines = ["[board #17 task · from operator · to net · open] Build a shelter."]
+        assert s.runner("POST", "/runner/event", {"type": "board", "lines": lines}).status_code == 401
+        assert (
+            s.runner("POST", "/runner/event", {"type": "board", "lines": lines}, key="rk-wrong").status_code
+            == 401
+        )
+        response = s.runner(
+            "POST", "/runner/event", {"type": "board", "lines": lines}, key="rk-mind-one"
+        )
+        assert response.status_code == 200 and response.json()["lines"] == 1
+        event = parse(s.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0})))
+        assert event["type"] == "board" and event["lines"] == lines
+    finally:
+        s.close()
+
+
+def test_runner_event_refuses_everything_but_a_board_batch() -> None:
+    """The runner cannot hand the sister a death, a chat line or a shapeless body."""
+    s = Stack(runner_key="rk-mind-one")
+    try:
+        bad_bodies = [
+            {"type": "game.death", "text": "x"},  # no other event type rides this route
+            {"type": "chat.line", "lines": ["x"]},
+            {"type": "board", "lines": []},
+            {"type": "board", "lines": "x"},
+            {"type": "board", "lines": [1, 2]},
+            {"type": "board"},
+            {},
+            "not-a-dict",
+        ]
+        for body in bad_bodies:
+            assert (
+                s.runner("POST", "/runner/event", body, key="rk-mind-one").status_code == 400
+            ), body
+    finally:
+        s.close()
