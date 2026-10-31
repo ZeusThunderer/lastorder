@@ -24,3 +24,29 @@
 
 ### Чек-лист проекта
 Сырые id: `speaker` и текст проходят `scrub`, служебные строки отсекаются до разбора — без замечаний. Путь смерти и аварийное завещание не тронуты. Единственный писатель базы и уровни LLM не затронуты. Замечание только R1-1: метка источника — граница доверия, ошибка в ней приписывает реплику не тому говорящему.
+
+## Раунд 2 · 2026-10-31 · вердикт: changes · headless
+Проверено: `git diff main...z/T-051-operator-in-game-chat` @ f3773ed
+
+### Проверки (прогнаны надзором)
+- `bash dev/check.sh` — pytest: ok · 834 passed, 3 skipped; check.py: ok
+- `uv run pytest tests/test_executor.py tests/test_mcp_body.py tests/test_perception_chat.py tests/test_perception.py -q` — 111 passed
+- Ручная проба `Rig().x.chat_entry(...)`:
+  - без `OPERATOR_MC_NAME`: `<operator> stop mining, go home` → `{'from': 'operator', …}`;
+  - `operator_name='ZeusThunderer'`: `<operator> x` → `{'from': 'operator', …}`.
+
+### Критерии приёмки
+- [ ] Метку ставит среда, текст её не подделывает — текст не подделывает, но подделывает ник, см. R2-1.
+- [ ] Пусто → меток нет — нарушается через ник `operator` (R2-1). Имя слота — закрыто (R1-1 fixed: `_SLOT_NAME_RE`, регистр, тест `test_operator_name_of_any_slot_is_refused`).
+- [x] Накопление до потолка, пометка о сброшенных.
+- [x] `observe` — та же метка через `chat_entry`.
+- [x] Детектор смерти и фильтр сырых id — путь не тронут, тесты зелёные.
+- [x] Инструкции — R1-3 fixed.
+- [x] `docker-topology.md`.
+- [x] `bash dev/check.sh` — ok.
+
+### Находки
+- R2-1 · major · `runtime/mind/executor.py:444` · Метка `operator` и имя игрока делят одно поле `from`. Игрок с ником `operator` (валидное имя Minecraft) получает `from: operator` при пустой переменной и при любом другом `OPERATOR_MC_NAME`. Ник `Operator` даёт `from: Operator`, и сестра отличает его от оператора только по регистру. Офлайн-режим и так позволяет войти под именем оператора, но этот путь ломает гарантию «пусто → меток нет» и обходит имя, выбранное оператором. · Метка не должна совпадать ни с одним возможным именем игрока. Варианты: отдельное поле (`{"from": "ZeusThunderer", "operator": true, …}`) или `from`, который не может быть ником: `operator` только для оператора, а ник, равный `operator` без учёта регистра, оборачивается (например, `player:operator`). Выбор за исполнителем. Формат обновить в отчёте, docstring `wait_events`, AGENTS.md/SESSION_PROMPT и `docker-topology.md`. Тесты: без переменной `<operator> hi` и `<OPERATOR> hi` — без метки оператора; с `OPERATOR_MC_NAME=ZeusThunderer` — то же.
+
+### Чек-лист проекта
+Сырые id: имя и текст проходят `scrub`, служебные строки отсекаются до разбора — без замечаний. Путь смерти и аварийное завещание не тронуты (`_clean_text` и `recent_chat` для детектора прежние). Единственный писатель базы и уровни LLM не затронуты. Граница доверия метки — R2-1.
