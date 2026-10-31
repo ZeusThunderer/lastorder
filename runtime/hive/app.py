@@ -617,9 +617,12 @@ def create_app(
         return str(max(b.serial for b in live))
 
     def _board_actor(request: Request) -> str:
-        """Operator or agent identity for the routes both may read."""
+        """Operator or agent identity for the routes both may read. The page's
+        browser identifies with its Basic pair the same way as everywhere else."""
         if request.headers.get("x-operator-key", "").strip():
             _require_operator(request)
+            return OPERATOR
+        if _basic_password_ok(request):
             return OPERATOR
         return _agent_actor(request)
 

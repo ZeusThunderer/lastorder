@@ -79,8 +79,10 @@ async function doAction(path, body) {
   try {
     await api(path, "POST", body);
     await refresh(); // the SSE event will call it again; better twice than late
+    return true;
   } catch (error) {
     toast(String(error.message || error));
+    return false; // the caller keeps the form with its typed text
   }
 }
 
@@ -104,10 +106,28 @@ async function refresh() {
     ]);
     state.entries = entries;
     state.alive = alive;
+    await loadThreads(visibleEntries());
     render();
   } catch (error) {
     toast(String(error.message || error));
   }
+}
+
+// TASKBOARD.md section 9: the listing carries no threads — only the one-entry call
+// does. The page fetches the thread of every visible entry in parallel (loopback,
+// one debounced burst per update); a `with_thread` param on the list would spare
+// the round-trips, but runtime/hive/board.py is outside this task's scope.
+async function loadThreads(entries) {
+  const threads = await Promise.all(entries.map((entry) =>
+    api("/board/entries/" + entry.id, "GET")
+      .then((full) => full.thread || [])
+      .catch(() => [])
+  ));
+  entries.forEach((entry, i) => { entry.thread = threads[i]; });
+}
+
+function visibleEntries() {
+  return state.entries.filter((entry) => !state.filter || entry.to === state.filter);
 }
 
 let refreshTimer = null;
@@ -158,9 +178,9 @@ function render() {
   }
   buildFilter();
   buildAddressees();
+  const visible = visibleEntries();
   const columns = { task: [], request: [], info: [] };
-  for (const entry of state.entries) {
-    if (state.filter && entry.to !== state.filter) continue;
+  for (const entry of visible) {
     if (entry.kind === "task") columns.task.push(entry);
     else if (entry.kind === "request") columns.request.push(entry);
     else columns.info.push(entry);
@@ -220,9 +240,10 @@ function entryCard(entry, openForms) {
     card.append(threadBox(entry.thread));
   }
   // the carried form (an update re-rendered the cards around the operator's typing)
-  const carried = openForms ? openForms.get(entry.id) : null;
-  card.append(actionsRow(entry, carried));
-  if (carried) card.append(carried);
+  // rides along only while its action still exists on the card (review R2-1)
+  const actions = actionsRow(entry, openForms ? openForms.get(entry.id) : null);
+  card.append(actions.row);
+  if (actions.form) card.append(actions.form);
   return card;
 }
 
@@ -267,7 +288,16 @@ function threadBox(thread) {
 
 function actionsRow(entry, carriedForm) {
   const row = el("div", "actions");
-  let openForm = carriedForm || null; // a form carried over a re-render stays open
+
+  const button = (label, cls, opens) => {
+    const node = el("button", cls, label);
+    node.type = "button";
+    node.dataset.opens = opens; // a carried form survives while its action does (R2-1)
+    row.append(node);
+    return node;
+  };
+
+  let openForm = null;
 
   const toggle = (form) => {
     if (openForm) openForm.remove();
@@ -276,19 +306,16 @@ function actionsRow(entry, carriedForm) {
     row.after(form);
   };
 
-  const button = (label, cls, buildForm) => {
-    const node = el("button", cls, label);
-    node.type = "button";
+  const wire = (node, buildForm) =>
     node.addEventListener("click", () => toggle(buildForm()));
-    row.append(node);
-  };
 
   if (entry.kind === "task") {
     if (["open", "taken", "needs_input"].includes(entry.status)) {
-      button("отменить", "danger", () => transitionForm(entry, "canceled", "отменить задачу"));
+      wire(button("отменить", "danger", "canceled"),
+        () => transitionForm(entry, "canceled", "отменить задачу"));
     }
     if (entry.status === "needs_input") {
-      button("ответить", "primary",
+      wire(button("ответить", "primary", "taken"),
         () => transitionForm(entry, "taken", "ответить и вернуть во взятые", { needText: true }));
     }
   }
@@ -296,17 +323,20 @@ function actionsRow(entry, carriedForm) {
     const allowed = (entry.request && entry.request.allowed)
       || ["approve", "deny", "respond", "edit"];
     if (allowed.includes("approve")) {
-      button("одобрить", "primary", () => transitionForm(entry, "approved", "одобрить"));
+      wire(button("одобрить", "primary", "approved"),
+        () => transitionForm(entry, "approved", "одобрить"));
     }
     if (allowed.includes("edit")) {
-      button("правка и одобрить", "primary",
+      wire(button("правка и одобрить", "primary", "approved"),
         () => transitionForm(entry, "approved", "одобрить с правкой", { editArgs: true }));
     }
     if (allowed.includes("deny")) {
-      button("отклонить", "danger", () => transitionForm(entry, "denied", "отклонить", { needText: true }));
+      wire(button("отклонить", "danger", "denied"),
+        () => transitionForm(entry, "denied", "отклонить", { needText: true }));
     }
     if (allowed.includes("respond")) {
-      button("ответить", null, () => transitionForm(entry, "answered", "ответить", { needText: true }));
+      wire(button("ответить", null, "answered"),
+        () => transitionForm(entry, "answered", "ответить", { needText: true }));
     }
   }
   if (entry.kind === "alarm" && entry.status === "open") {
@@ -317,8 +347,13 @@ function actionsRow(entry, carriedForm) {
     });
     row.append(ack);
   }
-  button("реплика", null, () => replyForm(entry));
-  return row;
+  wire(button("реплика", null, "reply"), () => replyForm(entry));
+  // the carried form stays open on the fresh card only if the entry still offers
+  // its move: a status change may have removed the button that opened it (R2-1)
+  if (carriedForm && row.querySelector(`[data-opens="${carriedForm.dataset.opens}"]`)) {
+    openForm = carriedForm;
+  }
+  return { row, form: openForm };
 }
 
 // A transition form: optional or required text, optionally the corrected args
@@ -326,6 +361,7 @@ function actionsRow(entry, carriedForm) {
 function transitionForm(entry, toStatus, label, options) {
   const opts = options || {};
   const form = el("form", "inline-form");
+  form.dataset.opens = toStatus; // matched against the fresh card's buttons (R2-1)
   const inputs = { text: null, args: {} };
 
   if (opts.editArgs && entry.request) {
@@ -364,13 +400,16 @@ function transitionForm(entry, toStatus, label, options) {
       body.args = {};
       for (const key of Object.keys(inputs.args)) body.args[key] = inputs.args[key].value;
     }
-    await doAction("/board/entries/" + entry.id + "/transition", body);
+    if (await doAction("/board/entries/" + entry.id + "/transition", body)) {
+      form.remove(); // sent: closed; on a refusal the typed text stays (R2-1)
+    }
   });
   return form;
 }
 
 function replyForm(entry) {
   const form = el("form", "inline-form");
+  form.dataset.opens = "reply"; // the reply button lives on every card (R2-1)
   const area = document.createElement("textarea");
   area.maxLength = 400;
   area.required = true;
@@ -384,7 +423,9 @@ function replyForm(entry) {
   form.append(send, hide);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    await doAction("/board/entries/" + entry.id + "/reply", { text: area.value });
+    if (await doAction("/board/entries/" + entry.id + "/reply", { text: area.value })) {
+      form.remove(); // sent: closed; on a refusal the typed text stays (R2-1)
+    }
   });
   return form;
 }

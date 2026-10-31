@@ -104,6 +104,11 @@ def test_basic_password_opens_the_operator_api(tmp_path: Path) -> None:
     )
     assert posted.status_code == 200, posted.text
     assert posted.json()["from"] == "operator"  # the server stamps it, not the browser
+    # the page's thread loads: the one-entry route under the same Basic pair (R2-1)
+    one = stack.client.get(f"/board/entries/{posted.json()['id']}",
+                           headers=basic("operator", KEY_OP))
+    assert one.status_code == 200, one.text
+    assert one.json()["thread"] == []
     listed = stack.client.get("/board/entries", headers=basic("operator", KEY_OP))
     assert listed.status_code == 200
     # an explicit but wrong X-Operator-Key is a refusal even over a valid Basic pair:
