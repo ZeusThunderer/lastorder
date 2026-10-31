@@ -195,6 +195,7 @@ class Board:
         self._lifecycle = lifecycle
         self._log = log
         self._clock = clock
+        self._grant_hook: Callable[[int, dict, str, str | None], None] | None = None
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(
             self._path, check_same_thread=False, timeout=10.0, isolation_level=None
@@ -208,6 +209,13 @@ class Board:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+    def set_grant_hook(self, hook: Callable[[int, dict, str, str | None], None]) -> None:
+        """The grant vault behind approvals (T-046, TASKBOARD.md 5.3): called after
+        the board has committed an approved request with a `grant` payload. Its
+        failure never rolls the approval back — no record, no access; the event
+        carries the exception type alone, never any secret that rode the call."""
+        self._grant_hook = hook
 
     # --- schema --------------------------------------------------------------------------
 
@@ -610,7 +618,8 @@ class Board:
     # --- transitions (sections 3.2, 5.2) -----------------------------------------------------
 
     def transition(
-        self, actor: str, entry_id: int, to_status: Any, text: Any = "", args: Any = None
+        self, actor: str, entry_id: int, to_status: Any, text: Any = "", args: Any = None,
+        secret: Any = None,
     ) -> dict:
         if not isinstance(to_status, str):
             raise BoardError(422, "validation", "to_status must be a string")
@@ -651,6 +660,25 @@ class Board:
                 self._check_text(text, REPLY_MAX, "text")
             if kind == "request":
                 self._check_allowed_answer(row, to_status, args)
+            # the grant approval of TASKBOARD.md 5.3 (T-046): the operator's secret
+            # value rides this call to the vault alone, never into logs or threads
+            grant = json.loads(row["grant_json"]) if row["grant_json"] else None
+            if grant is not None:
+                if to_status == "approved":
+                    if grant.get("kind") == "secret" and (
+                        not isinstance(secret, str) or not secret.strip()
+                    ):
+                        raise BoardError(
+                            422, "validation", "approving a secret grant needs the secret value"
+                        )
+                    if grant.get("kind") != "secret" and secret:
+                        raise BoardError(
+                            422, "validation", "the secret field fits a secret grant alone"
+                        )
+                elif secret:
+                    raise BoardError(
+                        422, "validation", "the secret field fits an approval alone"
+                    )
             # approve-with-edit (5.2): the corrected args are what the agent receives
             new_request = None
             if kind == "request" and to_status == "approved" and args is not None:
@@ -697,7 +725,18 @@ class Board:
                 after["request"] = json.loads(new_request)
             op = "claim" if (kind, status, to_status) == ("task", "open", "taken") else "transition"
             self._log_row(cur, actor, entry_id, op, before, after, text_len=len(text) or None)
-            return self._entry(cur, entry_id)
+            result = self._entry(cur, entry_id)
+        # Outside the transaction, still under the lock: the grant vault runs after
+        # the approval is durable (TASKBOARD.md 5.3). A failing hook leaves the entry
+        # approved with no grant record — exactly the no-access state the spec wants.
+        if grant is not None and to_status == "approved" and self._grant_hook is not None:
+            try:
+                self._grant_hook(entry_id, grant, actor, secret)
+            except Exception as exc:  # the board keeps its answer; access stays closed
+                self._log.event(
+                    "grants.hook_failed", {"entry": entry_id, "error": type(exc).__name__}
+                )
+        return result
 
     @staticmethod
     def _allowed_answers(row: sqlite3.Row) -> list[str]:

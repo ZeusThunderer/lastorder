@@ -2,7 +2,7 @@
 id: T-046
 title: Гранты — запрос выхода наружу и секрета, одобрение оператора, хранилище hive, egress-прокси
 stage: I
-status: ready
+status: accepted
 criticality: critical
 after: [T-042, T-049]
 branch: z/T-046-grants
@@ -80,3 +80,5 @@ bash dev/check.sh
 
 ## Заметки надзора
 - 2026-10-26: одобрение — на странице доски (ADR-042), а не в консоли.
+- 2026-10-31: принят вариант Б. Для T-047: `HIVE_TOOL_KEY` не класть в контейнер `last-order`
+  (review R1-5).
