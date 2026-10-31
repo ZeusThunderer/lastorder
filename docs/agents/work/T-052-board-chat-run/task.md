@@ -2,7 +2,7 @@
 id: T-052
 title: Короткий прогон на стенде — задача с доски и реплика оператора в чате у живой сестры
 stage: I
-status: ready
+status: in_progress
 criticality: normal
 after: [T-050, T-051]
 branch: z/T-052-board-chat-run
