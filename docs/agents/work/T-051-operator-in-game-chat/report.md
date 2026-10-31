@@ -69,7 +69,7 @@ check.py: ok · Every workplace is intact: files present, links resolve, boxes p
 ```
 
 ## Раунд 3 · 2026-10-31
-Коммиты: <фикс-коммит>
+Коммиты: 4ba6941
 
 ### Ответ на ревью
 - R2-1 (major) · fixed: метка переехала в отдельное поле — итоговый формат записи
