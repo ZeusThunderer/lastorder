@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Доска сети · Last Order</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/board/board.css">
+</head>
+<body>
+<header class="top">
+  <h1>Доска сети</h1>
+  <span id="conn" class="conn" title="живое обновление">…</span>
+  <label class="filter-label">адресат:
+    <select id="filter"></select>
+  </label>
+  <form id="new-entry" class="new-entry">
+    <select id="new-kind">
+      <option value="task">задача</option>
+      <option value="message">сообщение</option>
+    </select>
+    <select id="new-to"></select>
+    <textarea id="new-text" maxlength="800" placeholder="текст (до 800 символов)" required></textarea>
+    <button type="submit">отправить</button>
+  </form>
+</header>
+<main class="columns">
+  <section class="column" id="col-task">
+    <h2>Задачи</h2>
+    <div class="cards"></div>
+  </section>
+  <section class="column" id="col-request">
+    <h2>Запросы</h2>
+    <div class="cards"></div>
+  </section>
+  <section class="column" id="col-info">
+    <h2>Тревоги и сообщения</h2>
+    <div class="cards"></div>
+  </section>
+</main>
+<div id="toast" class="toast" hidden></div>
+<script src="/board/board.js" defer></script>
+</body>
+</html>
