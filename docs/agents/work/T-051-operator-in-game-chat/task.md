@@ -2,7 +2,7 @@
 id: T-051
 title: Оператор в игровом чате — сестра узнаёт его реплики, чат не теряет строк
 stage: I
-status: ready
+status: accepted
 criticality: critical
 after: [T-050]
 branch: z/T-051-operator-in-game-chat

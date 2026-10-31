@@ -67,3 +67,30 @@ def test_body_flags_service_lines_with_the_shared_implementation():
     from runtime.game import is_service_line as body_is_service_line
 
     assert body_is_service_line is is_service_line
+
+
+# --- the speaker of a chat line (T-051) -----------------------------------------------------
+
+
+def test_parse_speaker_splits_vanilla_player_lines():
+    from runtime.perception.chat import parse_speaker
+
+    assert parse_speaker("<Steve> дай oak log") == ("Steve", "дай oak log")
+    assert parse_speaker("<ZeusThunderer>hi") == ("ZeusThunderer", "hi")  # the space after `>` is optional
+    assert parse_speaker("<LastOrder01> привет") == ("LastOrder01", "привет")
+
+
+def test_parse_speaker_refuses_non_player_lines():
+    from runtime.perception.chat import parse_speaker
+
+    assert parse_speaker("LastOrder01 was slain by Zombie") is None  # vanilla system
+    assert parse_speaker("<A B> hi") is None  # a space is not a name character
+    assert parse_speaker("<" + "x" * 17 + "> hi") is None  # over the 16-char name cap
+    assert parse_speaker("") is None
+
+
+def test_parse_speaker_takes_the_first_prefix_only():
+    # a quoted `<Name>` inside the text stays text — the mark belongs to the prefix
+    from runtime.perception.chat import parse_speaker
+
+    assert parse_speaker("<Bob> <ZeusThunderer> hi") == ("Bob", "<ZeusThunderer> hi")

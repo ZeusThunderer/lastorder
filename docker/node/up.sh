@@ -29,6 +29,8 @@ lift() { # lift <var> [file key]: env wins, then the root .env
 # the Z.ai token sits under ZAI_API_KEY in the root .env (T-024 naming); ZCODE_API_KEY
 # stays the canonical env override, like the spike overlay used it
 lift ZCODE_API_KEY ZAI_API_KEY
+# the operator's game name (T-051) rides the same lift: a stand config value, not a key
+lift OPERATOR_MC_NAME
 for key in GATEWAY_KEY_NODE_1 GATEWAY_KEY_NODE_2 GATEWAY_KEY_NODE_3 \
            HIVE_NODE_KEY_1 HIVE_NODE_KEY_2 HIVE_NODE_KEY_3 \
            HIVE_RUNNER_KEY_1 HIVE_RUNNER_KEY_2 HIVE_RUNNER_KEY_3 \

@@ -21,6 +21,9 @@ SERVICE_PREFIXES: tuple[str, ...] = ("[Alto Clef]", "[Tungsten]", "WARNING:")
 
 _COLOR_CODE = re.compile("§.")
 
+# Vanilla player speech is `<Name> text`; a name is [A-Za-z0-9_], 1..16 chars.
+_SPEAKER_RE = re.compile(r"^<([A-Za-z0-9_]{1,16})>\s?(.*)$")
+
 
 def strip_formatting(text: str) -> str:
     """Drop Minecraft `§x` color/format codes; the glyphs stay."""
@@ -31,6 +34,16 @@ def is_service_line(text: str) -> bool:
     """True for uc's own bookkeeping lines. Runs after strip_formatting, before any prompt."""
     stripped = strip_formatting(text).lstrip()
     return stripped.startswith(SERVICE_PREFIXES)
+
+
+def parse_speaker(line: str) -> tuple[str, str] | None:
+    """Split a vanilla chat line into (player name, said text); None for anything
+    else (system lines). Runs after `strip_formatting` — the `<Name>` prefix is
+    the server's, so the caller marks the speaker from it, never from the text."""
+    match = _SPEAKER_RE.match(str(line or "").strip())
+    if match is None:
+        return None
+    return match.group(1), match.group(2)
 
 
 def clean_chat(lines: Iterable[str]) -> list[str]:
