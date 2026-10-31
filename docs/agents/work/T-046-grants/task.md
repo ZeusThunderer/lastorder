@@ -2,7 +2,7 @@
 id: T-046
 title: Гранты — запрос выхода наружу и секрета, одобрение оператора, хранилище hive, egress-прокси
 stage: I
-status: ready
+status: in_progress
 criticality: critical
 after: [T-042, T-049]
 branch: z/T-046-grants
