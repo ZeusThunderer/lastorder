@@ -50,7 +50,7 @@ $ uv run pytest tests/test_executor.py tests/test_mcp_body.py tests/test_percept
 - нет
 
 ## Раунд 2 · 2026-10-31
-Коммиты: <фикс-коммит>
+Коммиты: d0016f6
 
 ### Ответ на ревью
 - R1 (major) · fixed: отказ теперь на имя ЛЮБОГО слота — `_SLOT_NAME_RE` (^lastorder\d{2}$,
