@@ -503,7 +503,7 @@ class NodeRunner:
         return self.cfg.failover, self._adapters[self.cfg.failover]
 
     def _adapter_ready(self, name: str) -> bool:
-        if name == "zcode":
+        if name in ("zcode", "pi"):
             return bool(self.cfg.zai_key)
         if name == "opencode":
             return bool(self.cfg.gateway_url and self.cfg.gateway_key)
