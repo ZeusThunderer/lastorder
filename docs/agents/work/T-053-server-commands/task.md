@@ -4,7 +4,7 @@ title: Команды сервера сестре — команды игрок�
 stage: I
 status: ready
 criticality: critical
-after: [T-052]
+after: [T-052, T-059]
 branch: z/T-053-server-commands
 created: 2026-10-31
 ---
@@ -76,3 +76,4 @@ uv run pytest tests -k "server_command or login"
 - Прогон на внешнем сервере — в T-058, здесь только `mc-server`.
 
 ## Заметки надзора
+2026-10-31: `after` дополнен T-059 — оператор просит перевести Last Order на Z.ai раньше.

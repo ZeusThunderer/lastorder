@@ -64,3 +64,4 @@
 | T-058 | Прогон стенда после исправлений — команда сервера, старт слота, мост, размер запроса | I | ready | normal | z/T-058-stand-run-fixes |
 | T-059 | Last Order на Z.ai Coding Plan — харнесс zcode, как у сестёр, запасной OpenCode через шлюз | I | ready | critical | z/T-059-lo-on-zai |
 | T-060 | Классификатор безопасности — второе мнение о запросах infra Last Order на локальной модели | I | ready | normal | z/T-060-safety-classifier |
+| T-061 | Скин сестёр — тела LastOrder01..03 в скине sister.png на своём и внешнем сервере | I | ready | normal | z/T-061-sister-skin |

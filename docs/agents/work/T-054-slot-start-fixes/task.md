@@ -4,7 +4,7 @@ title: Старт слота — нет смерти от устаревшего
 stage: I
 status: ready
 criticality: critical
-after: []
+after: [T-059]
 branch: z/T-054-slot-start-fixes
 created: 2026-10-31
 ---
@@ -58,3 +58,4 @@ uv run pytest tests -k "death or wait_events"
 - Прогон на стенде — в T-058.
 
 ## Заметки надзора
+2026-10-31: `after` дополнен T-059 — оператор просит перевести Last Order на Z.ai раньше.

@@ -4,7 +4,7 @@ title: Мост py4j — порядок подъёма тела и mind, мяг�
 stage: I
 status: ready
 criticality: normal
-after: []
+after: [T-059]
 branch: z/T-055-py4j-bridge
 created: 2026-10-31
 ---
@@ -71,3 +71,4 @@ bash dev/slot_restart.sh 1 --dry-run
 - Если понадобится менять `network_mode` или сети compose — это критичная зона, вопрос надзору.
 
 ## Заметки надзора
+2026-10-31: `after` дополнен T-059 — оператор просит перевести Last Order на Z.ai раньше.
