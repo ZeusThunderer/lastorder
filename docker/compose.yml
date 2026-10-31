@@ -326,11 +326,15 @@ services:
   # Last Order's own sandbox (T-030, ADR-036): the admin alarm plus the short harness
   # sessions of the network's administrator. The node image carries both harnesses (the
   # mind image of the hive does not); the sandbox reaches ONLY hive and llm-gateway over
-  # the internal svc-lo network (plan review P1-1): no mc-server and its RCON, no node
-  # slots, no way out. The knowledge volume is read-only here — the base is written only
-  # by the hive (ADR-017), through the MCP tools the session gets. The node entrypoint
-  # renders the gateway key into the opencode auth store of the agent uid and scrubs it
-  # from the environment; no provider key ever enters this container.
+  # the internal svc-lo network (plan review P1-1) plus, since T-059, api.z.ai through
+  # zai-egress: the primary harness is zcode on the Z.ai subscription — the ADR-033
+  # conscious exception the sisters ride too; opencode through the gateway stays as the
+  # quota failover. No mc-server and its RCON, no node slots, no other way out. The
+  # knowledge volume is read-only here — the base is written only by the hive (ADR-017),
+  # through the MCP tools the session gets. The node entrypoint renders both
+  # credentials — the gateway key into the opencode auth store, the Z.ai token into the
+  # zcode provider config — and scrubs them from the environment; no other provider key
+  # ever enters this container.
   last-order:
     build:
       context: ..
@@ -356,7 +360,10 @@ services:
       HIVE_URL: http://hive:8000
       GATEWAY_URL: http://llm-gateway:4000
       HIVE_MCP_LO_KEY: "${HIVE_MCP_LO_KEY:-}"
-      ADMIN_MODEL: "${LO_MODEL:-z-ai/glm-5.3-flash}"   # the smart tier through the gateway
+      ADMIN_MODEL: "${LO_MODEL:-z-ai/glm-5.3-flash}"   # the failover tier through the gateway
+      ADMIN_HARNESS: "${ADMIN_HARNESS:-zcode}"          # the primary: Z.ai Coding Plan (T-059)
+      ADMIN_HARNESS_FAILOVER: "${ADMIN_HARNESS_FAILOVER:-opencode}"
+      ADMIN_ZCODE_MODEL: "${ADMIN_ZCODE_MODEL:-}"       # empty -> ZCODE_MODEL -> GLM-5.3-Flash
       ADMIN_EVERY_MIN: "${ADMIN_EVERY_MIN:-10}"
       ADMIN_PROPOSALS_BATCH: "${ADMIN_PROPOSALS_BATCH:-3}"
       ADMIN_POLL_S: "${ADMIN_POLL_S:-5}"
@@ -364,6 +371,9 @@ services:
       ADMIN_SESSION_MIN_GAP_S: "${ADMIN_SESSION_MIN_GAP_S:-30}"
       NAME_PRESET: "${NAME_PRESET:-lab}"
       GATEWAY_NODE_KEY: "${GATEWAY_KEY_LO:-}"   # the node entrypoint renders it into opencode auth
+      ZAI_API_KEY: "${ZCODE_API_KEY:-}"         # ditto: zcode provider + root-only tmpfs copy
+      ZAI_KEY_FILE: /run/node/secrets/zai_api_key
+      ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"   # the provider render's model (entrypoint)
       SISTER_UID: "1001"
       SISTER_GID: "1001"
     command: ["python", "-m", "runtime.hive.admin"]
@@ -500,9 +510,11 @@ services:
     restart: on-failure
 
   # The only way out of a node sandbox (T-027 plan review P1-3): a TLS passthrough with an
-  # SNI allowlist of exactly api.z.ai. In svc-N it carries the network alias `api.z.ai`, so
-  # the zcode harness talks to the official base URL and verifies the real certificate; no
-  # proxy env, no base-URL override. Everything else (internet, other hosts) is refused.
+  # SNI allowlist of exactly api.z.ai. In svc-N and svc-lo it carries the network alias
+  # `api.z.ai`, so the zcode harness talks to the official base URL and verifies the real
+  # certificate; no proxy env, no base-URL override. Everything else (internet, other
+  # hosts) is refused. svc-lo since T-059: Last Order's primary harness rides the same
+  # subscription route as the sisters.
   zai-egress:
     image: nginx:1.27-alpine
     volumes:
@@ -514,6 +526,8 @@ services:
       svc-2:
         aliases: ["api.z.ai"]
       svc-3:
+        aliases: ["api.z.ai"]
+      svc-lo:
         aliases: ["api.z.ai"]
     restart: on-failure
 
@@ -564,8 +578,9 @@ networks:
   svc-1: {internal: true}
   svc-2: {internal: true}
   svc-3: {internal: true}
-  # last-order + hive + llm-gateway only (T-030 review P1-1): the administrator's
-  # bash has no route to mc-server/RCON, the node slots or the internet
+  # last-order + hive + llm-gateway + zai-egress (T-030 review P1-1; zai-egress since
+  # T-059): the administrator's bash has no route to mc-server/RCON or the node slots,
+  # and api.z.ai through the SNI-allowlisted passthrough is its only way out
   svc-lo: {internal: true}
   # the only network with a route out: zai-egress alone sits on it
   egress-out: {}

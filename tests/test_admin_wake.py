@@ -177,8 +177,8 @@ def operator_write(path: Path, text: str) -> None:
     os.chmod(path, 0o444)
 
 
-def boot(tmp_path: Path, *, clock=None, recorder=None):
-    cfg = make_cfg(tmp_path)
+def boot(tmp_path: Path, *, clock=None, recorder=None, **over):
+    cfg = make_cfg(tmp_path, **over)
     clock = clock or FakeClock()
     recorder = recorder or Recorder()
     alarm = make_alarm(cfg, recorder, clock, tmp_path)
@@ -304,7 +304,9 @@ def test_summary_rides_the_prompt(tmp_path: Path) -> None:
     )
     operator_write(alarm.cfg.workplace / "INBOX.md", "\nпроверь летопись\n")
     alarm.run_once()
-    prompt = recorder.argv[0][-1]
+    argv = recorder.argv[0]
+    # zcode carries the prompt after -p, flags follow it; opencode puts it last
+    prompt = argv[argv.index("-p") + 1] if argv[0] == "zcode" else argv[-1]
     assert "Wake reasons" in prompt
     assert "0012" in prompt and "wills filed" in prompt
     assert "Pending proposals: 3" in prompt
@@ -331,7 +333,9 @@ def test_session_timeout_kills_the_harness(tmp_path: Path) -> None:
 
 
 def test_spawn_env_is_fresh_and_cwd_is_the_workplace(tmp_path: Path) -> None:
-    cfg, clock, recorder, alarm = boot(tmp_path)
+    # the failover harness carries the key in argv (the provider prefix) — this test
+    # pins that shape, so it asks for opencode explicitly (the default is zcode, T-059)
+    cfg, clock, recorder, alarm = boot(tmp_path, harness="opencode", failover="zcode")
     add_will(tmp_path / "knowledge", 6)
     alarm.run_once()
     env = recorder.envs[0]
