@@ -2,7 +2,7 @@
 id: T-050
 title: Доска у сестёр на текущем раннере — события доски будят wait_events, инструкции по разделу 13
 stage: I
-status: review
+status: changes
 criticality: critical
 after: []
 branch: z/T-050-board-on-runner
