@@ -65,6 +65,7 @@ from runtime.hive.client import (
     traits_from_json,
     vote_from_json,
 )
+from runtime.hive.grants import GrantError, Grants
 from runtime.hive.lifecycle import HiveLog, Lifecycle, LifecycleError, TTL_SCAN_S
 from runtime.hive.mcp import HiveMcp, build_mcp, parse_node_keys
 from runtime.hive.proposals import CommonLayers, ProposalBook
@@ -259,6 +260,7 @@ def create_app(
     runner_keys: dict[str, str] | None = None,
     operator_key: str | None = None,
     stream_poll_s: float | None = None,
+    tool_key: str | None = None,
 ) -> FastAPI:
     clock = clock or (lambda: datetime.now(timezone.utc))
     run_dir = Path(run_dir if run_dir is not None else (env("RUN_DIR") or "run"))
@@ -272,7 +274,18 @@ def create_app(
     service = HiveService(store, lifecycle, CommsBook(lifecycle, log=log, clock=clock))
     board = Board(
         run_dir / "board.sqlite", lifecycle=lifecycle, log=log, clock=clock
-    )
+        )
+    grants = Grants(run_dir / "grants.sqlite", log=log, clock=clock)
+    # The approval hook of TASKBOARD.md 5.3 (T-046): the vault opens only through the
+    # operator's board approval, never through the board status alone. A failure is
+    # the board's `grants.hook_failed` event — the entry stays approved, access closed.
+    def _grant_hook(entry_id: int, grant: dict, actor: str, secret: str | None) -> None:
+        grants.approve(
+            entry_id=entry_id, kind=grant["kind"], what=grant["what"],
+            actor=actor, secret=secret,
+        )
+
+    board.set_grant_hook(_grant_hook)
     # TASKBOARD.md 4.3: every closing point of a node frees its board hold in one
     # transaction; the hook itself never breaks the death path (lifecycle logs the miss).
     lifecycle.set_death_hook(board.on_death)
@@ -297,6 +310,7 @@ def create_app(
             )
     last_order_key = lo_key if lo_key is not None else (env("HIVE_MCP_LO_KEY") or "")
     operator_secret = operator_key if operator_key is not None else (env("HIVE_OPERATOR_KEY") or "")
+    tool_secret = tool_key if tool_key is not None else (env("HIVE_TOOL_KEY") or "")
     stream_poll = float(stream_poll_s if stream_poll_s is not None else (env("BOARD_STREAM_POLL_S") or 1.0))
     now = lambda: clock().isoformat()  # noqa: E731 - one clock for every layer write
     proposals = ProposalBook(store, now=now)
@@ -315,6 +329,7 @@ def create_app(
             now=now,
             runner_keys=runner_keys,
             board=board,
+            grants=grants,
         )
     )
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the
@@ -362,6 +377,7 @@ def create_app(
     app.state.hive = service
     app.state.log = log
     app.state.board = board
+    app.state.grants = grants
 
     def envelope(status: int, kind: str, message: str) -> JSONResponse:
         return JSONResponse(
@@ -382,6 +398,10 @@ def create_app(
 
     @app.exception_handler(BoardError)  # the board's refusals carry their own mapping
     async def _board_error(_: Any, exc: BoardError) -> JSONResponse:
+        return envelope(exc.status, exc.kind, exc.message)
+
+    @app.exception_handler(GrantError)  # the grant vault's refusals, same shape
+    async def _grant_error(_: Any, exc: GrantError) -> JSONResponse:
         return envelope(exc.status, exc.kind, exc.message)
 
     @app.exception_handler(StoreError)  # subclasses resolved by isinstance below
@@ -668,9 +688,11 @@ def create_app(
     def board_transition(request: Request, entry_id: int, body: dict) -> dict:
         _require_operator(request)
         _no_from_in(body)
+        if "secret" in body and not isinstance(body.get("secret"), str):
+            raise ApiError(422, "validation", "secret must be a string")
         return board.transition(
             OPERATOR, entry_id, body.get("to_status"), text=body.get("text", ""),
-            args=body.get("args"),
+            args=body.get("args"), secret=body.get("secret"),
         )
 
     @app.post("/board/entries/{entry_id}/reply")
@@ -717,6 +739,43 @@ def create_app(
     @app.post("/board/ack")
     def board_ack(request: Request, body: dict) -> None:
         board.ack(_agent_actor(request), body.get("seq"))
+
+    # --- the grant vault (ADR-041, TASKBOARD.md 5.3; T-046) ------------------------------
+    # The egress proxy and the tool-process executor identify with HIVE_TOOL_KEY
+    # (X-Tool-Key): the vault tells the proxy which domains are open and hands a
+    # secret to the tool process alone. The operator revokes with the operator key;
+    # the board entry keeps its approved status with a reply (TASKBOARD.md 5.3).
+
+    def _require_tool_key(request: Request) -> None:
+        if not tool_secret:
+            raise ApiError(401, "tool_key", "the grants API needs HIVE_TOOL_KEY configured")
+        sent = request.headers.get("x-tool-key", "").strip()
+        if not sent or not secrets.compare_digest(
+            sent.encode("utf-8"), tool_secret.encode("utf-8")
+        ):
+            raise ApiError(401, "tool_key", "X-Tool-Key does not open the grants API")
+
+    @app.get("/grants/egress")
+    def grants_egress(request: Request) -> dict:
+        _require_tool_key(request)
+        return {"domains": grants.egress_domains()}
+
+    @app.get("/grants/secret")
+    def grants_secret(request: Request, name: str) -> dict:
+        _require_tool_key(request)
+        return {"name": name, "secret": grants.secret_of(name)}
+
+    @app.post("/grants/revoke")
+    def grants_revoke(request: Request, body: dict) -> dict:
+        _require_operator(request)
+        record = grants.revoke(
+            kind=body.get("kind"), what=body.get("what"), actor=OPERATOR
+        )
+        try:  # the board note rides the entry; a missing one never undoes the revoke
+            board.reply(OPERATOR, record["entry_id"], "грант отозван")
+        except BoardError:
+            pass
+        return record
 
     # --- the operator's page (T-049, TASKBOARD.md section 12) ----------------------------
     # Basic-auth with HIVE_OPERATOR_KEY: the browser challenges itself on 401, the

@@ -43,7 +43,8 @@ SISTER_TOOLS = {
     "board", "post", "claim", "update", "reply",  # the task board (T-042, TASKBOARD.md 10)
 }
 LO_TOOLS = {"proposals", "decide", "set_goals", "chronicle",
-            "board", "post", "claim", "update", "reply"}
+            "board", "post", "claim", "update", "reply",
+            "request_grant", "grants"}  # the grant vault (T-046, TASKBOARD.md 5.3)
 
 
 class FakeClock:
