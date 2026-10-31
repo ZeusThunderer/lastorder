@@ -118,3 +118,75 @@ body {
 }
 
 @media (max-width: 1000px) { .columns { grid-template-columns: 1fr; } }
+
+/* --- the login form (T-052) ----------------------------------------------------------- */
+
+.login {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 17, 21, 0.92);
+}
+
+/* the author display:flex outranks the UA's [hidden] rule — without this guard
+   the overlay stays over the board after a successful login (JS sets hidden) */
+.login[hidden] { display: none; }
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(320px, 90vw);
+  padding: 24px;
+  border-radius: 10px;
+  background: #1d2027;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+
+.login-form h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.login-note {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.login-form input {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #3a3f4b;
+  background: #14161b;
+  color: inherit;
+  font: inherit;
+}
+
+.login-form button {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 0;
+  background: #3f6ea5;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.login-error {
+  color: #e08c8c;
+  font-size: 13px;
+}
+
+.logout {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #3a3f4b;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}

@@ -31,12 +31,13 @@ lift() { # lift <var> [file key]: env wins, then the root .env
 lift ZCODE_API_KEY ZAI_API_KEY
 # the operator's game name (T-051) rides the same lift: a stand config value, not a key
 lift OPERATOR_MC_NAME
+lift MC_SERVER_1  # slot 1 on another server: an address, not a secret
 for key in GATEWAY_KEY_NODE_1 GATEWAY_KEY_NODE_2 GATEWAY_KEY_NODE_3 \
            HIVE_NODE_KEY_1 HIVE_NODE_KEY_2 HIVE_NODE_KEY_3 \
            HIVE_RUNNER_KEY_1 HIVE_RUNNER_KEY_2 HIVE_RUNNER_KEY_3 \
            GATEWAY_MASTER_KEY OPENROUTER_API_KEY GATEWAY_DB_PASSWORD \
            GATEWAY_KEY_MIND_1 GATEWAY_KEY_MIND_2 GATEWAY_KEY_MIND_3 GATEWAY_KEY_HIVE \
-           RCON_PASSWORD; do
+           HIVE_OPERATOR_KEY RCON_PASSWORD; do
   lift "$key"
 done
 

@@ -57,12 +57,24 @@ function fmtTime(iso) {
 
 // --- API --------------------------------------------------------------------------------
 
+const KEY_STORAGE = "lo_board_key";
+state.key = sessionStorage.getItem(KEY_STORAGE) || "";
+
 async function api(path, method, body) {
   const options = method === "GET"
     ? {}
     : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) };
+  if (state.key) {
+    options.headers = Object.assign({}, options.headers, { "X-Operator-Key": state.key });
+  }
   const response = await fetch(path, options);
   if (!response.ok) {
+    if (response.status === 401 && state.key) {
+      // the stored key no longer opens the board (changed on the stand): re-login
+      sessionStorage.removeItem(KEY_STORAGE);
+      state.key = "";
+      showLogin("пароль больше не подходит — войди заново");
+    }
     let note = response.status + " " + response.statusText;
     try {
       const data = await response.json();
@@ -494,6 +506,45 @@ function buildAddressees() {
 
 // --- init (the script tag is deferred: the DOM is ready) --------------------------------
 
+// The login form (T-052): the page opens without the browser's Basic dialog; the
+// password is checked by POST /board/login (which sets the SSE-riding cookie) and
+// kept in sessionStorage for the X-Operator-Key header of every fetch.
+function showLogin(note) {
+  document.getElementById("login").hidden = false;
+  const error = document.getElementById("login-error");
+  error.hidden = !note;
+  error.textContent = note || "";
+  document.getElementById("login-password").focus();
+}
+
+async function tryLogin(password) {
+  const response = await fetch("/board/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  if (!response.ok) {
+    let note = "неправильный пароль";
+    try {
+      const data = await response.json();
+      if (data && data.error && data.error.kind === "operator_key" && !/wrong/.test(data.error.message)) {
+        note = data.error.message; // e.g. HIVE_OPERATOR_KEY is not configured
+      }
+    } catch (notJson) {
+      // keep the default note
+    }
+    showLogin(note);
+    return;
+  }
+  sessionStorage.setItem(KEY_STORAGE, password);
+  state.key = password;
+  document.getElementById("login").hidden = true;
+  document.getElementById("logout").hidden = false;
+  refresh();
+  openStream();
+  watchLiveness();
+}
+
 function init() {
   document.getElementById("filter").addEventListener("change", (event) => {
     state.filter = event.target.value;
@@ -515,6 +566,22 @@ function init() {
       toast(String(error.message || error));
     }
   });
+  document.getElementById("login-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const field = document.getElementById("login-password");
+    await tryLogin(field.value);
+    field.value = "";
+  });
+  document.getElementById("logout").addEventListener("click", async () => {
+    sessionStorage.removeItem(KEY_STORAGE);
+    await fetch("/board/logout", { method: "POST" }).catch(() => {});
+    location.reload();
+  });
+  if (!state.key) {
+    showLogin();
+    return;
+  }
+  document.getElementById("logout").hidden = false;
   refresh();
   openStream();
   watchLiveness();

@@ -71,9 +71,11 @@ WSL2, 24 ГБ / 18 CPU. До T-003 (замер E1 и baseline T-003, серве�
 
 - Страница: `http://127.0.0.1:18080/board` (только loopback хоста; номер двигает
   `HIVE_BOARD_PORT` в `.env`; 18080, потому что 8000 на хосте занят — T-042). Вход —
-  Basic-auth: пароль `HIVE_OPERATOR_KEY` из `.env` (`uv run python
-  dev/stand_keys.py init` создаёт), имя пользователя любое. Скрипты и curl могут
-  вместо Basic-пароля слать тот же ключ заголовком `X-Operator-Key`.
+  форма на самой странице (T-052): пароль `HIVE_OPERATOR_KEY` из `.env` (`uv run python
+  dev/stand_keys.py init` создаёт). Cookie несёт sha256 пароля, а не пароль, живёт
+  12 ч, `HttpOnly`, `SameSite=strict`, `Path=/board`; выход — кнопка на странице
+  [проверено: прогон T-052, docs/agents/runs/2026-10-31-board-chat.md]. Basic-auth и
+  заголовок `X-Operator-Key` для скриптов и curl продолжают работать.
 - Статика без сборки — `runtime/hive/static/board.{html,js,css}` (`GET /board`),
   внешних ресурсов и CDN нет; живое обновление — SSE `/board/stream`.
 
@@ -94,6 +96,32 @@ WSL2, 24 ГБ / 18 CPU. До T-003 (замер E1 и baseline T-003, серве�
   репозитория]. Если `OPERATOR_MC_NAME` пуст или совпадает с именем слота
   (`LastOrderNN`), меток нет; совпадение со слотом пишется в лог mind одной строкой
   `operator_name.ignored` [проверено: tests/test_executor.py].
+
+## Доска и чат: рецепт оператора (T-052)
+
+Подъём одной командой (поднимает ключи из `.env`, останавливает брошенные тела слотов
+2–3, ждёт сервер и рождение сестры, печатает её номер):
+```
+bash dev/board_chat_run.sh up
+```
+Слот 1 на другом сервере — до подъёма задать `MC_SERVER_1=адрес:порт` в `.env`
+(слоты 2–3 остаются на локальном `mc-server`; тело ездит по сети default). Полный
+сценарий «подъём → задача → реплика → выдержки» — `bash dev/board_chat_run.sh run`.
+
+- Поставить задачу — `http://127.0.0.1:18080/board`: форма новой записи, тип
+  «задача», адресат — номер живой сестры или `net`; ответ сестры — тред на карточке.
+  Из терминала: `bash dev/board_chat_run.sh post net "текст"` (или `post <номер>
+  "текст"`), снять запись с тредом — `entry <id>`.
+- Поговорить — зайти в игру под `OPERATOR_MC_NAME` (раздел T-051) и писать в чат:
+  реплики доходят сестре с меткой `operator: true`, ответ виден в чате игры от
+  `LastOrderNN`. Без клиента: `bash dev/board_chat_run.sh say "текст"` шлёт tellraw
+  через RCON — строка появляется в чате, но выдаёт ли её uc как строку игрока, не
+  проверено; метка оператора гарантирована живому клиенту.
+- Где смотреть: лог ума — `bash dev/board_chat_run.sh mind 'chat\.line|board'`
+  (пробуждения доски видно как `woke_by: "board"` у `wait_events`), доставки доски —
+  `bridge`, расход — `uv run python dev/gateway_report.py`.
+- Снять стенд: `docker compose -f docker/compose.yml stop` (тома с миром и доской
+  остаются). Чужой поднятый стенд (project `lastorder`) не трогать.
 
 ## Запуск (E1)
 - `docker compose -f docker/compose.yml up -d mc-server body-1`, затем `up mind-1` — проба `tools/body_probe.py`.
