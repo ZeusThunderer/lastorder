@@ -2,7 +2,7 @@
 id: T-049
 title: Страница доски для оператора — задачи, запросы, тревоги, живое обновление
 stage: I
-status: accepted
+status: done
 criticality: normal
 after: [T-042]
 branch: z/T-049-board-page
