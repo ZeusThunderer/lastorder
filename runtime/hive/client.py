@@ -611,3 +611,75 @@ class HiveClient:
             "post", "/board/alarms", payload, buffered=True,
             extra_headers={"X-Node-Key": self._lo_key},
         )
+
+
+class BoardFeedClient:
+    """The board feed reader of one slot's bridge (T-050): `GET /board/feed` and
+    `POST /board/ack` with the node key, plus the node's own `delivery_failing`
+    alarm (TASKBOARD.md sections 9 and 11 — the node key is the only author that
+    may raise it). One attempt per call: the pacing, the retries and the alarm
+    belong to the bridge. Connect errors and 5xx answer `HiveUnavailable`, a 4xx
+    `HiveRejected` — the same taxonomy the bridge's callers already read."""
+
+    def __init__(
+        self,
+        base_url: str = "http://hive:8000",
+        *,
+        node_key: str = "",
+        transport: httpx.Client | None = None,
+        timeout_s: float = 5.0,
+    ):
+        self._http = transport if transport is not None else httpx.Client(
+            base_url=base_url, timeout=timeout_s
+        )
+        self._node_key = node_key
+
+    def close(self) -> None:
+        self._http.close()
+
+    def _request(
+        self, method: str, path: str, payload: Any = None, params: Any = None
+    ) -> httpx.Response:
+        headers = {"X-Node-Key": self._node_key} if self._node_key else {}
+        try:
+            response = (
+                self._http.post(path, json=payload, headers=headers)
+                if method == "post"
+                else self._http.get(path, params=params, headers=headers)
+            )
+        except httpx.HTTPError as exc:
+            raise HiveUnavailable(f"{type(exc).__name__}: {exc}") from exc
+        if response.status_code >= 500:
+            raise HiveUnavailable(f"HTTP {response.status_code}")
+        if response.status_code >= 400:
+            error = {}
+            try:
+                body = response.json()
+                if isinstance(body, dict) and isinstance(body.get("error"), dict):
+                    error = body["error"]
+            except ValueError:
+                pass
+            raise HiveRejected(
+                response.status_code,
+                str(error.get("kind", "http")),
+                str(error.get("message", response.text[:200])),
+            )
+        return response
+
+    def feed(self, since: int | None) -> dict:
+        """Events after `since` for this node; `None` on a new life lets the hive
+        answer with the one-time snapshot of open `net` and addressed tasks."""
+        params = {"since": since} if since is not None else None
+        return self._request("get", "/board/feed", params=params).json()
+
+    def ack(self, seq: int) -> None:
+        """Everything up to `seq` reached the agent — the only cursor move."""
+        self._request("post", "/board/ack", {"seq": int(seq)})
+
+    def alarm_delivery_failing(
+        self, text: str, *, slot: str = "", serial: int | None = None
+    ) -> None:
+        payload: dict[str, Any] = {"type": "delivery_failing", "text": text, "slot": slot}
+        if serial is not None:
+            payload["serial"] = serial
+        self._request("post", "/board/alarms", payload)

@@ -626,6 +626,42 @@ def test_wait_events_returns_first_accumulated_immediately() -> None:
     assert queue.pop(0.0, clock) is None  # and nothing else waits behind it
 
 
+# --- the board event (T-050) -------------------------------------------------------------------
+
+
+def test_board_batches_accumulate_while_others_collapse() -> None:
+    queue = EventQueue()
+    queue.put("board", lines=["[board #1] a", "[board #2] b"])
+    queue.put("board", lines=["[board #3] c"])
+    queue.put("chat.line", text="first")
+    queue.put("chat.line", text="second")  # still collapses: the newest wins
+    assert queue.pending() == (
+        {"type": "board", "lines": ["[board #1] a", "[board #2] b", "[board #3] c"]},
+        {"type": "chat.line", "text": "second"},
+    )
+
+
+def test_board_accumulation_keeps_the_ten_line_ceiling() -> None:
+    queue = EventQueue()
+    first = [f"[board #{i}] line {i}" for i in range(1, 10)] + ["… 2 more, `board`"]
+    queue.put("board", lines=first)  # a capped batch: 10 lines, 2 already hidden
+    queue.put("board", lines=["[board #11] k", "[board #12] l"])
+    (event,) = queue.pending()
+    assert event["lines"] == [
+        *[f"[board #{i}] line {i}" for i in range(1, 10)],
+        "[board #11] k",
+        "… 3 more, `board`",  # 2 hidden before + the one cut now
+    ]
+
+
+def test_a_single_board_batch_is_capped_too() -> None:
+    queue = EventQueue()
+    queue.put("board", lines=[f"[board #{i}] t{i}" for i in range(1, 13)])
+    (event,) = queue.pending()
+    assert event["lines"][-1] == "… 2 more, `board`"
+    assert event["lines"][:3] == ["[board #1] t1", "[board #2] t2", "[board #3] t3"]
+
+
 # --- log.jsonl ---------------------------------------------------------------------------------
 
 

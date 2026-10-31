@@ -6,8 +6,9 @@ The strict order (NETWORK.md sections 3 and 6, plan reviews P1-1/P1-4):
   (`POST /runner/birth`, BEFORE any session: a sister with bash must not arm another
   serial first) → the workplace from the T-029 template → the long session;
 - life: poll `GET /runner/status`; a dead harness process restarts on the SAME
-  workplace with a growing pause (a stable stretch resets it); quota marks switch the
-  adapter or make the node wait (section 9);
+  workplace with a growing pause (a stable stretch resets it), quota marks switch the
+  adapter or make the node wait (section 9); the board bridge (T-050) runs alongside
+  the session and stops with it;
 - death: stop the life session → `mark_dead` (bounded retries — the emergency will
   covers a hive that stayed down) → the will session behind `WILL_TIMEOUT_S`, its hive
   MCP pointed at the runner's proxy → the staged `submit_will` text or the emergency
@@ -34,7 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from runtime.hive.client import HiveRejected, HiveUnavailable
+from runtime.hive.client import BoardFeedClient, HiveRejected, HiveUnavailable
 from runtime.knowledge.schema import CAUSES, SchemaError, Will, emergency_will
 from runtime.lastorder.naming import NamingPreset, node_name
 from runtime.lastorder.persona import Node, PersonaProvider
@@ -47,6 +48,7 @@ from runtime.lastorder.will import (
     check_will_body,
 )
 from runtime.node import workplace
+from runtime.node.boardlink import BoardLink, MindEventPoster
 from runtime.node.adapters import Command, quota_exhausted
 from runtime.node.remotes import HiveApi, MindApi
 from runtime.node.willproxy import WillProxy
@@ -149,6 +151,7 @@ class NodeRunner:
         log: Callable[[str, dict[str, Any]], None] | None = None,
         seed_factory: Callable[[], int] | None = None,
         will_proxy_factory: Callable[[str, str, str], Any] | None = None,
+        boardlink_factory: Callable[["LifeState"], Any] | None = None,
         sweep: Callable[[], None] | None = None,
     ):
         self.cfg = cfg
@@ -168,6 +171,7 @@ class NodeRunner:
                 target, node_key=node_key, runner_key=runner_key
             )
         )
+        self._boardlink_factory = boardlink_factory or self._make_boardlink
         self._sweep = sweep or self._kill_sister_uid_processes
 
     # --- plumbing -----------------------------------------------------------------------
@@ -410,6 +414,22 @@ class NodeRunner:
 
     # --- life ---------------------------------------------------------------------------
 
+    def _make_boardlink(self, state: LifeState):
+        """The temporary board bridge of this life (T-050). None — and the bridge
+        stays off — when the slot has no node key: without it the feed answers 401
+        for as long as the operator does not fix the keys."""
+        if not self.cfg.node_key:
+            self._log("boardlink.off", {"serial": state.serial, "why": "no node key"})
+            return None
+        return BoardLink(
+            BoardFeedClient(self.cfg.hive_url, node_key=self.cfg.node_key),
+            MindEventPoster(self.cfg.body_base, runner_key=self.cfg.runner_key),
+            serial=state.serial,
+            slot=self.cfg.slot,
+            naming=self._naming,
+            log=self._log,
+        )
+
     def _life(self, state: LifeState) -> tuple[Death, str]:
         """The long session of one life; returns the death and the adapter it ended on."""
         adapter_name = self.cfg.harness
@@ -417,55 +437,62 @@ class NodeRunner:
         root = self.cfg.workplaces / "agent" / workplace.serial_dir(state.serial)
         prompt = self._session_prompt(LIFE_PREFIX)
         pause = self.cfg.restart_pause_s
-        while True:
-            death = self._death_status()
-            if death is not None:
-                return death, adapter_name
-            if not self._adapter_ready(adapter_name):
-                self._log("harness.waits", {"harness": adapter_name, "why": "no key"})
-                self._sleep(self.cfg.restart_pause_max_s)
-                continue
-            command = adapter.life_turn(prompt, state.session_id)
-            started = time.monotonic()
-            process = self._safe_spawn(command, root)
-            if process is None:
-                self._sleep(pause)
-                pause = self._capped_pause(pause)
-                continue
-            death = self._wait_session(state, process)
-            if death is not None:
-                return death, adapter_name
-            output = process.output()
-            session_id = adapter.session_id(output)
-            if session_id:
-                state.session_id = session_id
-                self._save_state(state)
-            ran_for = time.monotonic() - started
-            self._log(
-                "session.ended",
-                {
-                    "harness": adapter_name,
-                    "code": process.returncode(),
-                    "ran_s": round(ran_for, 1),
-                    "tail": _tail(output, 300),
-                },
-            )
-            if quota_exhausted(output):
-                switched = self._quota_switch(adapter_name)
-                if switched is not None:
-                    adapter_name, adapter = switched
-                    pause = self.cfg.restart_pause_s
+        boardlink = self._boardlink_factory(state)
+        if boardlink is not None:
+            boardlink.start()  # the bridge lives exactly as long as the life session
+        try:
+            while True:
+                death = self._death_status()
+                if death is not None:
+                    return death, adapter_name
+                if not self._adapter_ready(adapter_name):
+                    self._log("harness.waits", {"harness": adapter_name, "why": "no key"})
+                    self._sleep(self.cfg.restart_pause_max_s)
                     continue
-                self._log("quota.waits", {"harness": adapter_name})
+                command = adapter.life_turn(prompt, state.session_id)
+                started = time.monotonic()
+                process = self._safe_spawn(command, root)
+                if process is None:
+                    self._sleep(pause)
+                    pause = self._capped_pause(pause)
+                    continue
+                death = self._wait_session(state, process)
+                if death is not None:
+                    return death, adapter_name
+                output = process.output()
+                session_id = adapter.session_id(output)
+                if session_id:
+                    state.session_id = session_id
+                    self._save_state(state)
+                ran_for = time.monotonic() - started
+                self._log(
+                    "session.ended",
+                    {
+                        "harness": adapter_name,
+                        "code": process.returncode(),
+                        "ran_s": round(ran_for, 1),
+                        "tail": _tail(output, 300),
+                    },
+                )
+                if quota_exhausted(output):
+                    switched = self._quota_switch(adapter_name)
+                    if switched is not None:
+                        adapter_name, adapter = switched
+                        pause = self.cfg.restart_pause_s
+                        continue
+                    self._log("quota.waits", {"harness": adapter_name})
+                    self._sleep(pause)
+                    pause = self._capped_pause(pause)
+                    continue
                 self._sleep(pause)
-                pause = self._capped_pause(pause)
-                continue
-            self._sleep(pause)
-            pause = (
-                self.cfg.restart_pause_s
-                if ran_for >= self.cfg.restart_reset_after_s
-                else self._capped_pause(pause)
-            )
+                pause = (
+                    self.cfg.restart_pause_s
+                    if ran_for >= self.cfg.restart_reset_after_s
+                    else self._capped_pause(pause)
+                )
+        finally:
+            if boardlink is not None:
+                boardlink.stop()  # before the death path: no bridge in the will session
 
     def _quota_switch(self, adapter_name: str) -> tuple[str, Any] | None:
         if self.cfg.quota_action != "switch" or not self.cfg.failover:

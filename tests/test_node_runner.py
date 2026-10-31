@@ -36,7 +36,7 @@ from runtime.node.adapters import (
     quota_exhausted,
 )
 from runtime.node.config import NodeConfig
-from runtime.node.runner import NodeRunner
+from runtime.node.runner import LifeState, NodeRunner
 from runtime.node.willproxy import WillProxy
 from runtime.node import workplace
 
@@ -246,6 +246,23 @@ class FakeProxy:
         self.journal.append(("proxy:stop",))
 
 
+class FakeBoardLink:
+    """The T-050 bridge fake: the journal order of start/stop IS the assertion."""
+
+    def __init__(self, journal: list):
+        self.journal = journal
+        self.started = 0
+        self.stopped = 0
+
+    def start(self) -> None:
+        self.started += 1
+        self.journal.append(("boardlink:start",))
+
+    def stop(self, timeout_s: float = 5.0) -> None:
+        self.stopped += 1
+        self.journal.append(("boardlink:stop",))
+
+
 RIG_N = 0
 
 
@@ -264,6 +281,7 @@ class Rig:
         self.zcode = FakeAdapter("zcode", self.journal)
         self.opencode = FakeAdapter("opencode", self.journal)
         self.proxy = FakeProxy(self.journal)
+        self.boardlink = FakeBoardLink(self.journal)
         self.pauses: list[float] = []
         self.runner = NodeRunner(
             self.cfg,
@@ -277,6 +295,7 @@ class Rig:
             sleep=self.pauses.append,
             seed_factory=lambda: 4242,
             will_proxy_factory=lambda target, node_key, runner_key: self.proxy,
+            boardlink_factory=lambda state: self.boardlink,
             log=lambda type, payload=None: self.logs.append((type, payload or {})),
             sweep=lambda: self.journal.append(("sweep",)),
         )
@@ -1133,3 +1152,43 @@ def test_will_proxy_adds_the_runner_mark_and_streams_the_body() -> None:
     assert headers["x-node-key"] == "sk-node-one"  # the workplace's forgery is overwritten
     assert headers["x-runner-key"] == "rk-runner-one"
     assert headers["x-runner-session"] == "will"
+
+
+# --- the board bridge (T-050) -------------------------------------------------------------------
+
+
+def test_boardlink_lives_with_the_life_session_alone(tmp_path: Path) -> None:
+    """The bridge starts with the life session and stops before the death path —
+    never a board batch into the will session or the gap between lives."""
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    rig.script(FakeProcess(hang=True))
+    rig.mind.kill_at_status = 3  # dies while the session hangs
+    rig.runner._life(state)
+    order = [entry[0] for entry in rig.journal]
+    first_spawn = order.index("spawn")
+    assert order.index("boardlink:start") < first_spawn
+    assert order.index("boardlink:stop") > first_spawn
+    # the will session (and everything after) sees no bridge
+    rig.mind.respawn()  # the fake clears the death and the armed clock
+    rig.mind.arm(2, BORN, 45)
+    rig.mind.kill_at_status = 3
+    rig.script(FakeProcess(hang=True))
+    state2 = LifeState(serial=2, born_at=BORN, ttl_min=45, traits={})
+    rig.runner._life(state2)
+    assert rig.boardlink.started == 2 and rig.boardlink.stopped == 2
+
+
+def test_boardlink_default_factory_follows_the_node_key(tmp_path: Path) -> None:
+    """Without a node key the bridge is off (the feed would refuse it anyway);
+    with one, the runner wires the real BoardLink — constructed, not started."""
+    from runtime.node.boardlink import BoardLink
+
+    rig = Rig(tmp_path, node_key="")
+    assert rig.runner._make_boardlink(LifeState(7, BORN, 45, {})) is None
+    assert any(type == "boardlink.off" for type, _ in rig.logs)
+
+    rig2 = Rig(tmp_path)
+    link = rig2.runner._make_boardlink(LifeState(7, BORN, 45, {}))
+    assert isinstance(link, BoardLink)
+    assert link._thread is None  # born stopped; only _life starts it

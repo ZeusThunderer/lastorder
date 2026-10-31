@@ -415,8 +415,9 @@ def build_server(
 ) -> tuple[MCPServer, BodyMcp]:
     """Wire the tools and the runner endpoints; returns (server, impl).
 
-    `runner_key` (env MIND_RUNNER_KEY) gates /runner/respawn and /runner/birth
-    (T-027 plan review P1-4); empty keeps the endpoints open for dev/tests."""
+    `runner_key` (env MIND_RUNNER_KEY) gates /runner/respawn, /runner/birth and
+    /runner/event (T-027 plan review P1-4, T-050); empty keeps the endpoints open
+    for dev/tests."""
     executor = impl.executor
     server = MCPServer(
         name="body",
@@ -457,7 +458,8 @@ def build_server(
     async def wait_events(timeout_s: float = 30.0) -> dict[str, Any]:
         """Sleep until the next event or the timeout — you pick your own rhythm. Events:
         game.damage, game.death, chat.line, intent.done, intent.failed, task.idle (arms
-        retire_stuck), life.expiring. Events of one type collapse; the queue is capped."""
+        retire_stuck), life.expiring, board (fresh task-board lines). Events of one type
+        collapse (a board batch accumulates its lines); the queue is capped."""
         return await impl._tool(
             "wait_events", {"timeout_s": timeout_s}, lambda: impl.wait_events(timeout_s)
         )
@@ -516,6 +518,30 @@ def build_server(
         except RuntimeError as exc:
             return JSONResponse({"error": str(exc)}, status_code=409)
         return JSONResponse(result)
+
+    @server.custom_route("/runner/event", methods=["POST"])
+    async def runner_event(request: Request) -> Response:
+        """The board bridge's batch (T-050): one `board` event into the queue. The
+        body is `{"type": "board", "lines": [str]}` alone — the runner cannot hand
+        the sister a death, a chat line or any other event type."""
+        if not _runner_key_ok(request):
+            return JSONResponse({"error": "missing or wrong X-Runner-Key"}, status_code=401)
+        try:
+            payload = await request.json()
+            type_, lines = payload["type"], payload["lines"]
+        except (ValueError, KeyError, TypeError):
+            return JSONResponse({"error": "bad payload"}, status_code=400)
+        if (
+            type_ != "board"
+            or not isinstance(lines, list)
+            or not lines
+            or any(not isinstance(line, str) for line in lines)
+        ):
+            return JSONResponse(
+                {"error": "the body is {type: board, lines: [str]} alone"}, status_code=400
+            )
+        executor.events.put("board", lines=list(lines))
+        return JSONResponse({"queued": True, "lines": len(lines)})
 
     if start_c1:
         executor.start()

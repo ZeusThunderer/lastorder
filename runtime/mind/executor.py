@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -113,10 +114,35 @@ class JsonlLog:
 
 # --- the event queue (NETWORK section 5) ---------------------------------------------------
 
+BOARD_LINES_MAX = 10  # one `board` event: the rest folds into the "more" marker
+_BOARD_MORE_RE = re.compile(r"^… (\d+) more, `board`$")
+
+
+def _board_marker(dropped: int) -> str:
+    return f"… {dropped} more, `board`"
+
+
+def _split_board_lines(lines: Any) -> tuple[list[str], int]:
+    """Peel a trailing "more" marker back into (lines, dropped)."""
+    if isinstance(lines, list) and lines and _BOARD_MORE_RE.match(lines[-1] or ""):
+        return list(lines[:-1]), int(_BOARD_MORE_RE.match(lines[-1]).group(1))
+    return list(lines) if isinstance(lines, list) else [], 0
+
+
+def cap_board_lines(lines: list[str], dropped: int = 0) -> list[str]:
+    """A `board` event never carries more than BOARD_LINES_MAX envelope lines
+    (TASKBOARD.md section 11); `dropped` counts what earlier caps already hid."""
+    if len(lines) <= BOARD_LINES_MAX and not dropped:
+        return list(lines)
+    hidden = dropped + max(0, len(lines) - BOARD_LINES_MAX)
+    return [*lines[:BOARD_LINES_MAX], _board_marker(hidden)]
+
 
 class EventQueue:
     """Events wait here between `wait_events` calls, capped; same-type events collapse —
-    a newer one replaces the queued fields and keeps the queue position."""
+    a newer one replaces the queued fields and keeps the queue position. `board` is
+    the exception (T-050): batches accumulate into the queued lines under the same
+    10-line ceiling — two bridge batches between two `wait_events` never eat each other."""
 
     def __init__(self, limit: int = QUEUE_LIMIT):
         self._items: list[dict[str, Any]] = []
@@ -125,15 +151,30 @@ class EventQueue:
 
     def put(self, type_: str, **fields: Any) -> None:
         with self._cond:
-            for i, queued in enumerate(self._items):
-                if queued["type"] == type_:
-                    self._items[i] = {"type": type_, **fields}
-                    break
+            if type_ == "board":
+                self._put_board(fields.get("lines"))
             else:
-                if len(self._items) >= self._limit:
-                    self._items.pop(0)
-                self._items.append({"type": type_, **fields})
+                for i, queued in enumerate(self._items):
+                    if queued["type"] == type_:
+                        self._items[i] = {"type": type_, **fields}
+                        break
+                else:
+                    self._append({"type": type_, **fields})
             self._cond.notify_all()
+
+    def _put_board(self, lines: Any) -> None:
+        add, add_dropped = _split_board_lines(lines)
+        for queued in self._items:
+            if queued["type"] == "board":
+                held, held_dropped = _split_board_lines(queued.get("lines"))
+                queued["lines"] = cap_board_lines(held + add, held_dropped + add_dropped)
+                return
+        self._append({"type": "board", "lines": cap_board_lines(add, add_dropped)})
+
+    def _append(self, item: dict[str, Any]) -> None:
+        if len(self._items) >= self._limit:
+            self._items.pop(0)
+        self._items.append(item)
 
     def clear(self) -> None:
         """Drop everything: a respawned body starts a new life with a fresh queue —
