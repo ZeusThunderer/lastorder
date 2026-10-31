@@ -63,3 +63,4 @@
 | T-057 | Мост инфраструктуры — Last Order поднимает и снимает сестёр, хост исполняет без одобрения на каждое действие | I | ready | critical | z/T-057-infra-bridge |
 | T-058 | Прогон стенда после исправлений — команда сервера, старт слота, мост, размер запроса | I | ready | normal | z/T-058-stand-run-fixes |
 | T-059 | Last Order на Z.ai Coding Plan — харнесс zcode, как у сестёр, запасной OpenCode через шлюз | I | ready | critical | z/T-059-lo-on-zai |
+| T-060 | Классификатор безопасности — второе мнение о запросах infra Last Order на локальной модели | I | ready | normal | z/T-060-safety-classifier |
