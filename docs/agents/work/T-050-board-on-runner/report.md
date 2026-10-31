@@ -54,3 +54,23 @@ $ uv run pytest tests/test_node_boardlink.py tests/test_mcp_body.py tests/test_e
 
 ### Вопросы
 - нет
+
+## Раунд 2 · 2026-10-31
+Коммиты: <sha фикс-коммита ниже>
+
+### Ответ на ревью
+- R1-1 · fixed: пустой снимок подтверждается — `poll_once` при `snapshot: true` и
+  пустых событиях шлёт ack по `response["cursor"]` и двигает свой курсор. Тест
+  `test_an_empty_snapshot_is_acked_and_delivery_moves_on`: пустой снимок → ack(9) →
+  следующий опрос с `since=9` → сообщение узлу доставлено.
+- R1-2 · fixed: `_run` обёрнут catch-all — исключение пишет `boardlink.cycle_failed`
+  и мост продолжает опрос. Тест `test_an_unexpected_error_does_not_end_the_thread`
+  (первый feed() кидает ValueError, второй цикл проходит). Заодно здоровый темп
+  вынесен в `poll_s` (шов для тестов, дефолт 10 с).
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 822 passed, 3 skipped in 80.19s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+```

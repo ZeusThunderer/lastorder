@@ -126,6 +126,7 @@ class BoardLink:
         serial: int,
         slot: str,
         naming: NamingPreset,
+        poll_s: float = POLL_S,
         log: Callable[[str, dict[str, Any] | None], None] | None = None,
     ):
         self._feed = feed
@@ -133,6 +134,7 @@ class BoardLink:
         self._serial = serial
         self._slot = slot
         self._naming = naming
+        self.poll_s = poll_s  # the healthy cadence; a test seam, the ceiling is 15 s
         self._log = log or (lambda type, payload=None: None)
         self._cursor: int | None = None  # None: a new life, the hive snapshots once
         self._seen: OrderedDict[str, None] = OrderedDict()
@@ -162,7 +164,15 @@ class BoardLink:
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            pause = self.poll_once()
+            try:
+                pause = self.poll_once()
+            except Exception as exc:  # review R1-2: a bug or a bad payload must not
+                # end delivery for the rest of the life — log it and keep polling
+                self._log(
+                    "boardlink.cycle_failed",
+                    {"serial": self._serial, "error": f"{type(exc).__name__}: {exc}"},
+                )
+                pause = self.poll_s
             if self._stop.wait(pause):
                 break
 
@@ -213,11 +223,21 @@ class BoardLink:
             # a permanent refusal (an unknown key, no live node): a configuration
             # matter for the operator, not a delivery outage — keep the life going
             self._log("boardlink.feed_refused", {"serial": self._serial, "error": str(exc)})
-            return POLL_S
+            return self.poll_s
         self._hive_up_again()
         events = response.get("events") if isinstance(response, dict) else None
         if not events:
-            return POLL_S
+            # An empty snapshot still needs its ack (review R1-1): the cursor row is
+            # created by the ack alone, and without it the hive answers every poll
+            # with the snapshot — open tasks only, no messages or replies, ever.
+            if isinstance(response, dict) and response.get("snapshot"):
+                cursor = int(response.get("cursor") or 0)
+                try:
+                    self._feed.ack(cursor)
+                    self._cursor = cursor
+                except (HiveUnavailable, HiveRejected) as exc:
+                    self._log("boardlink.ack_failed", {"serial": self._serial, "error": str(exc)})
+            return self.poll_s
         fresh = [e for e in events if self._key(e) not in self._seen]
         top = max(int(e.get("seq") or 0) for e in events)
         if fresh:
@@ -230,7 +250,7 @@ class BoardLink:
                     "boardlink.mind_failed",
                     {"serial": self._serial, "lines": len(lines), "error": str(exc)},
                 )
-                return POLL_S
+                return self.poll_s
             for event in fresh:
                 self._remember(self._key(event))
             self._log(
@@ -240,6 +260,6 @@ class BoardLink:
             self._feed.ack(top)  # only after the mind took the batch
         except (HiveUnavailable, HiveRejected) as exc:
             self._log("boardlink.ack_failed", {"serial": self._serial, "error": str(exc)})
-            return POLL_S
+            return self.poll_s
         self._cursor = top
-        return POLL_S
+        return self.poll_s

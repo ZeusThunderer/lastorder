@@ -114,7 +114,8 @@ def test_unknown_ops_make_no_line() -> None:
 
 
 class FakeFeed:
-    """`responses` is popped per feed() call; `ack_error` makes ack fail N times."""
+    """`responses` is popped per feed() call; `ack_error` makes ack fail N times;
+    `boom` raises an unexpected error (a bug, not an outage)."""
 
     def __init__(self, responses=None):
         self.responses = list(responses or [])
@@ -122,9 +123,13 @@ class FakeFeed:
         self.acks: list[int] = []
         self.alarms: list[dict] = []
         self.down = 0  # the next N feed calls raise HiveUnavailable
+        self.boom = 0  # the next N feed calls raise something unexpected
         self.ack_error: Exception | None = None
 
     def feed(self, since):
+        if self.boom > 0:
+            self.boom -= 1
+            raise ValueError("bad json")
         self.feed_calls.append(since)
         if self.down > 0:
             self.down -= 1
@@ -238,6 +243,48 @@ def test_the_thread_runs_until_stopped() -> None:
     link.stop()
     assert mind.batches, "the bridge delivered nothing before the stop"
     assert link._thread is None or not link._thread.is_alive()
+
+
+def test_an_empty_snapshot_is_acked_and_delivery_moves_on() -> None:
+    """Review R1-1: an empty board at birth is the normal case — the snapshot's
+    ack creates the cursor, and messages reach the node for the rest of the life."""
+    empty = {"events": [], "cursor": 9, "snapshot": True}
+    message = {
+        "events": [
+            ev(10, 5, actor="operator",
+               fields={"kind": "message", "from": "operator", "to": "00007"},
+               text="привет")
+        ],
+        "cursor": 9,
+        "snapshot": False,
+    }
+    feed = FakeFeed([empty, message])
+    mind = FakeMindPoster()
+    link = make_link(feed, mind)
+    link.poll_once()  # nothing open: still the ack, or the snapshot repeats forever
+    assert feed.acks == [9]
+    link.poll_once()  # a message addressed to the node now arrives
+    assert feed.feed_calls == [None, 9]
+    assert mind.batches[0][1] == [
+        "[board #5 message · from operator · to узел 00007 · open] привет"
+    ]
+
+
+def test_an_unexpected_error_does_not_end_the_thread() -> None:
+    """Review R1-2: a bug (bad payload, a stray KeyError) logs and the bridge keeps
+    its cadence — delivery outlives the surprise."""
+    feed = FakeFeed()
+    feed.boom = 1
+    logs: list[str] = []
+    mind = FakeMindPoster()
+    link = make_link(feed, mind, poll_s=0.01, log=lambda type, payload=None: logs.append(type))
+    link.start()
+    deadline = time.monotonic() + 5.0
+    while len(feed.feed_calls) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    link.stop()
+    assert len(feed.feed_calls) >= 2, "the thread died on the first surprise"
+    assert "boardlink.cycle_failed" in logs
 
 
 # --- the wire client ------------------------------------------------------------------------
