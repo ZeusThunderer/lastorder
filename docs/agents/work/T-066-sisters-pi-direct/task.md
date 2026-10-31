@@ -2,7 +2,7 @@
 id: T-066
 title: Сёстры на Pi напрямую — адаптер раннера, MCP без codemode, потолок контекста сжатием
 stage: I
-status: ready
+status: in_progress
 criticality: critical
 after: []
 branch: z/T-066-sisters-pi-direct
