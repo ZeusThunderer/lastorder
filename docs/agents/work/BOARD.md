@@ -69,4 +69,4 @@
 | T-063 | Камера тела и сервис media — экран тела потоком в MediaMTX, кольцевой буфер, вырезка по времени | I | ready | critical | z/T-063-body-camera |
 | T-064 | Last Order и видео — доступ к media, ffmpeg, журналы сети на чтение, справка об инструментах | I | ready | critical | z/T-064-lo-media-access |
 | T-065 | Прогон камер на стенде — три тела на Xvfb в media, цена CPU и памяти, влияние на C1 | I | ready | normal | z/T-065-camera-stand-run |
-| T-066 | Сёстры на Pi напрямую — адаптер раннера, MCP без codemode, потолок контекста сжатием | I | ready | critical | z/T-066-sisters-pi-direct |
+| T-066 | Сёстры на Pi напрямую — адаптер раннера, MCP без codemode, потолок контекста сжатием | I | done | critical | z/T-066-sisters-pi-direct |
