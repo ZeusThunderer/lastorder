@@ -2,7 +2,7 @@
 id: T-066
 title: Сёстры на Pi напрямую — адаптер раннера, MCP без codemode, потолок контекста сжатием
 stage: I
-status: review
+status: accepted
 criticality: critical
 after: []
 branch: z/T-066-sisters-pi-direct
@@ -102,3 +102,6 @@ python tools/check.py
   требует того же для Last Order.
 - Прогон на стенде заблокирован не только квотой: из контейнеров хоста TLS наружу рвётся
   (`unexpected eof`, и к www.google.com), с хоста api.z.ai отвечает — сеть Docker/VPN оператора.
+- 2026-10-31, ревью R1 (headless): живого прогона Pi нет (сеть контейнеров). Первый подъём
+  `node-N` после пересборки образа — живая проверка: инструменты тела вызываются, сжатие есть,
+  токены за жизнь посчитаны. Если не работает — откат `NODE_HARNESS=zcode` и задача на находку.
