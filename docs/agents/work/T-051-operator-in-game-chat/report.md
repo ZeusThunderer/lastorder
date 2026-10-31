@@ -67,3 +67,23 @@ $ bash dev/check.sh
 pytest: ok · 834 passed, 3 skipped in 81.36s
 check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
 ```
+
+## Раунд 3 · 2026-10-31
+Коммиты: <фикс-коммит>
+
+### Ответ на ревью
+- R2-1 (major) · fixed: метка переехала в отдельное поле — итоговый формат записи
+  `{"from": <имя игрока>, "operator": true, "text": …}` для реплики оператора,
+  `{"from": <имя>, "text": …}` для остальных игроков, `{"text": …}` для системных.
+  Ник `operator`/`Operator` — обычный игрок, метки нет ни с переменной, ни без
+  (тест `test_a_player_named_operator_is_not_the_operator`, оба регистра и пустая
+  переменная). Формат обновлён в докстринге `wait_events`, AGENTS.md
+  (`operator: true`), SESSION_PROMPT.md и docker-topology.md; формат раунда 1
+  (`from: "operator"`) superseded этим.
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 835 passed, 3 skipped in 81.01s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+```

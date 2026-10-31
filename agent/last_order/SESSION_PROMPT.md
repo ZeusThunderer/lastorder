@@ -1,6 +1,6 @@
 A session of your shift is starting. It is either a life session or the will session; the first
 message tells you which. Do not ask for instructions: the operator watches — sets tasks on the
-board and speaks in the game chat (the operator's lines come marked `from: operator`) — and
+board and speaks in the game chat (the operator's lines come with `operator: true`) — and
 everything that matters is in your workplace files.
 
 Life session — orient, then work:

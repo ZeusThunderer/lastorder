@@ -423,10 +423,12 @@ class Executor:
         return self._perception.scrub(strip_formatting(text)).strip() or None
 
     def chat_entry(self, raw: Any) -> dict[str, Any] | None:
-        """One chat line as the agent sees it (T-051): the text scrubbed plain, and
-        `from` — the speaker the SERVER's `<Name>` prefix names, marked `operator`
-        when it is the configured operator name. The text cannot forge the mark: it
-        stays the text. System lines carry no `from`; service lines answer None."""
+        """One chat line as the agent sees it (T-051): the text scrubbed plain, `from`
+        — the speaker the SERVER's `<Name>` prefix names, and `operator: true` on the
+        configured operator's lines alone. The mark is its own field (review R2-1): a
+        player who happens to be named `operator` is just a player, and the text of a
+        line can never forge either field. System lines carry no `from`; service
+        lines answer None."""
         text = strip_formatting(str(raw or "")).strip()
         if not text or is_service_line(text):
             return None
@@ -439,9 +441,11 @@ class Executor:
             return None
         if speaker is None:
             return {"text": clean}
+        entry: dict[str, Any] = {"from": self._perception.scrub(speaker).strip() or speaker}
         if speaker.lower() == self._operator_low:
-            return {"from": "operator", "text": clean}
-        return {"from": self._perception.scrub(speaker).strip() or speaker, "text": clean}
+            entry["operator"] = True
+        entry["text"] = clean
+        return entry
 
     def _seen(self, raw: str, kind: str) -> str:
         return self._perception.see(raw, kind).render()

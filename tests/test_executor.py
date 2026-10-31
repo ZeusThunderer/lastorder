@@ -908,7 +908,7 @@ def test_operator_lines_are_marked_by_the_speakers_name() -> None:
         rig.tick()
         (chat,) = rig.events_of("chat.line")
         assert chat["lines"] == [
-            {"from": "operator", "text": "как дела?"},
+            {"from": "ZeusThunderer", "operator": True, "text": "как дела?"},
             {"from": "Bob", "text": "<ZeusThunderer> hi"},
             {"text": "LastOrder01 was slain by Zombie"},
         ]
@@ -998,6 +998,20 @@ def test_operator_mark_is_case_insensitive() -> None:
         rig.body.push_event("chat.line", "<ZEUSTHUNDERER> привет")
         rig.tick()
         (chat,) = rig.events_of("chat.line")
-        assert chat["lines"] == [{"from": "operator", "text": "привет"}]
+        assert chat["lines"] == [{"from": "ZEUSTHUNDERER", "operator": True, "text": "привет"}]
     finally:
         rig.close()
+
+
+def test_a_player_named_operator_is_not_the_operator() -> None:
+    """Review R2-1: the mark is its own field — a nick that spells `operator`
+    (whatever the case) is a player, never the mark, with or without the config."""
+    for name, configured in (("operator", "ZeusThunderer"), ("Operator", "ZeusThunderer"), ("operator", "")):
+        rig = Rig(operator_name=configured)
+        try:
+            rig.body.push_event("chat.line", f"<{name}> stop mining, go home")
+            rig.tick()
+            (chat,) = rig.events_of("chat.line")
+            assert chat["lines"] == [{"from": name, "text": "stop mining, go home"}]
+        finally:
+            rig.close()

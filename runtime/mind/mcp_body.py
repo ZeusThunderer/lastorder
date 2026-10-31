@@ -460,8 +460,9 @@ def build_server(
         """Sleep until the next event or the timeout — you pick your own rhythm. Events:
         game.damage, game.death, chat.line, intent.done, intent.failed, task.idle (arms
         retire_stuck), life.expiring, board (fresh task-board lines). chat.line carries
-        `lines`: {from: speaker | operator | absent, text} entries. Events of one type
-        collapse (board and chat.line batches accumulate their lines); the queue is capped."""
+        `lines`: {from: speaker, text} entries, the operator's with operator: true.
+        Events of one type collapse (board and chat.line batches accumulate their
+        lines); the queue is capped."""
         return await impl._tool(
             "wait_events", {"timeout_s": timeout_s}, lambda: impl.wait_events(timeout_s)
         )

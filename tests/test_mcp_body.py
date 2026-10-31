@@ -679,7 +679,7 @@ def test_observe_and_events_mark_the_operator() -> None:
         s.body.chat = ["<ZeusThunderer> собери дерево", "<Bob> привет"]
         obs = parse(s.call(lambda c: c.call_tool("observe", {})))
         assert obs["chat"] == [
-            {"from": "operator", "text": "собери дерево"},
+            {"from": "ZeusThunderer", "operator": True, "text": "собери дерево"},
             {"from": "Bob", "text": "привет"},
         ]
         s.body.push_event("chat.line", "<ZeusThunderer> как дела?")
@@ -688,7 +688,7 @@ def test_observe_and_events_mark_the_operator() -> None:
         )
         ev = parse(s.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0})))
         assert ev["type"] == "chat.line"
-        assert ev["lines"] == [{"from": "operator", "text": "как дела?"}]
+        assert ev["lines"] == [{"from": "ZeusThunderer", "operator": True, "text": "как дела?"}]
     finally:
         s.close()
 
