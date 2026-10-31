@@ -299,6 +299,7 @@ services:
       HIVE_RUNNER_KEYS: "${HIVE_RUNNER_KEYS:-}"
       HIVE_MCP_LO_KEY: "${HIVE_MCP_LO_KEY:-}"
       HIVE_OPERATOR_KEY: "${HIVE_OPERATOR_KEY:-}"
+      HIVE_TOOL_KEY: "${HIVE_TOOL_KEY:-}"
       NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
     command:
       - sh
