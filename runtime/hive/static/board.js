@@ -148,6 +148,14 @@ function watchLiveness() {
 // --- render -----------------------------------------------------------------------------
 
 function render() {
+  // An update must not eat the operator's open inline forms: the typed deny reason,
+  // a needs_input answer, edited args. The form elements are carried into the fresh
+  // cards (moving a DOM node keeps its textarea state).
+  const openForms = new Map();
+  for (const form of document.querySelectorAll(".entry .inline-form")) {
+    const card = form.closest(".entry");
+    if (card) openForms.set(Number(card.dataset.id), form);
+  }
   buildFilter();
   buildAddressees();
   const columns = { task: [], request: [], info: [] };
@@ -157,20 +165,21 @@ function render() {
     else if (entry.kind === "request") columns.request.push(entry);
     else columns.info.push(entry);
   }
-  fillColumn("col-task", columns.task);
-  fillColumn("col-request", columns.request);
-  fillColumn("col-info", columns.info);
+  fillColumn("col-task", columns.task, openForms);
+  fillColumn("col-request", columns.request, openForms);
+  fillColumn("col-info", columns.info, openForms);
 }
 
-function fillColumn(id, entries) {
+function fillColumn(id, entries, openForms) {
   const cards = document.querySelector("#" + id + " .cards");
-  const nodes = entries.map(entryCard);
+  const nodes = entries.map((entry) => entryCard(entry, openForms));
   if (!nodes.length) nodes.push(el("div", "empty", "пусто"));
   cards.replaceChildren(...nodes);
 }
 
-function entryCard(entry) {
+function entryCard(entry, openForms) {
   const card = el("article", "entry");
+  card.dataset.id = entry.id;
   const live = liveSerials();
   // the whole card goes gray when a node it names is dead (TASKBOARD.md 12);
   // the individual name spans gray out the same way inside the route line
@@ -210,7 +219,10 @@ function entryCard(entry) {
   if (entry.thread && entry.thread.length) {
     card.append(threadBox(entry.thread));
   }
-  card.append(actionsRow(entry));
+  // the carried form (an update re-rendered the cards around the operator's typing)
+  const carried = openForms ? openForms.get(entry.id) : null;
+  card.append(actionsRow(entry, carried));
+  if (carried) card.append(carried);
   return card;
 }
 
@@ -253,9 +265,9 @@ function threadBox(thread) {
 
 // --- actions (one request each; the server decides the rights) --------------------------
 
-function actionsRow(entry) {
+function actionsRow(entry, carriedForm) {
   const row = el("div", "actions");
-  let openForm = null;
+  let openForm = carriedForm || null; // a form carried over a re-render stays open
 
   const toggle = (form) => {
     if (openForm) openForm.remove();
@@ -395,6 +407,7 @@ function buildFilter() {
 
 function buildAddressees() {
   const toSelect = document.getElementById("new-to");
+  const previous = toSelect.value; // an update while the operator types must not retarget it
   const options = [];
   if (document.getElementById("new-kind").value === "task") {
     for (const brief of state.alive) {
@@ -407,6 +420,7 @@ function buildAddressees() {
     options.push({ value: "net", label: "net" });
   }
   toSelect.replaceChildren(...options.map((o) => new Option(o.label, o.value)));
+  if (options.some((o) => o.value === previous)) toSelect.value = previous;
 }
 
 // --- init (the script tag is deferred: the DOM is ready) --------------------------------

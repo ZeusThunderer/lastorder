@@ -121,6 +121,36 @@ def test_basic_password_opens_the_operator_api(tmp_path: Path) -> None:
 # --- the page's own safety rules (acceptance: grep level) ---------------------------------
 
 
+def test_non_ascii_key_is_a_calm_401(tmp_path: Path) -> None:
+    """compare_digest refuses non-ASCII str (review R1-3): a stray symbol in a stand
+    password must still answer 401, never a 500."""
+    unicode_key = "пароль-стенда-Ø"
+    clock = lambda: datetime(2026, 10, 31, 12, 0, 0, tzinfo=timezone.utc)  # noqa: E731
+    home = tmp_path / "unicode"
+    app = create_app(
+        store=KnowledgeStore(home / "kb", git=False, now=lambda: clock().isoformat()),
+        rcon=FakeRcon(),
+        log=HiveLog(home / "run" / "events.jsonl"),
+        run_dir=home / "run",
+        clock=clock,
+        node_keys={"sk-node-one": "LastOrder01"},
+        lo_key="sk-last-order",
+        operator_key=unicode_key,
+        runner_keys={},
+    )
+    client = TestClient(app)
+    wrong = client.get("/board", headers=basic("operator", "неверный-Ø"))
+    assert wrong.status_code == 401  # not 500: the compare is over bytes
+    right = client.get("/board", headers=basic("operator", unicode_key))
+    assert right.status_code == 200
+    # raw header values arrive as bytes on the wire; the server side still compares
+    # over utf-8 bytes, so a non-ASCII attempt is a 401, not a TypeError/500
+    wrong_header = client.get(
+        "/board/entries", headers={"X-Operator-Key": "ключ-Ø-не-тот".encode("utf-8")}
+    )
+    assert wrong_header.status_code == 401
+
+
 def test_static_references_nothing_external() -> None:
     for path in sorted(STATIC.iterdir()):
         text = path.read_text(encoding="utf-8")

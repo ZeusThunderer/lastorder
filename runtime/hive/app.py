@@ -575,7 +575,9 @@ def create_app(
 
     def _basic_password_ok(request: Request) -> bool:
         """The page's Basic-auth (TASKBOARD.md section 2): any user name, the password
-        is HIVE_OPERATOR_KEY. Constant-time compare; malformed headers just fail."""
+        is HIVE_OPERATOR_KEY. Constant-time compare over UTF-8 bytes — compare_digest
+        refuses non-ASCII str, and a stray symbol in a stand password must be a calm
+        401, never a 500."""
         scheme, _, value = request.headers.get("authorization", "").partition(" ")
         if scheme.lower() != "basic" or not value:
             return False
@@ -583,14 +585,16 @@ def create_app(
             decoded = base64.b64decode(value, validate=True).decode("utf-8", "replace")
         except ValueError:  # binascii.Error (bad base64) is a ValueError
             return False
-        return secrets.compare_digest(decoded.partition(":")[2], operator_secret)
+        return secrets.compare_digest(
+            decoded.partition(":")[2].encode("utf-8"), operator_secret.encode("utf-8")
+        )
 
     def _require_operator(request: Request) -> None:
         if not operator_secret:
             raise ApiError(401, "operator_key", "the board needs HIVE_OPERATOR_KEY configured")
         key = request.headers.get("x-operator-key", "").strip()
         if key:
-            if secrets.compare_digest(key, operator_secret):
+            if secrets.compare_digest(key.encode("utf-8"), operator_secret.encode("utf-8")):
                 return
         elif _basic_password_ok(request):
             return
