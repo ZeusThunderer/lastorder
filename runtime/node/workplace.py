@@ -407,22 +407,46 @@ def drop_hermes_home(
     _chmod(home, 0o700)
 
 
-# Pi (ADR-041 primary harness; the adapter itself is T-045, this is only the config
-# render). Like Hermes, Pi keeps its agent dir on the sister's tmpfs home, NOT in the
-# workplace: sessions and state are per-container runtime data. ~/.pi/agent carries
-# models.json (the Z.ai coding provider — the same base URL and plan the zcode and
-# hermes configs use), mcp.json (both MCP servers of the slot; MCP is builtin since
-# 1.0 — pi-mcp ships as a core dependency) and settings.json (the zai defaults).
+# Pi (ADR-041 primary harness; the adapter is T-066, the `hapi pi` wrapper T-045). Like
+# Hermes, Pi keeps its agent dir on the sister's tmpfs home, NOT in the workplace.
+# ~/.pi/agent carries models.json (the Z.ai coding provider — the same base URL and
+# plan the zcode and hermes configs use), mcp.json (both MCP servers of the slot; MCP
+# is builtin since 1.0 — pi-mcp ships as a core dependency), settings.json (the zai
+# defaults and the compaction cap) and zai-key (the plan token, the sister's own
+# 0400 file — the zcode provider-config pattern: readable by her, never in the
+# process env, so no `env` in a bash tool can leak it into a session or an archive).
 PI_AGENT_DIR = Path("/home/sister/.pi/agent")
+PI_KEY_FILE = "zai-key"
 PI_ZAI_BASE_URL = HERMES_GLM_BASE_URL  # the coding endpoint of the GLM Coding Plan
+# The context cap (T-066). Pi compacts when the context passes
+# contextWindow - reserveTokens and keeps the last keepRecentTokens verbatim; the
+# window here is a budget, not the model's real one. On zcode one life grew to
+# 200–240k tokens and every wake resent all of it. The gap between "after a
+# compaction" (base context + summary + keepRecentTokens, ~45k [предположение]) and
+# the threshold (~80k) must stay wide, or Pi compacts on every other turn.
+PI_CONTEXT_WINDOW = 96_000
+PI_RESERVE_TOKENS = 16_384
+PI_KEEP_RECENT_TOKENS = 20_000
 
 
-def render_pi_configs(model: str, body_base: str, hive_url: str, node_key: str) -> dict[str, dict]:
-    """The Pi agent-dir configs (T-041): models.json + mcp.json + settings.json, by
-    content. No key material anywhere: models.json interpolates $ZAI_API_KEY from
-    the environment of the pi process at request time (how the key travels is the
-    adapter's business, T-045), mcp.json carries the node key — the agent's own
-    identity, same rule as zcode.json/config.yaml (ADR-033)."""
+def render_pi_configs(
+    model: str,
+    body_base: str,
+    hive_url: str,
+    node_key: str,
+    *,
+    context_window: int = PI_CONTEXT_WINDOW,
+    keep_recent_tokens: int = PI_KEEP_RECENT_TOKENS,
+    key_file: str = str(PI_AGENT_DIR / PI_KEY_FILE),
+) -> dict[str, dict]:
+    """The Pi agent-dir configs: models.json + mcp.json + settings.json, by content.
+    No key material in the configs: apiKey is a `!command` reference (Pi resolves a
+    leading `!` by running the rest as a shell command, verified in the 1.4.0 bundle
+    — execSync, .trim(), 10 s timeout) that cats the sister-owned key file at
+    request time; the key never rides the process env, mcp.json carries the node
+    key — the agent's own identity, same rule as zcode.json/config.yaml (ADR-033).
+    Both servers are `direct`: Pi's default `codemode` exposure declares no MCP tool
+    to the model at all (Pi docs mcp.md)."""
     glm = _glm_model(model)
     return {
         "models.json": {
@@ -430,32 +454,50 @@ def render_pi_configs(model: str, body_base: str, hive_url: str, node_key: str) 
                 "zai": {
                     "baseUrl": PI_ZAI_BASE_URL,
                     "api": "openai-completions",
-                    "apiKey": "$ZAI_API_KEY",
+                    "apiKey": f"!cat {key_file}",
                     # the endpoint's verified quirks (docs models-configuration.md):
                     # no developer role, thinking rides thinking.type — the same
                     # compat the zai guides prescribe
                     "compat": {"supportsDeveloperRole": False, "thinkingFormat": "zai"},
-                    "models": [{"id": glm, "reasoning": True}],
+                    "models": [
+                        {"id": glm, "reasoning": True, "contextWindow": context_window}
+                    ],
                 }
             }
         },
         "mcp.json": {
+            "autoEnableCodemode": False,
             "mcpServers": {
-                "body": {"url": f"{body_base.rstrip('/')}/mcp", "timeout": 10},
+                "body": {
+                    "url": f"{body_base.rstrip('/')}/mcp",
+                    "timeout": 10,
+                    "exposure": "direct",
+                },
                 "hive": {
                     "url": hive_mcp_url(hive_url),
                     "headers": {"X-Node-Key": node_key},
                     "timeout": 10,
+                    "exposure": "direct",
                 },
-            }
+            },
         },
         "settings.json": {
             "defaultProvider": "zai",
             "defaultModel": glm,
             "enableInstallTelemetry": False,
             "enableAnalytics": False,
+            "compaction": {
+                "enabled": True,
+                "reserveTokens": PI_RESERVE_TOKENS,
+                "keepRecentTokens": keep_recent_tokens,
+            },
         },
     }
+
+
+# The render params of the last drop per agent dir — set_will_mode rebuilds the will
+# config from THEM, never from the file in the sister's dir (the Hermes rule, R2-2).
+_PI_RENDER: dict[Path, dict] = {}
 
 
 def drop_pi_agent_dir(
@@ -465,21 +507,63 @@ def drop_pi_agent_dir(
     body_base: str,
     hive_url: str,
     node_key: str,
+    zai_key: str = "",
+    context_window: int = PI_CONTEXT_WINDOW,
+    keep_recent_tokens: int = PI_KEEP_RECENT_TOKENS,
     uid: int | None = None,
     gid: int | None = None,
+    hive_mcp_override: str | None = None,
 ) -> None:
-    """Lay out PI_AGENT_DIR: the three configs root-owned 0444 (the runner's files,
-    the same boundary as HERMES_HOME/config.yaml, R1-2), everything else Pi creates
-    itself on first run. The dir stays the sister's 0700 — sessions and state are
-    hers, only the provider/MCP wiring is ours. A will-session variant (hive at the
-    proxy) belongs to the adapter's per-session re-render, T-045."""
+    """(Re)render PI_AGENT_DIR: the three configs root-owned 0444 (the runner's files,
+    the same boundary as HERMES_HOME/config.yaml, R1-2), written link-safe (the dir is
+    hers, R2-1), plus zai-key — her own 0400 copy of the plan token (empty `zai_key`
+    writes none; the runner gates the pi harness on the key being present). The
+    adapter calls it before every life session: that heals a replaced file and moves
+    hive back from the will proxy. The dir and its parent (~/.pi) stay the sister's
+    0700 — Pi keeps its own state there. `hive_mcp_override` is the will-mode hook:
+    the full MCP url of the will proxy."""
+    fresh_parent = not agent_dir.parent.exists()
     agent_dir.mkdir(parents=True, exist_ok=True)
-    for name, config in render_pi_configs(model, body_base, hive_url, node_key).items():
+    if fresh_parent:
+        _own(agent_dir.parent, uid, gid)
+        _chmod(agent_dir.parent, 0o700)
+    params = dict(
+        model=model, body_base=body_base, hive_url=hive_url, node_key=node_key,
+        zai_key=zai_key,
+        context_window=context_window, keep_recent_tokens=keep_recent_tokens,
+    )
+    if hive_mcp_override is None:
+        _PI_RENDER[agent_dir] = {**params, "uid": uid, "gid": gid}
+    if zai_key:
+        _write_file_no_links(
+            agent_dir / PI_KEY_FILE, zai_key, mode=0o400, uid=uid, gid=gid
+        )
+    configs = render_pi_configs(
+        model, body_base, hive_url, node_key,
+        context_window=context_window, keep_recent_tokens=keep_recent_tokens,
+        key_file=str(agent_dir / PI_KEY_FILE),
+    )
+    if hive_mcp_override:
+        configs["mcp.json"]["mcpServers"]["hive"]["url"] = hive_mcp_override.rstrip("/")
+    for name, config in configs.items():
         _write_file_no_links(
             agent_dir / name, json.dumps(config, indent=2), mode=READ_ONLY_FILE, uid=0, gid=0
         )
     _own(agent_dir, uid, gid)
     _chmod(agent_dir, 0o700)
+
+
+def _set_pi_will_mode(proxy_url: str) -> None:
+    """The Pi twin of _set_hermes_will_mode: a fresh render with hive at the proxy from
+    the last life render's params. Without them (a runner restart between the last life
+    render and the will) nothing is written and the will runs unmarked — the real hive
+    refuses an unmarked submit_will and the emergency will covers it."""
+    params = _PI_RENDER.get(PI_AGENT_DIR)
+    if params is None:
+        return
+    drop_pi_agent_dir(
+        PI_AGENT_DIR, **params, hive_mcp_override=f"{proxy_url.rstrip('/')}/mcp"
+    )
 
 
 def _drop_harness_configs(
@@ -577,6 +661,9 @@ def set_will_mode(root: Path, harness: str, proxy_url: str) -> None:
     mark cannot be forged from the workplace (plan review P1-1)."""
     if harness == "hermes":
         _set_hermes_will_mode(proxy_url)
+        return
+    if harness == "pi":
+        _set_pi_will_mode(proxy_url)
         return
     name = "zcode.json" if harness == "zcode" else "opencode.json"
     path = root / name

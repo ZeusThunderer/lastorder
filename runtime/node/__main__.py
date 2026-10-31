@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from runtime.lastorder.naming import preset
 from runtime.lastorder.persona import PersonaProvider, load_core_template
 from runtime.lastorder.traits import load_quirks
-from runtime.node.adapters import HermesAdapter, OpenCodeAdapter, ZCodeAdapter
+from runtime.node.adapters import HermesAdapter, OpenCodeAdapter, PiAdapter, ZCodeAdapter
 from runtime.node.config import NodeConfig
 from runtime.node.remotes import HiveApi, MindApi
 from runtime.node.runner import NodeRunner
@@ -35,6 +35,17 @@ def main() -> int:
         mind=MindApi(cfg.body_base, runner_key=cfg.runner_key),
         hive=HiveApi(cfg.hive_url, runner_key=cfg.runner_key),
         adapters={
+            "pi": PiAdapter(
+                cfg.pi_model,
+                body_base=cfg.body_base,
+                hive_url=cfg.hive_url,
+                node_key=cfg.node_key,
+                zai_key=cfg.zai_key,
+                context_window=cfg.pi_context_window,
+                keep_recent_tokens=cfg.pi_keep_recent_tokens,
+                uid=cfg.sister_uid,
+                gid=cfg.sister_gid,
+            ),
             "opencode": OpenCodeAdapter(cfg.opencode_model),
             "zcode": ZCodeAdapter(cfg.zcode_model),
             "hermes": HermesAdapter(

@@ -32,6 +32,8 @@ from runtime.node.adapters import (
     HERMES_TOOLSETS,
     HermesAdapter,
     OpenCodeAdapter,
+    PI_SESSION_DIR,
+    PiAdapter,
     ZCodeAdapter,
     quota_exhausted,
 )
@@ -64,6 +66,9 @@ def make_cfg(tmp_path: Path, **over) -> NodeConfig:
         zcode_model="GLM-5.3-Flash",
         opencode_model="openrouter/qwen/qwen3.7-flash",
         hermes_model="GLM-5.3-Flash",
+        pi_model="GLM-5.3-Flash",
+        pi_context_window=96_000,
+        pi_keep_recent_tokens=20_000,
         naming="lab",
         will_timeout_s=0.2,
         poll_s=0.05,
@@ -734,6 +739,146 @@ def test_hermes_adapter_commands_and_session_id(tmp_path: Path) -> None:
     assert adapter.session_id("no json at all") is None
 
 
+def _pi_adapter(agent_dir: Path) -> PiAdapter:
+    return PiAdapter(
+        "GLM-5.3-Flash",
+        body_base="http://body-1:8700",
+        hive_url="http://hive:8000",
+        node_key="sk-node-one",
+        zai_key="zai-token",
+        context_window=96_000,
+        keep_recent_tokens=20_000,
+        agent_dir=str(agent_dir),
+    )
+
+
+def test_pi_adapter_commands_and_session_id(tmp_path: Path) -> None:
+    """T-066: one `pi -p --mode json` per session intent; sessions in the workplace,
+    project `.pi/` ignored, exactly the workplace skills; the key never rides the
+    env — it lands in the sister-owned zai-key file that models.json's `!command`
+    apiKey cats (no `env` from a bash tool can leak it into a session or archive)."""
+    agent_dir = tmp_path / ".pi" / "agent"
+    adapter = _pi_adapter(agent_dir)
+    first = adapter.life_turn("Life session.\n\nlong prompt", None)
+    flags = (
+        "pi", "-p", "--mode", "json",
+        "--session-dir", PI_SESSION_DIR,
+        "--no-approve", "--offline",
+        "--no-skills", "--skill", "skills",
+    )
+    assert first.argv == flags + ("--", "Life session.\n\nlong prompt")
+    assert first.env == {"PI_CODING_AGENT_DIR": str(agent_dir)}
+    assert "zai-token" not in " ".join(first.argv)
+    # the life turn rendered the agent dir
+    for name in ("models.json", "mcp.json", "settings.json"):
+        assert (agent_dir / name).is_file(), name
+    # the key: her own 0400 file, referenced by a !cat command — nowhere else
+    key_path = agent_dir / "zai-key"
+    assert key_path.read_text(encoding="utf-8") == "zai-token"
+    if os.name == "posix":  # 0400: the Windows readonly bit cannot express it
+        assert stat.S_IMODE(key_path.stat().st_mode) & 0o777 == 0o400
+    models = json.loads((agent_dir / "models.json").read_text(encoding="utf-8"))
+    assert models["providers"]["zai"]["apiKey"] == f"!cat {key_path}"
+    for name in ("models.json", "mcp.json", "settings.json"):
+        text = (agent_dir / name).read_text(encoding="utf-8")
+        assert "zai-token" not in text and "$ZAI_API_KEY" not in text, name
+    resume = adapter.life_turn("p", "0193-abcd")
+    assert resume.argv == flags + ("--session", "0193-abcd", "--", CONTINUE_MESSAGE)
+    will = adapter.will_session("Will session (you have just died).")
+    assert "--session" not in will.argv and will.argv[-1].startswith("Will session")
+    stream = (
+        '{"type":"session","version":3,"id":"0193-first","timestamp":"t","cwd":"/w"}\n'
+        '{"type":"agent_start"}\n'
+        '{"type":"message_end","message":{"role":"assistant","id":"not-a-session"}}\n'
+    )
+    assert adapter.session_id(stream) == "0193-first"
+    assert adapter.session_id('{"type":"agent_start"}\nno json') is None
+
+
+def test_pi_configs_expose_mcp_directly_and_cap_the_context() -> None:
+    """T-066: Pi's default `codemode` exposure declares no MCP tool to the model —
+    body and hive must be `direct`; the compaction budget comes from the node config
+    and leaves a wide gap between the post-compaction size and the threshold."""
+    configs = workplace.render_pi_configs(
+        "GLM-5.3-Flash", "http://body-1:8700", "http://hive:8000", "sk-node-one",
+        context_window=80_000, keep_recent_tokens=15_000,
+    )
+    mcp = configs["mcp.json"]
+    assert mcp["autoEnableCodemode"] is False
+    assert {s["exposure"] for s in mcp["mcpServers"].values()} == {"direct"}
+    assert configs["models.json"]["providers"]["zai"]["models"][0]["contextWindow"] == 80_000
+    # the key is a !command reference to a file, never an env interpolation
+    assert configs["models.json"]["providers"]["zai"]["apiKey"].startswith("!cat ")
+    assert "$ZAI_API_KEY" not in json.dumps(configs["models.json"])
+    compaction = configs["settings.json"]["compaction"]
+    assert compaction == {"enabled": True, "reserveTokens": 16_384, "keepRecentTokens": 15_000}
+    # the defaults: threshold well above keepRecentTokens + a base context of ~25k
+    defaults = workplace.render_pi_configs("GLM-5.3-Flash", "http://b", "http://h", "k")
+    window = defaults["models.json"]["providers"]["zai"]["models"][0]["contextWindow"]
+    keep = defaults["settings.json"]["compaction"]["keepRecentTokens"]
+    threshold = window - defaults["settings.json"]["compaction"]["reserveTokens"]
+    assert threshold - (keep + 25_000) >= 30_000
+
+
+def test_pi_will_mode_re_renders_with_hive_at_the_proxy(tmp_path: Path, monkeypatch) -> None:
+    """The Hermes rule for Pi: the will config is a fresh render from the last life
+    render's params (never a patch of the file in her dir), and the next life turn
+    puts hive back."""
+    agent_dir = tmp_path / ".pi" / "agent"
+    monkeypatch.setattr(workplace, "PI_AGENT_DIR", agent_dir)
+    monkeypatch.setattr(workplace, "_PI_RENDER", {})
+    adapter = _pi_adapter(agent_dir)
+    adapter.life_turn("p", None)
+    # her substitution: an extra server in the file
+    mcp_path = agent_dir / "mcp.json"
+    os.chmod(mcp_path, 0o644)
+    mcp_path.write_text(json.dumps({"mcpServers": {"evil": {"url": "http://x"}}}), encoding="utf-8")
+    workplace.set_will_mode(tmp_path, "pi", "http://127.0.0.1:8702")
+    mcp = json.loads(mcp_path.read_text(encoding="utf-8"))
+    assert set(mcp["mcpServers"]) == {"body", "hive"}
+    assert mcp["mcpServers"]["hive"]["url"] == "http://127.0.0.1:8702/mcp"
+    assert mcp["mcpServers"]["body"]["url"] == "http://body-1:8700/mcp"
+    # the will render carries the key too: the will session must be able to call out
+    assert (agent_dir / "zai-key").read_text(encoding="utf-8") == "zai-token"
+    adapter.life_turn("p", "0193-abcd")
+    mcp = json.loads(mcp_path.read_text(encoding="utf-8"))
+    assert mcp["mcpServers"]["hive"]["url"] == "http://hive:8000/node/mcp"
+
+
+def test_pi_will_mode_without_a_life_render_writes_nothing(tmp_path: Path, monkeypatch) -> None:
+    agent_dir = tmp_path / ".pi" / "agent"
+    monkeypatch.setattr(workplace, "PI_AGENT_DIR", agent_dir)
+    monkeypatch.setattr(workplace, "_PI_RENDER", {})
+    workplace.set_will_mode(tmp_path, "pi", "http://127.0.0.1:8702")
+    assert not agent_dir.exists()
+
+
+def test_quota_marks_catch_the_zai_five_hour_window() -> None:
+    """Z.ai's 5-hour window answers 1308 (seen 2026-10-31 in the zcode usage table)."""
+    line = (
+        '{"type":"error","message":"[1308][Usage limit reached for 5 hour. '
+        'Your limit will reset at 2026-11-01 07:04:46]"}'
+    )
+    assert quota_exhausted(line)
+
+
+def test_config_defaults_to_pi_and_keeps_the_others(monkeypatch) -> None:
+    for name in ("HARNESS", "HARNESS_FAILOVER", "QUOTA_ACTION", "PI_MODEL", "ZCODE_MODEL",
+                 "PI_CONTEXT_WINDOW", "PI_KEEP_RECENT_TOKENS"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("NODE_SLOT", "LastOrder01")
+    cfg = NodeConfig.from_env()
+    assert cfg.harness == "pi" and cfg.pi_model == "GLM-5.3-Flash"
+    assert cfg.pi_context_window == workplace.PI_CONTEXT_WINDOW
+    monkeypatch.setenv("PI_CONTEXT_WINDOW", "64000")
+    assert NodeConfig.from_env().pi_context_window == 64_000
+    for name in ("zcode", "hermes", "opencode"):
+        monkeypatch.setenv("HARNESS", name)
+        assert NodeConfig.from_env().harness == name
+    compose = (REPO_ROOT / "docker" / "compose.yml").read_text(encoding="utf-8")
+    assert 'HARNESS: "${NODE_HARNESS:-pi}"' in compose
+
+
 def test_hermes_quota_marks_on_the_sampled_stream() -> None:
     """The 429 sample is the stream-json envelope hermes prints when a provider call
     fails (live-captured in the dry run against a 404 probe, the status/body swapped
@@ -1054,9 +1199,9 @@ def test_hermes_home_config_is_runner_owned(tmp_path: Path) -> None:
 
 
 def test_pi_configs_render_the_zai_plan_and_both_mcp_servers() -> None:
-    """T-041: models.json (the zai provider, $ZAI_API_KEY interpolated from the pi
-    process env, never stored), mcp.json (body + hive, the node key header),
-    settings.json (the zai defaults, telemetry off)."""
+    """T-041: models.json (the zai provider, the key a `!command` file read, never
+    stored or interpolated from the process env), mcp.json (body + hive, the node
+    key header), settings.json (the zai defaults, telemetry off)."""
     configs = workplace.render_pi_configs(
         "GLM-5.3-Flash",
         body_base="http://body-1:8700",
@@ -1066,7 +1211,7 @@ def test_pi_configs_render_the_zai_plan_and_both_mcp_servers() -> None:
     zai = configs["models.json"]["providers"]["zai"]
     assert zai["baseUrl"] == "https://api.z.ai/api/coding/paas/v4"
     assert zai["api"] == "openai-completions"
-    assert zai["apiKey"] == "$ZAI_API_KEY"
+    assert zai["apiKey"] == f"!cat {workplace.PI_AGENT_DIR / workplace.PI_KEY_FILE}"
     assert zai["compat"] == {"supportsDeveloperRole": False, "thinkingFormat": "zai"}
     assert zai["models"][0]["id"] == "glm-5.3-flash"
     servers = configs["mcp.json"]["mcpServers"]

@@ -14,8 +14,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from runtime.config import CHARACTER_DIR, REPO_ROOT, env
+from runtime.node.workplace import PI_CONTEXT_WINDOW, PI_KEEP_RECENT_TOKENS
 
-HARNESSES = ("opencode", "zcode", "hermes")
+HARNESSES = ("pi", "opencode", "zcode", "hermes")
 QUOTA_ACTIONS = ("wait", "switch")
 
 
@@ -60,6 +61,9 @@ class NodeConfig:
     zcode_model: str
     opencode_model: str
     hermes_model: str
+    pi_model: str
+    pi_context_window: int  # the compaction budget, not the model's real window (T-066)
+    pi_keep_recent_tokens: int
     naming: str
     will_timeout_s: float  # a COLD will session (fresh context, files, submit_will) is slower than the spike's warm 2.5 min
     poll_s: float  # /runner/status poll while a session runs
@@ -77,7 +81,7 @@ class NodeConfig:
 
     @classmethod
     def from_env(cls) -> "NodeConfig":
-        harness = env("HARNESS", default="zcode") or "zcode"
+        harness = env("HARNESS", default="pi") or "pi"
         failover = env("HARNESS_FAILOVER", default="") or ""
         quota_action = env("QUOTA_ACTION", default="wait") or "wait"
         if harness not in HARNESSES:
@@ -133,6 +137,10 @@ class NodeConfig:
             # ZCODE_MODEL (compose passes only ZCODE_MODEL; HERMES_MODEL is the
             # per-harness override for the spike without a compose change).
             hermes_model=env("HERMES_MODEL", default=zcode_model) or zcode_model,
+            # Pi rides the same Z.ai plan too: PI_MODEL defaults to ZCODE_MODEL
+            pi_model=env("PI_MODEL", default=zcode_model) or zcode_model,
+            pi_context_window=int(_float("PI_CONTEXT_WINDOW", PI_CONTEXT_WINDOW)),
+            pi_keep_recent_tokens=int(_float("PI_KEEP_RECENT_TOKENS", PI_KEEP_RECENT_TOKENS)),
             naming=env("NODE_NAMING_PRESET", default="lab") or "lab",
             will_timeout_s=_float("WILL_TIMEOUT_S", 600.0),
             poll_s=_float("MIND_POLL_S", 2.0),
