@@ -128,6 +128,23 @@ function openStream() {
   source.addEventListener("board", scheduleRefresh);
 }
 
+// SSE carries board changes alone: a closed life (retire) changes liveness — who may
+// be addressed, which cards go gray — without touching the board, so no event comes.
+// A light poll re-renders only when the alive set actually changed.
+function watchLiveness() {
+  setInterval(async () => {
+    try {
+      const alive = await api("/registry/alive", "GET");
+      if (JSON.stringify(alive) !== JSON.stringify(state.alive)) {
+        state.alive = alive;
+        render();
+      }
+    } catch (error) {
+      toast(String(error.message || error)); // the next tick tries again
+    }
+  }, 10000);
+}
+
 // --- render -----------------------------------------------------------------------------
 
 function render() {
@@ -155,8 +172,12 @@ function fillColumn(id, entries) {
 function entryCard(entry) {
   const card = el("article", "entry");
   const live = liveSerials();
-  const addresseeDead = /^\d+$/.test(entry.to) && !live.has(entry.to);
-  if (addresseeDead) card.classList.add("dead");
+  // the whole card goes gray when a node it names is dead (TASKBOARD.md 12);
+  // the individual name spans gray out the same way inside the route line
+  const namesDead = [entry.from, entry.to, entry.claimed_by].some(
+    (who) => typeof who === "string" && /^\d+$/.test(who) && !live.has(who)
+  );
+  if (namesDead) card.classList.add("dead");
   if (TERMINAL.has(entry.status)) card.classList.add("terminal");
 
   const head = el("div", "head");
@@ -413,6 +434,7 @@ function init() {
   });
   refresh();
   openStream();
+  watchLiveness();
 }
 
 init();
