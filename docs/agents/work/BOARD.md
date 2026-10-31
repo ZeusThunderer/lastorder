@@ -59,7 +59,7 @@
 | T-053 | Команды сервера сестре — команды игрока с запретным списком и вход /login средой | I | ready | critical | z/T-053-server-commands |
 | T-054 | Старт слота — нет смерти от устаревшего hp, wait_events не дольше таймаута харнесса | I | ready | critical | z/T-054-slot-start-fixes |
 | T-055 | Мост py4j — порядок подъёма тела и mind, мягкая остановка, перезапуск слота одной командой | I | ready | normal | z/T-055-py4j-bridge |
-| T-056 | Контекст запроса сестры — разбор 100k токенов и сокращение главных частей | I | ready | normal | z/T-056-context-cut |
+| T-056 | Контекст запроса сестры — рост за жизнь, пробуждения, крупные части | I | ready | normal | z/T-056-context-cut |
 | T-057 | Мост инфраструктуры — Last Order поднимает и снимает сестёр, хост исполняет без одобрения на каждое действие | I | ready | critical | z/T-057-infra-bridge |
 | T-058 | Прогон стенда после исправлений — команда сервера, старт слота, мост, размер запроса | I | ready | normal | z/T-058-stand-run-fixes |
 | T-059 | Last Order на Z.ai Coding Plan — харнесс zcode, как у сестёр, запасной OpenCode через шлюз | I | ready | critical | z/T-059-lo-on-zai |
@@ -69,3 +69,4 @@
 | T-063 | Камера тела и сервис media — экран тела потоком в MediaMTX, кольцевой буфер, вырезка по времени | I | ready | critical | z/T-063-body-camera |
 | T-064 | Last Order и видео — доступ к media, ffmpeg, журналы сети на чтение, справка об инструментах | I | ready | critical | z/T-064-lo-media-access |
 | T-065 | Прогон камер на стенде — три тела на Xvfb в media, цена CPU и памяти, влияние на C1 | I | ready | normal | z/T-065-camera-stand-run |
+| T-066 | Сёстры на Pi напрямую — адаптер раннера, MCP без codemode, потолок контекста сжатием | I | ready | critical | z/T-066-sisters-pi-direct |
