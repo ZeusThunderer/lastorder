@@ -255,6 +255,10 @@ function requestBox(request) {
     arg.append(el("span", "k", key + ": "), document.createTextNode(String(request.args[key])));
     box.append(arg);
   }
+  if (request.grant) {
+    box.append(el("span", "arg grant-line",
+      "grant: " + request.grant.kind + " " + request.grant.what));
+  }
   if (request.why) box.append(el("span", "arg why", "почему: " + request.why));
   return box;
 }
@@ -347,6 +351,16 @@ function actionsRow(entry, carriedForm) {
     });
     row.append(ack);
   }
+  const grant = entry.request && entry.request.grant;
+  if (entry.kind === "request" && entry.status === "approved" && grant) {
+    // TASKBOARD.md 5.3: the entry keeps `approved`, the grant record flips to revoked
+    const revoke = el("button", "danger", "отозвать грант");
+    revoke.type = "button";
+    revoke.addEventListener("click", () => {
+      doAction("/grants/revoke", { kind: grant.kind, what: grant.what });
+    });
+    row.append(revoke);
+  }
   wire(button("реплика", null, "reply"), () => replyForm(entry));
   // the carried form stays open on the fresh card only if the entry still offers
   // its move: a status change may have removed the button that opened it (R2-1)
@@ -362,7 +376,7 @@ function transitionForm(entry, toStatus, label, options) {
   const opts = options || {};
   const form = el("form", "inline-form");
   form.dataset.opens = toStatus; // matched against the fresh card's buttons (R2-1)
-  const inputs = { text: null, args: {} };
+  const inputs = { text: null, args: {}, secret: null };
 
   if (opts.editArgs && entry.request) {
     for (const key of Object.keys(entry.request.args || {})) {
@@ -375,6 +389,19 @@ function transitionForm(entry, toStatus, label, options) {
       row.append(input);
       form.append(row);
     }
+  }
+  const grant = entry.request && entry.request.grant;
+  if (toStatus === "approved" && grant && grant.kind === "secret") {
+    // T-046: the operator types the secret here; it reaches the vault alone
+    const row = el("label", "arg-row");
+    row.append(el("span", "k", "значение секрета:"));
+    const input = document.createElement("input");
+    input.type = "password";
+    input.autocomplete = "new-password";
+    input.required = true;
+    inputs.secret = input;
+    row.append(input);
+    form.append(row);
   }
   if (toStatus !== "acked") {
     const area = document.createElement("textarea");
@@ -396,6 +423,7 @@ function transitionForm(entry, toStatus, label, options) {
     event.preventDefault();
     const body = { to_status: toStatus };
     if (inputs.text && inputs.text.value.trim()) body.text = inputs.text.value;
+    if (inputs.secret) body.secret = inputs.secret.value;
     if (opts.editArgs) {
       body.args = {};
       for (const key of Object.keys(inputs.args)) body.args[key] = inputs.args[key].value;

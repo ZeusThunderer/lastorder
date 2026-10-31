@@ -34,6 +34,7 @@ runner key (`X-Runner-Key`): the node's will-session proxy adds it, a sister's b
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,13 +45,15 @@ from mcp.server.mcpserver.context import Context
 from mcp.server.mcpserver.exceptions import ToolError as SdkToolError
 
 from runtime.comms.schema import MSG_MAX_CHARS
-from runtime.hive.board import Board, BoardError, LAST_ORDER
+from runtime.hive.board import OPERATOR, Board, BoardError, LAST_ORDER
 from runtime.hive.client import (
     entry_to_json,
     inheritance_to_json,
     message_to_json,
     slice_to_json,
 )
+from runtime.hive import grants as grants_module
+from runtime.hive.grants import GrantError
 from runtime.hive.lifecycle import HiveLog, Lifecycle, LifecycleError
 from runtime.hive.proposals import (
     CommonLayers,
@@ -127,6 +130,7 @@ class HiveMcp:
         now: Callable[[], str] | None = None,
         runner_keys: Mapping[str, str] | None = None,
         board: Board | None = None,
+        grants: Any = None,
     ):
         self._store = store
         self._lifecycle = lifecycle
@@ -141,6 +145,7 @@ class HiveMcp:
         # header check of T-028 alone.
         self._runner_keys = dict(runner_keys) if runner_keys else {}
         self._board = board
+        self._grants = grants
         self._wills_dir = Path(run_dir) / "pending_wills"
         self._log = log
         self._now = now or (lambda: datetime.now(timezone.utc).isoformat())
@@ -377,6 +382,52 @@ class HiveMcp:
             _err("reply: id must be an entry id")
         return self._board.reply(actor, entry_id, text)
 
+    # --- grants (ADR-041, TASKBOARD.md 5.3; T-046) ---------------------------------------------
+
+    _GRANT_DOMAIN = re.compile(
+        r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
+    )
+    _GRANT_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+    def grant_request(self, ctx: Context, kind: Any, what: Any, why: Any) -> dict[str, Any]:
+        """Last Order alone asks the operator for a mechanical grant."""
+        self._require_last_order(ctx)
+        if kind not in grants_module.KINDS:
+            _err(f"request_grant: kind must be one of {list(grants_module.KINDS)}")
+        if not isinstance(what, str) or not what.strip():
+            _err("request_grant: what must be a non-empty string")
+        what = what.strip().lower()
+        if kind == "egress":
+            if len(what) > grants_module.DOMAIN_MAX or not self._GRANT_DOMAIN.match(what):
+                _err("request_grant: an egress grant names a plain domain (api.example.com)")
+        elif not self._GRANT_NAME.match(what):
+            _err("request_grant: a secret grant names a snake_case name (telegram_token)")
+        text = f"grant {kind}: {what}"
+        request = {
+            "action": "grant",
+            "args": {"kind": kind, "what": what},
+            "why": why if isinstance(why, str) else "",
+            "allowed": ["approve", "deny"],
+            "grant": {"kind": kind, "what": what},
+        }
+        entry = self._board.post(
+            LAST_ORDER, kind="request", to=OPERATOR, text=text, request=request
+        )
+        return {"id": entry["id"]}
+
+    def grant_list(self, ctx: Context) -> dict[str, Any]:
+        """The grant records as short lines; secret values never leave the vault."""
+        self._require_last_order(ctx)
+        if self._grants is None:
+            _err("grants: the vault is not configured")
+        return {
+            "grants": [
+                f"{g['kind']} {g['what']} {g['status']} approved {g['approved_at']}"
+                + (f" revoked {g['revoked_at']}" if g["revoked_at"] else "")
+                for g in self._grants.list()
+            ]
+        }
+
     # --- Last Order's tools (ADR-036) ---------------------------------------------------------
 
     def proposals(self, ctx: Context) -> dict[str, Any]:
@@ -438,6 +489,8 @@ async def _run(body: Callable[[], Any]) -> Any:
     except ToolError:
         raise
     except BoardError as exc:
+        raise ToolError(f"{exc.kind}: {exc.message}") from exc
+    except GrantError as exc:
         raise ToolError(f"{exc.kind}: {exc.message}") from exc
     except (StoreError, LifecycleError, ProposalError, SchemaError) as exc:
         raise ToolError(str(exc)) from exc
@@ -579,6 +632,19 @@ def build_mcp(
         """One thread reply on an entry you are part of, without a status change."""
         return await _run(lambda: impl.board_reply(ctx, id, text, lo=True))
 
+    async def request_grant(
+        kind: str, what: str, why: str = "", *, ctx: Context
+    ) -> dict[str, Any]:
+        """Ask the operator for a mechanical grant: kind 'egress' (what: a plain
+        domain, e.g. api.telegram.org) or 'secret' (what: a snake_case name). Posts a
+        board request the operator approves on the board page; a secret's value is
+        typed there and never returns to you. Last Order alone has this tool."""
+        return await _run(lambda: impl.grant_request(ctx, kind, what, why))
+
+    async def grants(*, ctx: Context) -> dict[str, Any]:
+        """The grant records ({grants}): kind, what, status — never secret values."""
+        return await _run(lambda: impl.grant_list(ctx))
+
     async def proposals(*, ctx: Context) -> dict[str, Any]:
         """The open proposal queue ({proposals}), oldest first."""
         return await _run(lambda: impl.proposals(ctx))
@@ -609,6 +675,8 @@ def build_mcp(
     lo.add_tool(lo_claim, name="claim")
     lo.add_tool(lo_update, name="update")
     lo.add_tool(lo_reply, name="reply")
+    lo.add_tool(request_grant, name="request_grant")
+    lo.add_tool(grants, name="grants")
 
     return sister, lo
 

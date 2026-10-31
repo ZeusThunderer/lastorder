@@ -510,6 +510,23 @@ services:
         aliases: ["api.z.ai"]
     restart: on-failure
 
+  # The grants egress proxy (T-046, ADR-041, TASKBOARD.md 5.3): an HTTP CONNECT
+  # tunnel that opens ONLY the domains of active egress grants. It asks hive over
+  # svc-lo with HIVE_TOOL_KEY (GET /grants/egress), so an approval opens a domain
+  # and a revoke closes it with no rebuild or restart. It terminates no TLS: the
+  # tunnel carries the client's own certificates end-to-end, like zai-egress. It
+  # sits on egress-out (the only network with a way out) and svc-lo — Last Order's
+  # tool executor reaches the internet through this proxy alone; a sister sandbox
+  # (svc-N) has no route to it at all.
+  egress:
+    build: ./egress
+    image: lastorder-egress:dev
+    environment:
+      HIVE_URL: http://hive:8000
+      HIVE_TOOL_KEY: "${HIVE_TOOL_KEY:-}"
+    networks: [egress-out, svc-lo]
+    restart: on-failure
+
 volumes:
   world:
   body-1:
