@@ -8,6 +8,16 @@
 <link rel="stylesheet" href="/board/board.css">
 </head>
 <body>
+<div id="login" class="login" hidden>
+  <form id="login-form" class="login-form">
+    <h2>Вход на доску</h2>
+    <p class="login-note">Пароль — HIVE_OPERATOR_KEY стенда</p>
+    <input type="password" id="login-password" placeholder="пароль оператора"
+           autocomplete="current-password" required>
+    <button type="submit">войти</button>
+    <div id="login-error" class="login-error" hidden></div>
+  </form>
+</div>
 <header class="top">
   <h1>Доска сети</h1>
   <span id="conn" class="conn" title="живое обновление">…</span>
@@ -23,6 +33,7 @@
     <textarea id="new-text" maxlength="800" placeholder="текст (до 800 символов)" required></textarea>
     <button type="submit">отправить</button>
   </form>
+  <button id="logout" class="logout" hidden>выйти</button>
 </header>
 <main class="columns">
   <section class="column" id="col-task">

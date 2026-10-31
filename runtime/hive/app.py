@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import hashlib
 import json
 import secrets
 import threading
@@ -609,6 +610,23 @@ def create_app(
             decoded.partition(":")[2].encode("utf-8"), operator_secret.encode("utf-8")
         )
 
+    # The page's own login (operator-ordered, T-052): POST /board/login with the
+    # password sets a cookie carrying sha256(password) — not the password itself —
+    # so the browser's EventSource (which cannot send headers) rides the same auth
+    # as every fetch. Loopback-only port, one operator: no server-side sessions.
+    _LOGIN_COOKIE = "lo_board"
+
+    def _login_cookie_value() -> str:
+        return hashlib.sha256(operator_secret.encode("utf-8")).hexdigest()
+
+    def _login_cookie_ok(request: Request) -> bool:
+        if not operator_secret:
+            return False
+        value = request.cookies.get(_LOGIN_COOKIE, "")
+        return bool(value) and secrets.compare_digest(
+            value.encode("utf-8"), _login_cookie_value().encode("utf-8")
+        )
+
     def _require_operator(request: Request) -> None:
         if not operator_secret:
             raise ApiError(401, "operator_key", "the board needs HIVE_OPERATOR_KEY configured")
@@ -616,7 +634,7 @@ def create_app(
         if key:
             if secrets.compare_digest(key.encode("utf-8"), operator_secret.encode("utf-8")):
                 return
-        elif _basic_password_ok(request):
+        elif _basic_password_ok(request) or _login_cookie_ok(request):
             return
         raise ApiError(401, "operator_key", "X-Operator-Key or the Basic password opens the board")
 
@@ -638,11 +656,12 @@ def create_app(
 
     def _board_actor(request: Request) -> str:
         """Operator or agent identity for the routes both may read. The page's
-        browser identifies with its Basic pair the same way as everywhere else."""
+        browser identifies with its Basic pair or its login cookie the same way
+        as everywhere else."""
         if request.headers.get("x-operator-key", "").strip():
             _require_operator(request)
             return OPERATOR
-        if _basic_password_ok(request):
+        if _basic_password_ok(request) or _login_cookie_ok(request):
             return OPERATOR
         return _agent_actor(request)
 
@@ -777,25 +796,37 @@ def create_app(
             pass
         return record
 
-    # --- the operator's page (T-049, TASKBOARD.md section 12) ----------------------------
-    # Basic-auth with HIVE_OPERATOR_KEY: the browser challenges itself on 401, the
-    # password never rides in the HTML, the URL or storage. Registered after the
-    # literal /board routes on purpose: this parameter route catches only the assets.
+    # --- the operator's page (T-049, TASKBOARD.md section 12; login form T-052) ----------
+    # The page itself is public: it is a static shell with no data — every number on
+    # it comes from the authed routes below. The login form posts to /board/login,
+    # which sets the cookie; Basic-auth and X-Operator-Key keep working for browsers
+    # and scripts. Registered after the literal /board routes on purpose: this
+    # parameter route catches only the assets.
 
-    def _page_unauthorized() -> JSONResponse:
-        return JSONResponse(
-            status_code=401,
-            headers={"WWW-Authenticate": 'Basic realm="last-order board", charset="UTF-8"'},
-            content={"error": {"kind": "operator_key",
-                               "message": "the board opens with the operator password"}},
+    @app.post("/board/login")
+    def board_login(request: Request, body: dict) -> dict:
+        if not operator_secret:
+            raise ApiError(401, "operator_key", "the board needs HIVE_OPERATOR_KEY configured")
+        password = body.get("password")
+        if not isinstance(password, str) or not secrets.compare_digest(
+            password.encode("utf-8"), operator_secret.encode("utf-8")
+        ):
+            raise ApiError(401, "operator_key", "wrong password")
+        response = JSONResponse({"ok": True})
+        response.set_cookie(
+            _LOGIN_COOKIE, _login_cookie_value(),
+            max_age=12 * 3600, httponly=True, samesite="strict", path="/board",
         )
+        return response
+
+    @app.post("/board/logout")
+    def board_logout() -> dict:
+        response = JSONResponse({"ok": True})
+        response.delete_cookie(_LOGIN_COOKIE, path="/board")
+        return response
 
     @app.get("/board")
     def board_page(request: Request) -> Response:
-        if not operator_secret:
-            raise ApiError(401, "operator_key", "the board needs HIVE_OPERATOR_KEY configured")
-        if not _basic_password_ok(request):
-            return _page_unauthorized()
         return FileResponse(
             _STATIC_DIR / "board.html", media_type=_BOARD_STATIC["board.html"],
             headers={"Cache-Control": "no-store"},  # the operator always sees the current page
@@ -805,10 +836,6 @@ def create_app(
     def board_asset(request: Request, filename: str) -> Response:
         if filename not in _BOARD_STATIC:
             raise ApiError(404, "http", f"no board asset {filename!r}")
-        if not operator_secret:
-            raise ApiError(401, "operator_key", "the board needs HIVE_OPERATOR_KEY configured")
-        if not _basic_password_ok(request):
-            return _page_unauthorized()
         return FileResponse(
             _STATIC_DIR / filename, media_type=_BOARD_STATIC[filename],
             headers={"Cache-Control": "no-store"},

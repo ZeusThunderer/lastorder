@@ -48,49 +48,70 @@ class Stack:
         self.client = TestClient(self.app)
 
 
-# --- the Basic-auth gate (acceptance: 401 with WWW-Authenticate / 200) ---------------------
+# --- the page and its assets are open; the data behind them is not (T-052) ----------------
 
 
-def test_board_page_challenges_without_password(tmp_path: Path) -> None:
+def test_board_page_opens_without_a_dialog(tmp_path: Path) -> None:
+    """The shell carries no data — every number comes from the authed routes — so it
+    loads anonymously and shows the login form instead of the browser's Basic box."""
     stack = Stack(tmp_path)
     response = stack.client.get("/board")
-    assert response.status_code == 401
-    assert response.headers["WWW-Authenticate"].startswith("Basic ")
-    # the operator key header is not the page's gate: the browser must see the challenge
-    key_only = stack.client.get("/board", headers={"X-Operator-Key": KEY_OP})
-    assert key_only.status_code == 401
-    assert key_only.headers["WWW-Authenticate"].startswith("Basic ")
+    assert response.status_code == 200
+    assert response.headers["Content-Type"].startswith("text/html")
+    assert response.content == (STATIC / "board.html").read_bytes()
+    # the data stays closed: the API answers 401 without the key/cookie
+    assert stack.client.get("/board/entries").status_code == 401
 
 
-def test_board_page_opens_with_the_password(tmp_path: Path) -> None:
-    stack = Stack(tmp_path)
-    for user in ("operator", "", "anything"):
-        response = stack.client.get("/board", headers=basic(user, KEY_OP))
-        assert response.status_code == 200, (user, response.text)
-        assert response.headers["Content-Type"].startswith("text/html")
-        assert response.content == (STATIC / "board.html").read_bytes()
-    wrong = stack.client.get("/board", headers=basic("operator", "not-the-key"))
-    assert wrong.status_code == 401
-    assert wrong.headers["WWW-Authenticate"].startswith("Basic ")
-    garbage = stack.client.get("/board", headers={"Authorization": "Bearer nope"})
-    assert garbage.status_code == 401
-
-
-def test_board_assets_gated_and_whitelisted(tmp_path: Path) -> None:
+def test_board_assets_open_and_whitelisted(tmp_path: Path) -> None:
     stack = Stack(tmp_path)
     for name, media in (
         ("board.js", "text/javascript"),
         ("board.css", "text/css"),
     ):
-        served = stack.client.get(f"/board/{name}", headers=basic("operator", KEY_OP))
+        served = stack.client.get(f"/board/{name}")
         assert served.status_code == 200
         assert served.headers["Content-Type"].startswith(media)
         assert served.content == (STATIC / name).read_bytes()
-        anonymous = stack.client.get(f"/board/{name}")
-        assert anonymous.status_code == 401
     for missing in ("nope.js", "..%2Fapp.py", "board.html%00"):
-        response = stack.client.get(f"/board/{missing}", headers=basic("operator", KEY_OP))
+        response = stack.client.get(f"/board/{missing}")
         assert response.status_code == 404, missing
+
+
+def test_basic_password_still_opens_the_page(tmp_path: Path) -> None:
+    """Basic-auth keeps working for browsers that cached the pair and for scripts."""
+    stack = Stack(tmp_path)
+    for user in ("operator", "", "anything"):
+        response = stack.client.get("/board", headers=basic(user, KEY_OP))
+        assert response.status_code == 200, (user, response.text)
+    wrong = stack.client.get("/board/entries", headers=basic("operator", "not-the-key"))
+    assert wrong.status_code == 401
+
+
+# --- the page's login form (T-052) ---------------------------------------------------------
+
+
+def test_login_sets_the_cookie_that_opens_the_api(tmp_path: Path) -> None:
+    stack = Stack(tmp_path)
+    wrong = stack.client.post("/board/login", json={"password": "not-the-key"})
+    assert wrong.status_code == 401
+    ok = stack.client.post("/board/login", json={"password": KEY_OP})
+    assert ok.status_code == 200 and ok.json() == {"ok": True}
+    cookie = ok.headers["Set-Cookie"]
+    assert "lo_board=" in cookie and "HttpOnly" in cookie and "SameSite=strict" in cookie
+    assert KEY_OP not in cookie  # the cookie carries the hash, never the password
+    # the cookie alone (no headers) opens the operator API and the SSE source
+    assert stack.client.get("/board/entries", cookies={"lo_board": cookie.split("lo_board=")[1].split(";")[0]}).status_code == 200
+    # a wrong cookie value is still a calm 401
+    assert stack.client.get("/board/entries", cookies={"lo_board": "f" * 64}).status_code == 401
+
+
+def test_logout_clears_the_cookie(tmp_path: Path) -> None:
+    stack = Stack(tmp_path)
+    stack.client.post("/board/login", json={"password": KEY_OP})
+    out = stack.client.post("/board/logout")
+    assert out.status_code == 200
+    assert 'lo_board=""' in out.headers["Set-Cookie"]
 
 
 # --- the page's browser speaks the Basic password to the operator API ---------------------
@@ -144,7 +165,7 @@ def test_non_ascii_key_is_a_calm_401(tmp_path: Path) -> None:
         runner_keys={},
     )
     client = TestClient(app)
-    wrong = client.get("/board", headers=basic("operator", "неверный-Ø"))
+    wrong = client.get("/board/entries", headers=basic("operator", "неверный-Ø"))
     assert wrong.status_code == 401  # not 500: the compare is over bytes
     right = client.get("/board", headers=basic("operator", unicode_key))
     assert right.status_code == 200

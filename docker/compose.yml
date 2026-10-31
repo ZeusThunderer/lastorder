@@ -58,8 +58,8 @@ x-mind: &mind
     # fail-closed (review R2-6): without the slot's runner key the mind refuses to
     # start rather than serve /runner/* ungated; NODE_DEV_OPEN=1 is the dev exception
     NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
-    # The operator's game name (T-051): the mind marks this player's chat lines
-    # `from: operator`. A stand config value, not a secret; empty leaves the marking off.
+    # The operator's game name (T-051): the mind marks this player's chat lines with
+    # `operator: true`. A stand config value, not a secret; empty leaves the marking off.
     OPERATOR_MC_NAME: "${OPERATOR_MC_NAME:-}"
   command: ["python", "-m", "runtime.mind"]
 
@@ -151,7 +151,10 @@ services:
     environment:
       <<: *body-env
       MC_USERNAME: LastOrder01
-      MC_SERVER: mc-server:25565
+      # MC_SERVER_1 moves this body to another server (operator-ordered, T-052 run):
+      # the body rides the default network, so an external address is reachable;
+      # mind-1 shares this netns and is recreated with it.
+      MC_SERVER: "${MC_SERVER_1:-mc-server:25565}"
     volumes:
       - body-1:/data
     networks: [default, slot-1]   # slot-1 carries mind-1's MCP to node-1 (internal)
