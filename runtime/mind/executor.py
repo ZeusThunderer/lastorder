@@ -120,6 +120,9 @@ _BOARD_MORE_RE = re.compile(r"^… (\d+) more, `board`$")
 CHAT_LINES_MAX = 20  # one `chat.line` event: the newest stay, the rest folds
 _CHAT_DROPPED_RE = re.compile(r"^… (\d+) earlier lines dropped$")
 
+# Slot names are `LastOrderNN` (CLAUDE.md): never a valid operator name, whatever the case.
+_SLOT_NAME_RE = re.compile(r"^lastorder\d{2}$", re.IGNORECASE)
+
 
 def _board_marker(dropped: int) -> str:
     return f"… {dropped} more, `board`"
@@ -313,16 +316,21 @@ class Executor:
         self._username = username
         self._log = log_
         # The operator's game name (T-051): the environment marks `<name>` chat lines
-        # with it. The slot's own name refuses — every sister line would carry the
-        # mark; empty simply leaves the marking off.
+        # with it. ANY slot's name refuses (review R1-1: one variable feeds three
+        # minds — a sister's voice must never pass for the operator's), whatever the
+        # letter case; empty simply leaves the marking off.
         self._operator_name = str(operator_name or "").strip()
-        if self._operator_name == username:
+        if self._operator_name and (
+            self._operator_name.lower() == username.lower() or _SLOT_NAME_RE.match(self._operator_name)
+        ):
+            refused = self._operator_name
             self._operator_name = ""
             self._log.record(
                 "event",
                 event="operator_name.ignored",
-                reason=f"OPERATOR_MC_NAME matches the slot username {username!r}",
+                reason=f"OPERATOR_MC_NAME {refused!r} is a slot name, not the operator's",
             )
+        self._operator_low = self._operator_name.lower()
         self._perception = perception or Perception(descriptions={}, salt="", mode="plain")
         self._clock = clock
         self._wall_clock = wall_clock
@@ -431,7 +439,7 @@ class Executor:
             return None
         if speaker is None:
             return {"text": clean}
-        if speaker == self._operator_name:
+        if speaker.lower() == self._operator_low:
             return {"from": "operator", "text": clean}
         return {"from": self._perception.scrub(speaker).strip() or speaker, "text": clean}
 

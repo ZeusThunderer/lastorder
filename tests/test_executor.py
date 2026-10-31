@@ -972,3 +972,32 @@ def test_chat_keeps_the_newest_twenty_and_marks_the_dropped() -> None:
     assert len(lines) == 21  # the newest 20 + the marker
     assert lines[0] == {"from": "Steve", "text": "line 11"}
     assert lines[-1] == {"text": "… 10 earlier lines dropped"}
+
+
+def test_operator_name_of_any_slot_is_refused(tmp_path) -> None:
+    """Review R1: one OPERATOR_MC_NAME feeds three minds — a sister's voice (any
+    slot's name, whatever the case) must never pass for the operator's."""
+    path = str(tmp_path / "log.jsonl")
+    rig = Rig(log_file=path, operator_name="lastorder02")  # another slot's name
+    try:
+        assert rig.x._operator_name == ""
+        rig.body.push_event("chat.line", "<LastOrder02> реплика сестры")
+        rig.tick()
+        (chat,) = rig.events_of("chat.line")
+        assert chat["lines"] == [{"from": "LastOrder02", "text": "реплика сестры"}]
+        with open(path, encoding="utf-8") as fh:
+            entries = [json.loads(line) for line in fh if line.strip()]
+        assert len([e for e in entries if e.get("event") == "operator_name.ignored"]) == 1
+    finally:
+        rig.close()
+
+
+def test_operator_mark_is_case_insensitive() -> None:
+    rig = Rig(operator_name="ZeusThunderer")
+    try:
+        rig.body.push_event("chat.line", "<ZEUSTHUNDERER> привет")
+        rig.tick()
+        (chat,) = rig.events_of("chat.line")
+        assert chat["lines"] == [{"from": "operator", "text": "привет"}]
+    finally:
+        rig.close()

@@ -48,3 +48,22 @@ $ uv run pytest tests/test_executor.py tests/test_mcp_body.py tests/test_percept
 
 ### Вопросы
 - нет
+
+## Раунд 2 · 2026-10-31
+Коммиты: <фикс-коммит>
+
+### Ответ на ревью
+- R1 (major) · fixed: отказ теперь на имя ЛЮБОГО слота — `_SLOT_NAME_RE` (^lastorder\d{2}$,
+  без учёта регистра) плюс сравнение с именем своего слота без регистра; маркировка в
+  `chat_entry` тоже без регистра (`speaker.lower() == operator_low`). Тесты:
+  `test_operator_name_of_any_slot_is_refused` (mind слота 01, переменная lastorder02 —
+  реплика сестры 02 без метки, одна строка `operator_name.ignored`),
+  `test_operator_mark_is_case_insensitive` (<ZEUSTHUNDERER> при ZeusThunderer → operator).
+- «his lines» · fixed: «the operator's lines» в SESSION_PROMPT.md.
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 834 passed, 3 skipped in 81.36s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+```
