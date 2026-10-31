@@ -2,7 +2,7 @@
 id: T-059
 title: Last Order на Z.ai Coding Plan — харнесс zcode, как у сестёр, запасной OpenCode через шлюз
 stage: I
-status: ready
+status: in_progress
 criticality: critical
 after: [T-052]
 branch: z/T-059-lo-on-zai
