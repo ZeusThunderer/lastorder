@@ -1,0 +1,120 @@
+/* The operator's board page (T-049): local styles alone, no external fonts or CDNs. */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
+  color: #1c2733;
+  background: #f2f4f7;
+}
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #21303f;
+  color: #f2f4f7;
+}
+
+.top h1 { font-size: 17px; margin: 0; font-weight: 600; }
+
+.conn { font-size: 12px; color: #9fd0a4; }
+.conn.off { color: #e0a48c; }
+
+.filter-label { font-size: 13px; }
+
+.top select, .top textarea, .top button {
+  font: inherit;
+  border-radius: 4px;
+  border: none;
+}
+
+.new-entry { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; align-items: flex-start; }
+.new-entry select { padding: 5px 6px; max-width: 220px; }
+.new-entry textarea { width: 320px; min-height: 34px; max-height: 90px; padding: 6px 8px; resize: vertical; }
+.new-entry button { padding: 7px 14px; background: #3f8ae0; color: #fff; cursor: pointer; }
+
+.columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  padding: 14px 16px;
+  align-items: start;
+}
+
+.column { background: #e7ebf0; border-radius: 6px; padding: 10px; min-height: 200px; }
+.column h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; margin: 2px 4px 10px; color: #5a6b7c; }
+.column .empty { color: #8a99a8; font-size: 13px; padding: 8px; }
+
+.entry {
+  background: #fff;
+  border: 1px solid #d5dce3;
+  border-left: 4px solid #9aa8b5;
+  border-radius: 5px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.entry.dead { background: #ececec; border-left-color: #b9b9b9; color: #7c7c7c; }
+.entry.terminal { opacity: 0.75; }
+
+.entry .head { display: flex; gap: 8px; align-items: baseline; font-size: 12px; color: #5a6b7c; }
+.entry .head .id { font-weight: 600; color: #38495a; }
+.entry .head .time { margin-left: auto; }
+
+.badge {
+  display: inline-block; padding: 1px 7px; border-radius: 9px;
+  font-size: 11px; background: #dfe6ed; color: #38495a;
+}
+.badge.open { background: #cfe2f5; }
+.badge.taken, .badge.needs_input { background: #f5e3c5; }
+.badge.done, .badge.approved, .badge.answered, .badge.acked { background: #cfe7d2; }
+.badge.failed, .badge.denied, .badge.canceled { background: #ecd3cd; }
+.badge.posted { background: #dfe6ed; }
+
+.entry .route { font-size: 12px; color: #5a6b7c; margin: 3px 0; }
+.entry .route .dead { color: #8f8f8f; text-decoration: line-through; }
+.entry .claimer { font-size: 12px; color: #8a6d3b; }
+
+.entry .text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
+
+.entry .why { font-size: 12px; color: #5a6b7c; margin: 2px 0; }
+.entry .args { font-size: 12px; margin: 4px 0; }
+.entry .args .arg { display: block; }
+.entry .args .k { color: #38495a; }
+
+.alarm-meta { font-size: 12px; color: #8f3d2e; }
+
+.thread { margin-top: 6px; border-top: 1px dashed #d5dce3; padding-top: 4px; }
+.thread .reply { font-size: 12px; margin: 4px 0; }
+.thread .reply .meta { color: #5a6b7c; }
+.thread .reply .rtext { white-space: pre-wrap; overflow-wrap: anywhere; }
+.thread .reply .change { color: #8a6d3b; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.actions button {
+  font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer;
+  border: 1px solid #b9c4cf; border-radius: 4px; background: #f5f7fa;
+}
+.actions button.primary { background: #3f8ae0; border-color: #3f8ae0; color: #fff; }
+.actions button.danger { background: #d96b56; border-color: #d96b56; color: #fff; }
+
+.inline-form { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+.inline-form textarea { flex: 1 100%; min-height: 44px; resize: vertical; font: inherit; padding: 6px 8px; }
+.inline-form .arg-row { flex: 1 100%; display: flex; gap: 6px; align-items: center; font-size: 12px; }
+.inline-form .arg-row .k { min-width: 110px; color: #38495a; overflow-wrap: anywhere; }
+.inline-form .arg-row input { flex: 1; font: inherit; padding: 4px 6px; }
+.inline-form button { font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; }
+.inline-form .cancel-inline { background: none; border: none; color: #5a6b7c; cursor: pointer; }
+
+.toast {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  max-width: 80vw; padding: 10px 16px; border-radius: 6px;
+  background: #35302a; color: #ffe9d6; font-size: 13px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+@media (max-width: 1000px) { .columns { grid-template-columns: 1fr; } }

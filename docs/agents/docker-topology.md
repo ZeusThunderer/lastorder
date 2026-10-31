@@ -67,6 +67,16 @@ WSL2, 24 ГБ / 18 CPU. До T-003 (замер E1 и baseline T-003, серве�
   (`down` — снять). Параллельный стенд: `HAPI_PROJECT=t044 MC_HOST_PORT=25575
   HIVE_BOARD_PORT=18081 HAPI_PORT=3006 …`. [проверено: T-044, оба подъёма]
 
+## Доска оператора (T-049)
+
+- Страница: `http://127.0.0.1:18080/board` (только loopback хоста; номер двигает
+  `HIVE_BOARD_PORT` в `.env`; 18080, потому что 8000 на хосте занят — T-042). Вход —
+  Basic-auth: пароль `HIVE_OPERATOR_KEY` из `.env` (`uv run python
+  dev/stand_keys.py init` создаёт), имя пользователя любое. Скрипты и curl могут
+  вместо Basic-пароля слать тот же ключ заголовком `X-Operator-Key`.
+- Статика без сборки — `runtime/hive/static/board.{html,js,css}` (`GET /board`),
+  внешних ресурсов и CDN нет; живое обновление — SSE `/board/stream`.
+
 ## Запуск (E1)
 - `docker compose -f docker/compose.yml up -d mc-server body-1`, затем `up mind-1` — проба `tools/body_probe.py`.
 - Первый старт тела качает около 540 МБ ассетов и библиотек, это занимает 4 минуты. Всё ложится в volume

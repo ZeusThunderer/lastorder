@@ -34,8 +34,10 @@ T-017 (`chatter_turn` is always None until then).
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
+import secrets
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -45,7 +47,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.responses import StreamingResponse
+from starlette.responses import FileResponse, Response, StreamingResponse
 
 from runtime.config import env
 from runtime.comms.schema import MSG_MAX_CHARS, MSG_TTL_S
@@ -88,6 +90,18 @@ class ApiError(Exception):
         self.status = status
         self.kind = kind
         self.message = message
+
+
+# --- the operator's page (T-049, TASKBOARD.md section 12) ---------------------------------
+# One static page with vanilla JS, no build step and nothing external: the file names
+# are a fixed whitelist, so the route parameter never reaches the file system.
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_BOARD_STATIC = {
+    "board.html": "text/html; charset=utf-8",
+    "board.js": "text/javascript; charset=utf-8",
+    "board.css": "text/css; charset=utf-8",
+}
 
 
 class CommsBook:
@@ -556,13 +570,31 @@ def create_app(
     # The operator speaks with HIVE_OPERATOR_KEY in X-Operator-Key, agents with their
     # X-Node-Key (a slot's live serial or Last Order's key), the environment's alarms
     # with X-Runner-Key / the Last Order key as `admin`. `from` is always stamped here,
-    # never read from a body. The /board page itself is T-049; this is the API under it.
+    # never read from a body. The operator's browser also speaks the same key as the
+    # Basic-auth password of the page (T-049), so its fetches open the routes below.
+
+    def _basic_password_ok(request: Request) -> bool:
+        """The page's Basic-auth (TASKBOARD.md section 2): any user name, the password
+        is HIVE_OPERATOR_KEY. Constant-time compare; malformed headers just fail."""
+        scheme, _, value = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "basic" or not value:
+            return False
+        try:
+            decoded = base64.b64decode(value, validate=True).decode("utf-8", "replace")
+        except ValueError:  # binascii.Error (bad base64) is a ValueError
+            return False
+        return secrets.compare_digest(decoded.partition(":")[2], operator_secret)
 
     def _require_operator(request: Request) -> None:
         if not operator_secret:
             raise ApiError(401, "operator_key", "the board needs HIVE_OPERATOR_KEY configured")
-        if request.headers.get("x-operator-key", "").strip() != operator_secret:
-            raise ApiError(401, "operator_key", "X-Operator-Key does not open the board")
+        key = request.headers.get("x-operator-key", "").strip()
+        if key:
+            if secrets.compare_digest(key, operator_secret):
+                return
+        elif _basic_password_ok(request):
+            return
+        raise ApiError(401, "operator_key", "X-Operator-Key or the Basic password opens the board")
 
     def _agent_actor(request: Request) -> str:
         """X-Node-Key -> 'last-order' | the live serial, for feed/ack/entry reads."""
@@ -678,6 +710,43 @@ def create_app(
     @app.post("/board/ack")
     def board_ack(request: Request, body: dict) -> None:
         board.ack(_agent_actor(request), body.get("seq"))
+
+    # --- the operator's page (T-049, TASKBOARD.md section 12) ----------------------------
+    # Basic-auth with HIVE_OPERATOR_KEY: the browser challenges itself on 401, the
+    # password never rides in the HTML, the URL or storage. Registered after the
+    # literal /board routes on purpose: this parameter route catches only the assets.
+
+    def _page_unauthorized() -> JSONResponse:
+        return JSONResponse(
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="last-order board", charset="UTF-8"'},
+            content={"error": {"kind": "operator_key",
+                               "message": "the board opens with the operator password"}},
+        )
+
+    @app.get("/board")
+    def board_page(request: Request) -> Response:
+        if not operator_secret:
+            raise ApiError(401, "operator_key", "the board needs HIVE_OPERATOR_KEY configured")
+        if not _basic_password_ok(request):
+            return _page_unauthorized()
+        return FileResponse(
+            _STATIC_DIR / "board.html", media_type=_BOARD_STATIC["board.html"],
+            headers={"Cache-Control": "no-store"},  # the operator always sees the current page
+        )
+
+    @app.get("/board/{filename}")
+    def board_asset(request: Request, filename: str) -> Response:
+        if filename not in _BOARD_STATIC:
+            raise ApiError(404, "http", f"no board asset {filename!r}")
+        if not operator_secret:
+            raise ApiError(401, "operator_key", "the board needs HIVE_OPERATOR_KEY configured")
+        if not _basic_password_ok(request):
+            return _page_unauthorized()
+        return FileResponse(
+            _STATIC_DIR / filename, media_type=_BOARD_STATIC[filename],
+            headers={"Cache-Control": "no-store"},
+        )
 
     # --- the network MCP mounts (T-028) ---------------------------------------------------
 
