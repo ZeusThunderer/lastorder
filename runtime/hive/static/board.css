@@ -131,6 +131,10 @@ body {
   background: rgba(15, 17, 21, 0.92);
 }
 
+/* the author display:flex outranks the UA's [hidden] rule — without this guard
+   the overlay stays over the board after a successful login (JS sets hidden) */
+.login[hidden] { display: none; }
+
 .login-form {
   display: flex;
   flex-direction: column;

@@ -106,6 +106,15 @@ def test_login_sets_the_cookie_that_opens_the_api(tmp_path: Path) -> None:
     assert stack.client.get("/board/entries", cookies={"lo_board": "f" * 64}).status_code == 401
 
 
+def test_login_overlay_hides_after_a_successful_login(tmp_path: Path) -> None:
+    """The overlay is display:flex, which outranks the UA's [hidden] rule; the
+    class must carry its own [hidden] guard or the form stays over the board
+    after login (operator report 2026-10-31). No JS runner here — the guard is
+    asserted as a static regression on the stylesheet."""
+    css = (STATIC / "board.css").read_text(encoding="utf-8")
+    assert ".login[hidden]" in css and "display: none" in css
+
+
 def test_logout_clears_the_cookie(tmp_path: Path) -> None:
     stack = Stack(tmp_path)
     stack.client.post("/board/login", json={"password": KEY_OP})
