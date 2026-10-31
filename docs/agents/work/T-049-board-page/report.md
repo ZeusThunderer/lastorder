@@ -118,3 +118,49 @@ check.py: ok · Every workplace is intact: files present, links resolve, boxes p
 
 ### Вопросы
 - нет
+
+## Раунд 3 · 2026-10-31
+Коммиты: 5185451
+
+### Ответ на ревью
+- R2-1 · fixed 5185451, всеми тремя частями:
+  - успех закрывает форму: `doAction` возвращает успех, оба submit-обработчика делают
+    `form.remove()` после отправленного запроса, при отказе форма с текстом остаётся
+    (текст виден в тосте и сохраняется в форме);
+  - перенос только живого действия: у каждой кнопки `data-opens` (целевой статус или
+    `reply`), у формы `dataset.opens`; `actionsRow` принимает перенесённую форму, только
+    если в свежей карточке есть кнопка с тем же `opens` — смена статуса, убравшая
+    кнопку, оставляет форму умирать со старой карточкой;
+  - браузерная проверка на стенде (headless Edge): реплика отправлена кликом по форме →
+    `forms left after submit (want 0): 0 | reply occurrences (want 1): 1` — форма
+    исчезла, на доске одна реплика. Вывод ниже.
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 790 passed, 3 skipped in 69.33s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+```
+Стенд повторён (проект `t049-check`, тот же рецепт, после проверки свёрнут). Полный
+прогон раунда 2 зелёный + новая строка R2-1:
+```
+$ addressee kept after refresh (want net): "net"          # R1-1 держится
+$ typed reply kept after refresh: "Реплика оператора…"    # R1-2 держится
+$ forms left after submit (want 0): 0 | reply occurrences (want 1): 1   # R2-1
+$ dead node request: visible | card gray: true | canceled: true
+$ probe visible as text: true | img elements: 0
+$ board(filter=net) через MCP сестры: "#1 task operator->net open: Постройте укрытие…"
+```
+Скриншоты board-sse.png / board-xss.png перезаписаны этим прогоном.
+
+### Отклонения от задачи
+- Новое к раунду 2: список `/board/entries` не отдаёт треды (раздел 9: только точечный
+  `/board/entries/{id}`), а без тредов страница не показывает ни реплики, ни вопросы
+  `needs_input`. Вместо правки `board.py` (вне зоны) страница грузит треды видимых
+  записей параллельным пачкой после каждого обновления (loopback, один debounce-пакет);
+  `_board_actor` принимает Basic-пару как и остальные операторские маршруты (принято
+  ревью раунда 1). Если надзор сочтёт нужным `with_thread` в списке — это одна строка в
+  `board.py`, вне моей зоны.
+
+### Вопросы
+- нет
