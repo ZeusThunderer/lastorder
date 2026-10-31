@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
-from runtime.node.workplace import HERMES_HOME, drop_hermes_config
+from runtime.node.workplace import HERMES_HOME, PI_AGENT_DIR, drop_hermes_config, drop_pi_agent_dir
 
 
 @dataclass(frozen=True)
@@ -32,12 +32,14 @@ class Command:
 # (the spike saw qwen "closing" a session four times per shift).
 CONTINUE_MESSAGE = "Continue your shift session: observe, act, speak, wait_events."
 
-# zcode: HTTP 429 and the plan's rate-limit code 1302 (setup README, "Грабли" #1);
-# opencode through the gateway: the virtual-key ceiling answers 429. Text marks cover
-# both harnesses' phrasings.
+# zcode: HTTP 429 and the plan's rate-limit code 1302 (setup README, "Грабли" #1), the
+# 5-hour window's 1308 "Usage limit reached" (seen 2026-10-31, T-066); opencode through
+# the gateway: the virtual-key ceiling answers 429. Text marks cover the harnesses'
+# phrasings.
 _QUOTA_MARKS = (
     re.compile(r"\b429\b"),
     re.compile(r"\b1302\b"),
+    re.compile(r"\b1308\b"),
     re.compile(r"rate.?limit", re.IGNORECASE),
     re.compile(r"\bquota\b", re.IGNORECASE),
 )
@@ -153,6 +155,109 @@ class ZCodeAdapter:
             except ValueError:
                 continue
             value = doc.get("sessionId")
+            if isinstance(value, str) and value:
+                found = value
+        return found
+
+
+# Pi (ADR-041, the primary node harness; T-066 runs it directly, the `hapi pi` wrapper
+# is T-045). One `pi -p --mode json` per session intent, like zcode. The agent-dir
+# configs (models/mcp/settings) are re-rendered before EVERY session — the dir is the
+# sister's and the will session points hive at the proxy (the Hermes contract, R1-1).
+# Sessions live in the workplace (`--session-dir`): a resume survives a container
+# restart and the session file is archived with the workplace (T-056 reads it).
+# `--no-approve` ignores project `.pi/` resources (settings, MCP, extensions the sister
+# could plant in her workplace); AGENTS.md still loads — context files ignore trust
+# (Pi docs security.md). `--no-skills` + `--skill skills`: exactly the workplace
+# skills, no stubs. The Z.ai key never rides the process env (a bash tool's `env`
+# would copy it into the session file and the workplace archive): it lives in the
+# sister's 0400 zai-key file in the agent dir, cat'ed at request time by models.json's
+# `!command` apiKey — the zcode provider-config exposure (ADR-033 exception).
+PI_SESSION_DIR = ".pi-sessions"
+
+
+class PiAdapter:
+    name = "pi"
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        body_base: str,
+        hive_url: str,
+        node_key: str,
+        zai_key: str,
+        context_window: int,
+        keep_recent_tokens: int,
+        agent_dir: str = str(PI_AGENT_DIR),
+        uid: int | None = None,
+        gid: int | None = None,
+    ):
+        self._model = model
+        self._body_base = body_base
+        self._hive_url = hive_url
+        self._node_key = node_key
+        self._zai_key = zai_key
+        self._context_window = context_window
+        self._keep_recent_tokens = keep_recent_tokens
+        self._agent_dir = agent_dir
+        self._uid = uid
+        self._gid = gid
+
+    def _render(self) -> None:
+        drop_pi_agent_dir(
+            Path(self._agent_dir),
+            model=self._model,
+            body_base=self._body_base,
+            hive_url=self._hive_url,
+            node_key=self._node_key,
+            zai_key=self._zai_key,
+            context_window=self._context_window,
+            keep_recent_tokens=self._keep_recent_tokens,
+            uid=self._uid,
+            gid=self._gid,
+        )
+
+    def _command(self, prompt: str, resume: str | None) -> Command:
+        argv: tuple[str, ...] = (
+            "pi", "-p", "--mode", "json",
+            "--session-dir", PI_SESSION_DIR,
+            "--no-approve", "--offline",
+            "--no-skills", "--skill", "skills",
+        )
+        if resume is not None:
+            argv += ("--session", resume)
+        # no ZAI_API_KEY here: the key travels as the zai-key file (see _render),
+        # never through an env a bash tool could print
+        return Command(
+            argv + ("--", prompt),
+            env={"PI_CODING_AGENT_DIR": self._agent_dir},
+        )
+
+    def life_turn(self, prompt: str, session_id: str | None) -> Command:
+        self._render()  # back onto the real hive after a will, heals a replaced file
+        if session_id is None:
+            return self._command(prompt, None)
+        return self._command(CONTINUE_MESSAGE, session_id)
+
+    def will_session(self, prompt: str) -> Command:
+        # No render here: set_will_mode has just pointed the hive MCP at the proxy.
+        return self._command(prompt, None)
+
+    def session_id(self, output: str) -> str | None:
+        """The id of the last `session` header on stdout (the first JSON-mode record)."""
+        found: str | None = None
+        for line in output.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                doc = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(doc, dict) or doc.get("type") != "session":
+                continue
+            value = doc.get("id")
             if isinstance(value, str) and value:
                 found = value
         return found

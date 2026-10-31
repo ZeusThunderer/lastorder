@@ -90,11 +90,13 @@ x-node: &node
     BODY_BASE: http://body-1:8700
     HIVE_URL: http://hive:8000
     WORKPLACES_DIR: /workplaces
-    HARNESS: "${NODE_HARNESS:-zcode}"
+    HARNESS: "${NODE_HARNESS:-pi}"
     HARNESS_FAILOVER: "${NODE_HARNESS_FAILOVER:-opencode}"
     QUOTA_ACTION: "${NODE_QUOTA_ACTION:-wait}"
     GATEWAY_URL: http://llm-gateway:4000
-    ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"
+    ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"  # also the Pi and Hermes model by default
+    PI_CONTEXT_WINDOW: "${PI_CONTEXT_WINDOW:-96000}"  # the compaction budget (T-066)
+    PI_KEEP_RECENT_TOKENS: "${PI_KEEP_RECENT_TOKENS:-20000}"
     OPENCODE_MODEL: "${OPENCODE_MODEL:-openrouter/qwen/qwen3.7-flash}"
     WILL_TIMEOUT_S: "${WILL_TIMEOUT_S:-900}"
     HIVE_PENDING_WILLS: /hive-run/pending_wills
