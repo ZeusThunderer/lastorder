@@ -56,3 +56,16 @@
 | T-050 | Доска у сестёр на текущем раннере — события доски будят wait_events, инструкции по разделу 13 | I | done | critical | z/T-050-board-on-runner |
 | T-051 | Оператор в игровом чате — сестра узнаёт его реплики, чат не теряет строк | I | done | critical | z/T-051-operator-in-game-chat |
 | T-052 | Короткий прогон на стенде — задача с доски и реплика оператора в чате у живой сестры | I | ready | normal | z/T-052-board-chat-run |
+| T-053 | Команды сервера сестре — команды игрока с запретным списком и вход /login средой | I | ready | critical | z/T-053-server-commands |
+| T-054 | Старт слота — нет смерти от устаревшего hp, wait_events не дольше таймаута харнесса | I | ready | critical | z/T-054-slot-start-fixes |
+| T-055 | Мост py4j — порядок подъёма тела и mind, мягкая остановка, перезапуск слота одной командой | I | ready | normal | z/T-055-py4j-bridge |
+| T-056 | Контекст запроса сестры — разбор 100k токенов и сокращение главных частей | I | ready | normal | z/T-056-context-cut |
+| T-057 | Мост инфраструктуры — Last Order поднимает и снимает сестёр, хост исполняет без одобрения на каждое действие | I | ready | critical | z/T-057-infra-bridge |
+| T-058 | Прогон стенда после исправлений — команда сервера, старт слота, мост, размер запроса | I | ready | normal | z/T-058-stand-run-fixes |
+| T-059 | Last Order на Z.ai Coding Plan — харнесс zcode, как у сестёр, запасной OpenCode через шлюз | I | ready | critical | z/T-059-lo-on-zai |
+| T-060 | Классификатор безопасности — второе мнение о запросах infra Last Order на локальной модели | I | ready | normal | z/T-060-safety-classifier |
+| T-061 | Скин сестёр — тела LastOrder01..03 в скине sister.png на своём и внешнем сервере | I | ready | normal | z/T-061-sister-skin |
+| T-062 | mc-server на Fabric — закреплённые версии загрузчика и модов, мир без потерь | I | ready | normal | z/T-062-fabric-server |
+| T-063 | Камера тела и сервис media — экран тела потоком в MediaMTX, кольцевой буфер, вырезка по времени | I | ready | critical | z/T-063-body-camera |
+| T-064 | Last Order и видео — доступ к media, ffmpeg, журналы сети на чтение, справка об инструментах | I | ready | critical | z/T-064-lo-media-access |
+| T-065 | Прогон камер на стенде — три тела на Xvfb в media, цена CPU и памяти, влияние на C1 | I | ready | normal | z/T-065-camera-stand-run |
