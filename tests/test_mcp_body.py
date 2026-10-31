@@ -132,7 +132,11 @@ class Stack:
     """The whole mind in-process: fake body, C1, server, uvicorn, client call helpers."""
 
     def __init__(
-        self, body: FakeBody | None = None, idle_s: float = 10_000.0, runner_key: str = ""
+        self,
+        body: FakeBody | None = None,
+        idle_s: float = 10_000.0,
+        runner_key: str = "",
+        operator_name: str = "",
     ):
         self.body = body or FakeBody()
         self._tmp = f".mcp-body-test-{time.monotonic_ns()}.jsonl"
@@ -144,6 +148,7 @@ class Stack:
             tick_interval=0.25,
             idle_s=idle_s,  # the watchdog has its own tests; keep it quiet here
             runner_key=runner_key,
+            operator_name=operator_name,
         )
         app = server.streamable_http_app(stateless_http=True, streamable_http_path="/mcp")
         config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
@@ -326,9 +331,9 @@ def test_observe_filters_service_lines_and_plain_names(stack: Stack) -> None:
     ]
     obs = parse(stack.call(lambda c: c.call_tool("observe", {})))
     assert obs["chat"] == [
-        "<LastOrder01> привет",
-        "LastOrder01 was slain by Zombie",
-        "minecraft birch logs are nice",
+        {"from": "LastOrder01", "text": "привет"},
+        {"text": "LastOrder01 was slain by Zombie"},  # system: no `from`
+        {"text": "minecraft birch logs are nice"},
     ]
     joined = json.dumps(obs, ensure_ascii=False)
     assert "[Alto Clef]" not in joined and "[Tungsten]" not in joined
@@ -351,7 +356,9 @@ def test_wait_events_timeout_and_event(stack: Stack) -> None:
     # by event: a queued chat line is served first (T-024 review R2-1: one test, both paths)
     stack.body.push_event("chat.line", "<LastOrder01> реплика")
     result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0}))
-    assert parse(result) == {"type": "chat.line", "text": "<LastOrder01> реплика"}
+    assert parse(result) == {
+        "type": "chat.line", "lines": [{"from": "LastOrder01", "text": "реплика"}]
+    }
 
     # and again the timeout path once the queue is empty
     result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 0.3}))
@@ -372,7 +379,7 @@ def test_wait_events_filters_service_and_formatting(stack: Stack) -> None:
     result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0}))
     ev = parse(result)
     assert ev["type"] == "chat.line"
-    assert ev["text"] == "<Steve> дай oak_log"
+    assert ev["lines"] == [{"from": "Steve", "text": "дай oak_log"}]
 
 
 def test_damage_event_text_cleaned_with_plain_source(stack: Stack) -> None:
@@ -390,7 +397,7 @@ def test_wait_events_serves_accumulated_events_one_by_one(stack: Stack) -> None:
     stack.body.push_event("game.damage", "zombie hit")
     first = parse(stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0})))
     second = parse(stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0})))
-    assert first["text"] == "<Steve> первая"
+    assert first["lines"] == [{"from": "Steve", "text": "первая"}]
     assert second["type"] == "game.damage"
 
 
@@ -661,3 +668,42 @@ def test_runner_event_refuses_everything_but_a_board_batch() -> None:
             ), body
     finally:
         s.close()
+
+
+# --- the operator's chat lines (T-051) ---------------------------------------------------------
+
+
+def test_observe_and_events_mark_the_operator() -> None:
+    s = Stack(operator_name="ZeusThunderer")
+    try:
+        s.body.chat = ["<ZeusThunderer> собери дерево", "<Bob> привет"]
+        obs = parse(s.call(lambda c: c.call_tool("observe", {})))
+        assert obs["chat"] == [
+            {"from": "operator", "text": "собери дерево"},
+            {"from": "Bob", "text": "привет"},
+        ]
+        s.body.push_event("chat.line", "<ZeusThunderer> как дела?")
+        s.wait_until(
+            lambda: any(e["type"] == "chat.line" for e in s.executor.events.pending())
+        )
+        ev = parse(s.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0})))
+        assert ev["type"] == "chat.line"
+        assert ev["lines"] == [{"from": "operator", "text": "как дела?"}]
+    finally:
+        s.close()
+
+
+def test_several_chat_lines_reach_one_wait_events_call(stack: Stack) -> None:
+    stack.body.push_event("chat.line", "<Steve> раз")
+    stack.body.push_event("chat.line", "<Bob> два")
+    stack.body.push_event("chat.line", "<Steve> три")
+    stack.wait_until(
+        lambda: any(e["type"] == "chat.line" for e in stack.executor.events.pending())
+    )
+    ev = parse(stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0})))
+    assert ev["type"] == "chat.line"
+    assert ev["lines"] == [
+        {"from": "Steve", "text": "раз"},
+        {"from": "Bob", "text": "два"},
+        {"from": "Steve", "text": "три"},
+    ]

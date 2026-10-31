@@ -606,23 +606,26 @@ def test_queue_collapses_same_type_and_keeps_limit() -> None:
     clock = FakeClock()
     queue = EventQueue(limit=3)
     for i in range(5):
-        queue.put("chat.line", text=f"line {i}")
-    assert queue.pending() == ({"type": "chat.line", "text": "line 4"},)  # newest survives
-    queue.put("game.damage", hp_from=20.0, hp_to=15.0)
+        queue.put("game.damage", text=f"hit {i}")
+    assert queue.pending() == ({"type": "game.damage", "text": "hit 4"},)  # newest survives
+    # chat.line accumulates instead of collapsing (T-051); its own tests cover the cap
+    queue.put("chat.line", lines=[{"from": "Steve", "text": "a"}])
     queue.put("game.death", text="died")
     assert len(queue.pending()) == 3  # at the limit
     queue.put("task.idle", idle_s=1.0)
     assert len(queue.pending()) == 3  # the oldest is dropped, never above the limit
     first = queue.pop(0.0, clock)
-    assert first["type"] == "game.damage"  # order kept for different types
+    assert first["type"] == "chat.line"  # order kept for different types
     assert QUEUE_LIMIT == 200
 
 
 def test_wait_events_returns_first_accumulated_immediately() -> None:
     clock = FakeClock(100.0)
     queue = EventQueue()
-    queue.put("chat.line", text="копилось между ходами")
-    assert queue.pop(30.0, clock) == {"type": "chat.line", "text": "копилось между ходами"}
+    queue.put("chat.line", lines=[{"from": "Steve", "text": "копилось между ходами"}])
+    assert queue.pop(30.0, clock) == {
+        "type": "chat.line", "lines": [{"from": "Steve", "text": "копилось между ходами"}]
+    }
     assert queue.pop(0.0, clock) is None  # and nothing else waits behind it
 
 
@@ -633,11 +636,11 @@ def test_board_batches_accumulate_while_others_collapse() -> None:
     queue = EventQueue()
     queue.put("board", lines=["[board #1] a", "[board #2] b"])
     queue.put("board", lines=["[board #3] c"])
-    queue.put("chat.line", text="first")
-    queue.put("chat.line", text="second")  # still collapses: the newest wins
+    queue.put("game.damage", text="first")
+    queue.put("game.damage", text="second")  # still collapses: the newest wins
     assert queue.pending() == (
         {"type": "board", "lines": ["[board #1] a", "[board #2] b", "[board #3] c"]},
-        {"type": "chat.line", "text": "second"},
+        {"type": "game.damage", "text": "second"},
     )
 
 
@@ -792,7 +795,9 @@ def test_respawn_clears_the_event_queue() -> None:
         rig.body.push_event("chat.line", "<Steve> новая жизнь")
         rig.tick()
         served = [e for e in rig.x.events.pending() if e["type"] == "chat.line"]
-        assert served == [{"type": "chat.line", "text": "<Steve> новая жизнь"}]
+        assert served == [
+            {"type": "chat.line", "lines": [{"from": "Steve", "text": "новая жизнь"}]}
+        ]
     finally:
         rig.close()
 
@@ -887,3 +892,83 @@ def test_stuck_request_rules_its_own_death_cause() -> None:
         assert rig.x.death_status()["cause"] == "game"
     finally:
         rig.close()
+
+
+# --- the operator's chat lines (T-051) ---------------------------------------------------------
+
+
+def test_operator_lines_are_marked_by_the_speakers_name() -> None:
+    """The mark comes from the server's `<Name>` prefix alone: the text quoting
+    another `<Name>` stays text, a system line carries no `from`."""
+    rig = Rig(operator_name="ZeusThunderer")
+    try:
+        rig.body.push_event("chat.line", "<ZeusThunderer> как дела?")
+        rig.body.push_event("chat.line", "<Bob> <ZeusThunderer> hi")
+        rig.body.push_event("chat.line", "LastOrder01 was slain by Zombie")
+        rig.tick()
+        (chat,) = rig.events_of("chat.line")
+        assert chat["lines"] == [
+            {"from": "operator", "text": "как дела?"},
+            {"from": "Bob", "text": "<ZeusThunderer> hi"},
+            {"text": "LastOrder01 was slain by Zombie"},
+        ]
+    finally:
+        rig.close()
+
+
+def test_operator_name_equal_to_the_slot_username_is_refused_once(tmp_path) -> None:
+    """The slot's own name would mark every sister line; refused with exactly one
+    warning line in the mind log."""
+    path = str(tmp_path / "log.jsonl")
+    rig = Rig(log_file=path, operator_name="LastOrder01")
+    try:
+        assert rig.x._operator_name == ""
+        rig.body.push_event("chat.line", "<LastOrder01> моя реплика")
+        rig.tick()
+        (chat,) = rig.events_of("chat.line")
+        assert chat["lines"] == [{"from": "LastOrder01", "text": "моя реплика"}]
+        with open(path, encoding="utf-8") as fh:
+            entries = [json.loads(line) for line in fh if line.strip()]
+        ignored = [e for e in entries if e.get("event") == "operator_name.ignored"]
+        assert len(ignored) == 1
+    finally:
+        rig.close()
+
+
+def test_no_operator_name_no_marks_no_warning(tmp_path) -> None:
+    """Empty is simply off: no marks, and no warning noise on every mind start."""
+    path = str(tmp_path / "log.jsonl")
+    rig = Rig(log_file=path)
+    try:
+        rig.body.push_event("chat.line", "<ZeusThunderer> привет")
+        rig.tick()
+        (chat,) = rig.events_of("chat.line")
+        assert chat["lines"] == [{"from": "ZeusThunderer", "text": "привет"}]
+        with open(path, encoding="utf-8") as fh:
+            entries = [json.loads(line) for line in fh if line.strip()]
+        assert not [e for e in entries if e.get("event") == "operator_name.ignored"]
+    finally:
+        rig.close()
+
+
+def test_chat_batches_accumulate_all_lines_between_waits() -> None:
+    queue = EventQueue()
+    entries = [{"from": "Steve", "text": f"line {i}"} for i in range(1, 16)]
+    queue.put("chat.line", lines=entries[:10])
+    queue.put("chat.line", lines=entries[10:])
+    (event,) = queue.pending()
+    assert event["type"] == "chat.line"
+    assert event["lines"] == entries  # nothing lost under the cap
+
+
+def test_chat_keeps_the_newest_twenty_and_marks_the_dropped() -> None:
+    queue = EventQueue()
+    entries = [{"from": "Steve", "text": f"line {i}"} for i in range(1, 31)]
+    queue.put("chat.line", lines=entries[:12])
+    queue.put("chat.line", lines=entries[12:25])  # 25 held: 5 oldest already dropped
+    queue.put("chat.line", lines=entries[25:])  # the marker folds them all
+    (event,) = queue.pending()
+    lines = event["lines"]
+    assert len(lines) == 21  # the newest 20 + the marker
+    assert lines[0] == {"from": "Steve", "text": "line 11"}
+    assert lines[-1] == {"text": "… 10 earlier lines dropped"}

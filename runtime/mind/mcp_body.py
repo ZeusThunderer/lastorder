@@ -40,7 +40,6 @@ from runtime.mind.executor import (
     JsonlLog,
 )
 from runtime.mind.jev import JevGate
-from runtime.perception.chat import clean_chat
 from runtime.perception.translate import Perception
 
 log = logging.getLogger("mcp_body")
@@ -360,7 +359,9 @@ class BodyMcp:
                 {"name": self._seen(i.name, "item"), "count": int(i.count), "slot": int(i.slot)}
                 for i in inventory
             ],
-            "chat": [self._perception.scrub(line) for line in clean_chat(chat)],
+            # the same entries `chat.line` events carry: `from` marks the speaker the
+            # server's `<Name>` prefix names (`operator` when configured, T-051)
+            "chat": [entry for entry in (self._x.chat_entry(line) for line in chat) if entry],
         }
 
     def act(self, intent: str, args: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -458,8 +459,9 @@ def build_server(
     async def wait_events(timeout_s: float = 30.0) -> dict[str, Any]:
         """Sleep until the next event or the timeout — you pick your own rhythm. Events:
         game.damage, game.death, chat.line, intent.done, intent.failed, task.idle (arms
-        retire_stuck), life.expiring, board (fresh task-board lines). Events of one type
-        collapse (a board batch accumulates its lines); the queue is capped."""
+        retire_stuck), life.expiring, board (fresh task-board lines). chat.line carries
+        `lines`: {from: speaker | operator | absent, text} entries. Events of one type
+        collapse (board and chat.line batches accumulate their lines); the queue is capped."""
         return await impl._tool(
             "wait_events", {"timeout_s": timeout_s}, lambda: impl.wait_events(timeout_s)
         )
@@ -648,6 +650,7 @@ def main() -> None:
         evade_m=_env_float("MIND_EVADE_M", 12.0),
         idle_s=_env_float("MIND_IDLE_S", 120.0),
         runner_key=env("MIND_RUNNER_KEY", default="") or "",
+        operator_name=env("OPERATOR_MC_NAME", default="") or "",
     )
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the harness
     # reaches the port by service name (body-1:8700) inside the docker network, not via localhost.

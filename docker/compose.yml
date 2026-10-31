@@ -58,6 +58,9 @@ x-mind: &mind
     # fail-closed (review R2-6): without the slot's runner key the mind refuses to
     # start rather than serve /runner/* ungated; NODE_DEV_OPEN=1 is the dev exception
     NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
+    # The operator's game name (T-051): the mind marks this player's chat lines
+    # `from: operator`. A stand config value, not a secret; empty leaves the marking off.
+    OPERATOR_MC_NAME: "${OPERATOR_MC_NAME:-}"
   command: ["python", "-m", "runtime.mind"]
 
 # The node sandbox of a slot (T-027, ADR-033): the runner plus both harnesses in one

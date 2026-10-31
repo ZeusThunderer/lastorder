@@ -41,7 +41,7 @@ from typing import Any
 
 from runtime.lastorder.death import DeathDetector, classify_death
 from runtime.mind.jev import JevGate
-from runtime.perception.chat import is_service_line, strip_formatting
+from runtime.perception.chat import is_service_line, parse_speaker, strip_formatting
 from runtime.perception.translate import Perception
 from runtime.ports import BirthRecord, GameState, Option
 from runtime.hive.client import HiveClient, HiveRejected, HiveUnavailable
@@ -117,6 +117,9 @@ class JsonlLog:
 BOARD_LINES_MAX = 10  # one `board` event: the rest folds into the "more" marker
 _BOARD_MORE_RE = re.compile(r"^… (\d+) more, `board`$")
 
+CHAT_LINES_MAX = 20  # one `chat.line` event: the newest stay, the rest folds
+_CHAT_DROPPED_RE = re.compile(r"^… (\d+) earlier lines dropped$")
+
 
 def _board_marker(dropped: int) -> str:
     return f"… {dropped} more, `board`"
@@ -138,11 +141,36 @@ def cap_board_lines(lines: list[str], dropped: int = 0) -> list[str]:
     return [*lines[:BOARD_LINES_MAX], _board_marker(hidden)]
 
 
+def _chat_dropped_marker(dropped: int) -> dict[str, Any]:
+    """A marker entry: no `from` — it is the environment's, not a speaker's."""
+    return {"text": f"… {dropped} earlier lines dropped"}
+
+
+def _split_chat_entries(entries: Any) -> tuple[list[dict[str, Any]], int]:
+    """Peel a trailing "dropped" marker back into (entries, dropped)."""
+    if isinstance(entries, list) and entries:
+        last = entries[-1]
+        if isinstance(last, dict) and "from" not in last:
+            match = _CHAT_DROPPED_RE.match(str(last.get("text") or ""))
+            if match:
+                return list(entries[:-1]), int(match.group(1))
+    return list(entries) if isinstance(entries, list) else [], 0
+
+
+def cap_chat_entries(entries: list[dict[str, Any]], dropped: int = 0) -> list[dict[str, Any]]:
+    """A `chat.line` event keeps the newest CHAT_LINES_MAX entries (T-051): a chatty
+    stretch between two `wait_events` loses its oldest lines, never the fresh ones."""
+    if len(entries) <= CHAT_LINES_MAX and not dropped:
+        return list(entries)
+    hidden = dropped + max(0, len(entries) - CHAT_LINES_MAX)
+    return [*entries[-CHAT_LINES_MAX:], _chat_dropped_marker(hidden)]
+
+
 class EventQueue:
     """Events wait here between `wait_events` calls, capped; same-type events collapse —
-    a newer one replaces the queued fields and keeps the queue position. `board` is
-    the exception (T-050): batches accumulate into the queued lines under the same
-    10-line ceiling — two bridge batches between two `wait_events` never eat each other."""
+    a newer one replaces the queued fields and keeps the queue position. Two types
+    accumulate instead: `board` (T-050, first 10 lines kept) and `chat.line` (T-051,
+    newest 20 kept) — batches between two `wait_events` never eat each other."""
 
     def __init__(self, limit: int = QUEUE_LIMIT):
         self._items: list[dict[str, Any]] = []
@@ -153,6 +181,8 @@ class EventQueue:
         with self._cond:
             if type_ == "board":
                 self._put_board(fields.get("lines"))
+            elif type_ == "chat.line":
+                self._put_chat(fields.get("lines"))
             else:
                 for i, queued in enumerate(self._items):
                     if queued["type"] == type_:
@@ -170,6 +200,15 @@ class EventQueue:
                 queued["lines"] = cap_board_lines(held + add, held_dropped + add_dropped)
                 return
         self._append({"type": "board", "lines": cap_board_lines(add, add_dropped)})
+
+    def _put_chat(self, lines: Any) -> None:
+        add, add_dropped = _split_chat_entries(lines)
+        for queued in self._items:
+            if queued["type"] == "chat.line":
+                held, held_dropped = _split_chat_entries(queued.get("lines"))
+                queued["lines"] = cap_chat_entries(held + add, held_dropped + add_dropped)
+                return
+        self._append({"type": "chat.line", "lines": cap_chat_entries(add, add_dropped)})
 
     def _append(self, item: dict[str, Any]) -> None:
         if len(self._items) >= self._limit:
@@ -264,6 +303,7 @@ class Executor:
         birth: BirthRecord | None = None,
         hive: HiveClient | None = None,
         jev: JevGate | None = None,
+        operator_name: str = "",
     ):
         if not TICK_MIN_S <= tick_interval <= TICK_MAX_S:
             raise ValueError(
@@ -272,6 +312,17 @@ class Executor:
         self._body = body
         self._username = username
         self._log = log_
+        # The operator's game name (T-051): the environment marks `<name>` chat lines
+        # with it. The slot's own name refuses — every sister line would carry the
+        # mark; empty simply leaves the marking off.
+        self._operator_name = str(operator_name or "").strip()
+        if self._operator_name == username:
+            self._operator_name = ""
+            self._log.record(
+                "event",
+                event="operator_name.ignored",
+                reason=f"OPERATOR_MC_NAME matches the slot username {username!r}",
+            )
         self._perception = perception or Perception(descriptions={}, salt="", mode="plain")
         self._clock = clock
         self._wall_clock = wall_clock
@@ -363,6 +414,27 @@ class Executor:
             return None
         return self._perception.scrub(strip_formatting(text)).strip() or None
 
+    def chat_entry(self, raw: Any) -> dict[str, Any] | None:
+        """One chat line as the agent sees it (T-051): the text scrubbed plain, and
+        `from` — the speaker the SERVER's `<Name>` prefix names, marked `operator`
+        when it is the configured operator name. The text cannot forge the mark: it
+        stays the text. System lines carry no `from`; service lines answer None."""
+        text = strip_formatting(str(raw or "")).strip()
+        if not text or is_service_line(text):
+            return None
+        speaker, body = (None, text)
+        parsed = parse_speaker(text)
+        if parsed is not None:
+            speaker, body = parsed
+        clean = self._perception.scrub(body).strip()
+        if not clean:
+            return None
+        if speaker is None:
+            return {"text": clean}
+        if speaker == self._operator_name:
+            return {"from": "operator", "text": clean}
+        return {"from": self._perception.scrub(speaker).strip() or speaker, "text": clean}
+
     def _seen(self, raw: str, kind: str) -> str:
         return self._perception.see(raw, kind).render()
 
@@ -429,9 +501,9 @@ class Executor:
             self._events_watermark = idx
             payload = dict(event.payload or {})
             if event.type == "chat.line" and not payload.get("service"):
-                text = self._clean_text(payload.get("text"))
-                if text is not None:
-                    self._emit("chat.line", text=text)
+                entry = self.chat_entry(payload.get("text"))
+                if entry is not None:
+                    self._emit("chat.line", lines=[entry])
             elif event.type == "game.damage" and not payload.get("service"):
                 self._last_damage_at = self._clock()
                 source = self._nearest_hostile()
