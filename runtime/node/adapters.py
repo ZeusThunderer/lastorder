@@ -169,9 +169,10 @@ class ZCodeAdapter:
 # `--no-approve` ignores project `.pi/` resources (settings, MCP, extensions the sister
 # could plant in her workplace); AGENTS.md still loads — context files ignore trust
 # (Pi docs security.md). `--no-skills` + `--skill skills`: exactly the workplace
-# skills, no stubs. The Z.ai key rides the process env, where models.json's
-# `$ZAI_API_KEY` resolves it: the same exposure as zcode's provider config in her
-# home (ADR-033 exception).
+# skills, no stubs. The Z.ai key never rides the process env (a bash tool's `env`
+# would copy it into the session file and the workplace archive): it lives in the
+# sister's 0400 zai-key file in the agent dir, cat'ed at request time by models.json's
+# `!command` apiKey — the zcode provider-config exposure (ADR-033 exception).
 PI_SESSION_DIR = ".pi-sessions"
 
 
@@ -210,6 +211,7 @@ class PiAdapter:
             body_base=self._body_base,
             hive_url=self._hive_url,
             node_key=self._node_key,
+            zai_key=self._zai_key,
             context_window=self._context_window,
             keep_recent_tokens=self._keep_recent_tokens,
             uid=self._uid,
@@ -225,9 +227,11 @@ class PiAdapter:
         )
         if resume is not None:
             argv += ("--session", resume)
+        # no ZAI_API_KEY here: the key travels as the zai-key file (see _render),
+        # never through an env a bash tool could print
         return Command(
             argv + ("--", prompt),
-            env={"ZAI_API_KEY": self._zai_key, "PI_CODING_AGENT_DIR": self._agent_dir},
+            env={"PI_CODING_AGENT_DIR": self._agent_dir},
         )
 
     def life_turn(self, prompt: str, session_id: str | None) -> Command:

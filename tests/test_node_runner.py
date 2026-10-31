@@ -754,7 +754,9 @@ def _pi_adapter(agent_dir: Path) -> PiAdapter:
 
 def test_pi_adapter_commands_and_session_id(tmp_path: Path) -> None:
     """T-066: one `pi -p --mode json` per session intent; sessions in the workplace,
-    project `.pi/` ignored, exactly the workplace skills; the key rides the env only."""
+    project `.pi/` ignored, exactly the workplace skills; the key never rides the
+    env — it lands in the sister-owned zai-key file that models.json's `!command`
+    apiKey cats (no `env` from a bash tool can leak it into a session or archive)."""
     agent_dir = tmp_path / ".pi" / "agent"
     adapter = _pi_adapter(agent_dir)
     first = adapter.life_turn("Life session.\n\nlong prompt", None)
@@ -765,11 +767,21 @@ def test_pi_adapter_commands_and_session_id(tmp_path: Path) -> None:
         "--no-skills", "--skill", "skills",
     )
     assert first.argv == flags + ("--", "Life session.\n\nlong prompt")
-    assert first.env == {"ZAI_API_KEY": "zai-token", "PI_CODING_AGENT_DIR": str(agent_dir)}
+    assert first.env == {"PI_CODING_AGENT_DIR": str(agent_dir)}
     assert "zai-token" not in " ".join(first.argv)
     # the life turn rendered the agent dir
     for name in ("models.json", "mcp.json", "settings.json"):
         assert (agent_dir / name).is_file(), name
+    # the key: her own 0400 file, referenced by a !cat command — nowhere else
+    key_path = agent_dir / "zai-key"
+    assert key_path.read_text(encoding="utf-8") == "zai-token"
+    if os.name == "posix":  # 0400: the Windows readonly bit cannot express it
+        assert stat.S_IMODE(key_path.stat().st_mode) & 0o777 == 0o400
+    models = json.loads((agent_dir / "models.json").read_text(encoding="utf-8"))
+    assert models["providers"]["zai"]["apiKey"] == f"!cat {key_path}"
+    for name in ("models.json", "mcp.json", "settings.json"):
+        text = (agent_dir / name).read_text(encoding="utf-8")
+        assert "zai-token" not in text and "$ZAI_API_KEY" not in text, name
     resume = adapter.life_turn("p", "0193-abcd")
     assert resume.argv == flags + ("--session", "0193-abcd", "--", CONTINUE_MESSAGE)
     will = adapter.will_session("Will session (you have just died).")
@@ -795,6 +807,9 @@ def test_pi_configs_expose_mcp_directly_and_cap_the_context() -> None:
     assert mcp["autoEnableCodemode"] is False
     assert {s["exposure"] for s in mcp["mcpServers"].values()} == {"direct"}
     assert configs["models.json"]["providers"]["zai"]["models"][0]["contextWindow"] == 80_000
+    # the key is a !command reference to a file, never an env interpolation
+    assert configs["models.json"]["providers"]["zai"]["apiKey"].startswith("!cat ")
+    assert "$ZAI_API_KEY" not in json.dumps(configs["models.json"])
     compaction = configs["settings.json"]["compaction"]
     assert compaction == {"enabled": True, "reserveTokens": 16_384, "keepRecentTokens": 15_000}
     # the defaults: threshold well above keepRecentTokens + a base context of ~25k
@@ -823,6 +838,8 @@ def test_pi_will_mode_re_renders_with_hive_at_the_proxy(tmp_path: Path, monkeypa
     assert set(mcp["mcpServers"]) == {"body", "hive"}
     assert mcp["mcpServers"]["hive"]["url"] == "http://127.0.0.1:8702/mcp"
     assert mcp["mcpServers"]["body"]["url"] == "http://body-1:8700/mcp"
+    # the will render carries the key too: the will session must be able to call out
+    assert (agent_dir / "zai-key").read_text(encoding="utf-8") == "zai-token"
     adapter.life_turn("p", "0193-abcd")
     mcp = json.loads(mcp_path.read_text(encoding="utf-8"))
     assert mcp["mcpServers"]["hive"]["url"] == "http://hive:8000/node/mcp"
@@ -1182,9 +1199,9 @@ def test_hermes_home_config_is_runner_owned(tmp_path: Path) -> None:
 
 
 def test_pi_configs_render_the_zai_plan_and_both_mcp_servers() -> None:
-    """T-041: models.json (the zai provider, $ZAI_API_KEY interpolated from the pi
-    process env, never stored), mcp.json (body + hive, the node key header),
-    settings.json (the zai defaults, telemetry off)."""
+    """T-041: models.json (the zai provider, the key a `!command` file read, never
+    stored or interpolated from the process env), mcp.json (body + hive, the node
+    key header), settings.json (the zai defaults, telemetry off)."""
     configs = workplace.render_pi_configs(
         "GLM-5.3-Flash",
         body_base="http://body-1:8700",
@@ -1194,7 +1211,7 @@ def test_pi_configs_render_the_zai_plan_and_both_mcp_servers() -> None:
     zai = configs["models.json"]["providers"]["zai"]
     assert zai["baseUrl"] == "https://api.z.ai/api/coding/paas/v4"
     assert zai["api"] == "openai-completions"
-    assert zai["apiKey"] == "$ZAI_API_KEY"
+    assert zai["apiKey"] == f"!cat {workplace.PI_AGENT_DIR / workplace.PI_KEY_FILE}"
     assert zai["compat"] == {"supportsDeveloperRole": False, "thinkingFormat": "zai"}
     assert zai["models"][0]["id"] == "glm-5.3-flash"
     servers = configs["mcp.json"]["mcpServers"]
