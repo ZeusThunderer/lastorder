@@ -2,7 +2,7 @@
 id: T-059
 title: Last Order на Z.ai Coding Plan — харнесс Pi, модель GLM-5.3, запасной OpenCode через шлюз
 stage: I
-status: review
+status: changes
 criticality: critical
 after: [T-052, T-066]
 branch: z/T-059-lo-on-zai
