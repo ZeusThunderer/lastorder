@@ -62,7 +62,7 @@
 | T-056 | Контекст запроса сестры — рост за жизнь, пробуждения, крупные части | I | ready | normal | z/T-056-context-cut |
 | T-057 | Мост инфраструктуры — Last Order поднимает и снимает сестёр, хост исполняет без одобрения на каждое действие | I | ready | critical | z/T-057-infra-bridge |
 | T-058 | Прогон стенда после исправлений — команда сервера, старт слота, мост, размер запроса | I | ready | normal | z/T-058-stand-run-fixes |
-| T-059 | Last Order на Z.ai Coding Plan — харнесс Pi, модель GLM-5.3, запасной OpenCode через шлюз | I | ready | critical | z/T-059-lo-on-zai |
+| T-059 | Last Order на Z.ai Coding Plan — харнесс Pi, модель GLM-5.3, запасной OpenCode через шлюз | I | changes | critical | z/T-059-lo-on-zai |
 | T-060 | Классификатор безопасности — второе мнение о запросах infra Last Order на локальной модели | I | ready | normal | z/T-060-safety-classifier |
 | T-061 | Скин сестёр — тела LastOrder01..03 в скине sister.png на своём и внешнем сервере | I | ready | normal | z/T-061-sister-skin |
 | T-062 | mc-server на Fabric — закреплённые версии загрузчика и модов, мир без потерь | I | ready | normal | z/T-062-fabric-server |
