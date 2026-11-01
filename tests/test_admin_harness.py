@@ -31,12 +31,11 @@ class QuotaProcess(FakeProcess):
 
 def build(tmp_path: Path, *, recorder: Recorder | None = None,
           alarms: list | None = None, zai_key: str | None = "zai-token", **over):
-    """An alarm with the desk's real adapters; the zai key lands in the file the
-    entrypoint materializes in the container (zai_key None = no token materialized)."""
-    if zai_key is not None:
-        key_file = tmp_path / "secrets" / "zai_api_key"
-        key_file.parent.mkdir(parents=True, exist_ok=True)
-        key_file.write_text(zai_key, encoding="utf-8")
+    """An alarm with the desk's real adapters. make_cfg materializes the zai token
+    by default; zai_key=None points the config at an absent file (a keyless
+    container — the entrypoint materializes nothing)."""
+    if zai_key is None:
+        over["zai_key_file"] = tmp_path / "secrets" / "absent"
     cfg = make_cfg(tmp_path, **over)
     clock = FakeClock()
     recorder = recorder or Recorder()
@@ -181,18 +180,44 @@ def test_restart_lands_on_the_primary(tmp_path: Path) -> None:
     assert recorder.argv[1][0] == "pi"
 
 
-def test_no_zai_key_still_assembles_the_command(tmp_path: Path) -> None:
-    # the entrypoint materializes no token (a keyless container): the session command
-    # is still assembled — the pi process itself will state the missing auth — and
-    # the agent dir carries the !cat reference but no key file
-    _, _, recorder, alarm = build(tmp_path, zai_key=None)
+def test_not_ready_primary_switches_once_to_a_ready_failover(tmp_path: Path) -> None:
+    # a keyless container (the entrypoint materialized no Z.ai token): pi is not
+    # ready, and a ready opencode takes over — ONE board alarm for the switch, not
+    # one per session; the desk keeps working instead of spawning doomed sessions
+    auth = tmp_path / "auth.json"
+    auth.write_text("{}", encoding="utf-8")
+    alarms: list = []
+    _, clock, recorder, alarm = build(
+        tmp_path, alarms=alarms, zai_key=None, opencode_auth_file=auth
+    )
     add_will(tmp_path / "knowledge", 5)
     alarm.run_once()
-    assert recorder.argv[0][0] == "pi"
-    agent_dir = Path(alarm.cfg.pi_agent_dir)
-    assert not (agent_dir / "zai-key").exists()
-    models = json.loads((agent_dir / "models.json").read_text(encoding="utf-8"))
-    assert models["providers"]["zai"]["apiKey"].startswith("!cat ")
+    assert recorder.argv[0][0] == "opencode"
+    assert [kind for kind, _ in alarms] == ["harness_failover"]
+    assert "pi is out" in alarms[0][1] and "opencode" in alarms[0][1]
+    assert "harness.switch" in events(tmp_path)
+    # the next session rides the failover with no second alarm
+    clock.advance(seconds=60)
+    add_will(tmp_path / "knowledge", 6)
+    alarm.run_once()
+    assert [argv[0] for argv in recorder.argv] == ["opencode", "opencode"]
+    assert len(alarms) == 1
+
+
+def test_no_ready_harness_spawns_nothing(tmp_path: Path) -> None:
+    # neither credential rendered: the desk waits, no session is spawned at all
+    alarms: list = []
+    _, clock, recorder, alarm = build(tmp_path, alarms=alarms, zai_key=None)
+    add_will(tmp_path / "knowledge", 5)
+    reasons = alarm.run_once()
+    assert reasons  # the wake happened…
+    assert recorder.argv == []  # …but no session was spawned
+    assert alarms == []
+    assert "harness.waits" in events(tmp_path)
+    clock.advance(seconds=60)
+    add_will(tmp_path / "knowledge", 6)
+    alarm.run_once()
+    assert recorder.argv == []
 
 
 def test_config_rejects_a_bad_harness_pair(tmp_path: Path) -> None:

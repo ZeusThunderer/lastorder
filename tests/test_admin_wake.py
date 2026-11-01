@@ -115,6 +115,13 @@ class Recorder:
 
 
 def make_cfg(tmp_path: Path, **over) -> AdminConfig:
+    if "zai_key_file" not in over:
+        # the entrypoint's materialized token: present by default, so the default
+        # (pi) harness is ready and the wake tests exercise wakes, not the gate
+        key_file = tmp_path / "secrets" / "zai_api_key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text("zai-token", encoding="utf-8")
+        over["zai_key_file"] = key_file
     values = dict(
         workplace=tmp_path / "workplace",
         template_dir=TEMPLATE,
@@ -126,7 +133,7 @@ def make_cfg(tmp_path: Path, **over) -> AdminConfig:
         # the pi render writes real files on every session: keep them in tmp (the
         # production paths live in the container, not on this host)
         pi_agent_dir=tmp_path / "pi-agent",
-        zai_key_file=tmp_path / "secrets" / "zai_api_key",
+        zai_key_file=over.pop("zai_key_file"),
         every_min=10.0,
         batch=3,
         poll_s=0.0,

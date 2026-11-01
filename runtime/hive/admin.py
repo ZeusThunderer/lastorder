@@ -445,7 +445,8 @@ class AdminAlarm:
         # holds no key on this sandbox — proven on the stand (T-030 report). The pi
         # agent reads the token the entrypoint materialized for this container (the
         # root-only tmpfs copy, the same lift as node-N); no token means pi is not
-        # ready and the desk waits on it (the runner's `_adapter_ready` gate).
+        # ready — every session checks (`_harness_usable`): a ready failover takes
+        # over with one board alarm, otherwise the desk waits (no doomed spawns).
         zai_key = ""
         try:
             zai_key = cfg.zai_key_file.read_text(encoding="utf-8").strip()
@@ -707,6 +708,8 @@ class AdminAlarm:
             return ""
 
     def _session(self, reasons: list[WakeReason], new_deaths: list[int]) -> None:
+        if not self._harness_usable():
+            return
         adapter = self._adapters[self._harness_name]
         prompt = (
             f"{PROMPT_PREFIX}\n\n{self._summary(reasons, new_deaths)}\n\n"
@@ -752,15 +755,30 @@ class AdminAlarm:
                 self._quota_switch()
 
     def _adapter_ready(self, name: str) -> bool:
-        """A switch target must have its credential rendered (the runner's
-        `_adapter_ready`): the Z.ai token the entrypoint materialized for pi, the
-        gateway auth it rendered for opencode. Missing means not ready — switching
-        there would only stack spawn failures."""
+        """A harness must have its credential rendered (the runner's `_adapter_ready`):
+        the Z.ai token the entrypoint materialized for pi, the gateway auth it rendered
+        for opencode. Missing means not ready — spawning would only stack failures."""
         if name == "pi":
             return self.cfg.zai_key_file.exists()
         if name == "opencode":
             return self.cfg.opencode_auth_file.exists()
         return True
+
+    def _harness_usable(self) -> bool:
+        """The readiness gate of the CURRENT harness, before every session (R1-1): a
+        primary without its credential must not spawn doomed sessions. A ready
+        failover takes over with the one-time board alarm (the quota switch's twin);
+        nothing ready — the desk waits (the runner's `quota.waits` shape)."""
+        if self._adapter_ready(self._harness_name):
+            return True
+        target = self.cfg.failover
+        if target and target != self._harness_name and self._adapter_ready(target):
+            self._log.event("harness.switch", {"from": self._harness_name, "to": target})
+            self._post_failover_alarm(self._harness_name, target, "no rendered credential")
+            self._harness_name = target
+            return True
+        self._log.event("harness.waits", {"harness": self._harness_name})
+        return False
 
     def _quota_switch(self) -> None:
         """Quota marks in a session's output move the NEXT session to the failover
@@ -772,13 +790,19 @@ class AdminAlarm:
             self._log.event("quota.waits", {"harness": self._harness_name})
             return
         self._log.event("quota.switch", {"from": self._harness_name, "to": target})
+        self._post_failover_alarm(self._harness_name, target, "the Z.ai quota ran out")
         self._harness_name = target
+
+    def _post_failover_alarm(self, frm: str, target: str, reason: str) -> None:
+        """The board alarm of a harness switch — one per switch, whatever caused it.
+        The text is assembled from the pair and the reason, not hardcoded for
+        pi→opencode (R1-2): the reverse pair must read right too."""
+        text = (
+            f"last-order harness failover: {frm} is out ({reason}); sessions moved to "
+            f"{target} until the process restarts"
+        )
         try:
-            self._post_alarm(
-                "harness_failover",
-                "last-order harness failover: the Z.ai quota ran out, sessions moved to "
-                f"{target} through the gateway until the process restarts",
-            )
+            self._post_alarm("harness_failover", text)
         except OSError as exc:
             self._log.event("alarm.post_failed", {"error": f"{type(exc).__name__}: {exc}"})
 
