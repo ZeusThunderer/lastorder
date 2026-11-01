@@ -83,3 +83,37 @@ $ uv run pytest tests -k "admin"
 
 ### Вопросы
 - нет
+
+## Раунд 2 · 2026-11-01
+Коммиты: e461a23
+
+### Ответ на ревью
+- R1-1 · fixed e461a23 — гейт `_harness_usable` перед каждой сессией: основной без
+  рендера креденшела не запускается; готовый failover забирает сессии одним
+  `harness.failover`-переключением (`harness.switch` + одна тревога `harness_failover`
+  на переключение, не на сессию), ни один не готов — `harness.waits`, spawn нет.
+  Комментарий в `__init__` приведён к коду. Тест `test_no_zai_key…` заменён на
+  `test_not_ready_primary_switches_once_to_a_ready_failover` (одна тревога, вторая
+  сессия без новой) и `test_no_ready_harness_spawns_nothing` (нулевые spawn'ы,
+  `harness.waits`). make_cfg по умолчанию материализует токен — wake-тесты проверяют
+  пробуждения, а не гейт.
+- R1-2 · fixed e461a23 — текст тревоги собирается из `from`/`to`/причины:
+  «{frm} is out ({reason}); sessions moved to {target} until the process restarts» —
+  верен и для обратной пары.
+- R1-3 · disputed: `HiveClient.board_alarm_admin` тянет в стол лишнее — клиент
+  заводит httpx.Client с ретраями/backoff, RLock и машинерию §9 (outbox-файлы
+  `hive_outbox.jsonl`/`hive_client_events.jsonl` под `RUN_DIR`, которую стол не
+  осушает). Один POST с X-Node-Key — 15 строк urllib без побочных файлов; граница
+  та же (ключ LO, автор `admin`), формат тела идентичен `board_alarm_admin`.
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 856 passed, 3 skipped, 2 warnings in 86.81s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+$ uv run pytest tests/test_admin_harness.py tests/test_admin_wake.py tests/test_stand_compose.py -q
+36 passed in 2.72s
+```
+
+### Вопросы
+- нет
