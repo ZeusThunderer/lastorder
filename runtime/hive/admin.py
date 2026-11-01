@@ -19,10 +19,12 @@ Wake sources, all read-only against the knowledge volume (the layout lives in
 - clock: ADMIN_EVERY_MIN since the last session, plus a floor pause between sessions
   (ADMIN_SESSION_MIN_GAP_S) — the budget guard of P1-6.
 
-The session is a short harness run in the workplace: the runner's opencode adapter
-shape (runtime/node/adapters.py — reused, never modified), the `smart` tier through the
-gateway, MCP `/last-order/mcp` with the Last Order key rendered into the workplace
-config the same way a sister's node key is (T-029). The core files and skills are
+The session is a short harness run in the workplace: the runner's adapters (runtime/
+node/adapters.py — reused, never modified). Since T-059 the primary is pi on the Z.ai
+Coding Plan — the same subscription and the same agent-dir render the sisters ride
+(T-066) — with opencode through the gateway (`smart` tier) as the quota failover; MCP
+`/last-order/mcp` with the Last Order key is rendered into the session's configs the
+same way a sister's node key is (T-029). The core files and skills are
 rewritten from the image on every start: tampering is undone, `memory/` is never
 touched (P1-3). Children run under the sister uid with a fresh environment — no key of
 this container rides into a session.
@@ -39,6 +41,7 @@ import os
 import shutil
 import subprocess
 import time
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -48,18 +51,30 @@ from runtime.config import REPO_ROOT, env
 from runtime.hive.lifecycle import HiveLog
 from runtime.knowledge.slice import format_serial, parse_utc
 from runtime.lastorder.naming import node_name, preset as naming_preset
-from runtime.node.adapters import Command, OpenCodeAdapter, quota_exhausted
+from runtime.node.adapters import (
+    PI_SESSION_DIR,
+    Command,
+    OpenCodeAdapter,
+    PiAdapter,
+    quota_exhausted,
+)
 from runtime.node.runner import SessionProcess
 from runtime.node.workplace import (
+    PI_CONTEXT_WINDOW,
+    PI_KEY_FILE,
+    PI_KEEP_RECENT_TOKENS,
     READ_ONLY_DIR,
     READ_ONLY_FILE,
     SISTER_DIR,
     SISTER_FILE,
     WORKPLACE_DIR_MODE,
+    _chmod,
     _chmod_tree,
     _force_rmtree,
     _own,
+    _write_file_no_links,
     _write_readonly,
+    render_pi_configs,
 )
 
 # --- the knowledge layout this module reads (P1-5: one place, read-only) --------------------
@@ -84,6 +99,7 @@ WORKPLACE_TEMPLATE = REPO_ROOT / "agent" / "network"
 
 PROMPT_PREFIX = "Last Order session."
 SESSION_TITLE = "lo-session"
+HARNESSES = ("pi", "opencode")  # the desk's harness pair (runtime/node/config.py)
 SUMMARY_EXCERPT_CHARS = 1500
 CHRONICLE_TAIL_LINES = 5
 QUEUE_SNAPSHOT_MAX = 20
@@ -235,7 +251,8 @@ class Wake:
 
 class LastOrderAdapter(OpenCodeAdapter):
     """The runner's opencode adapter (runtime/node/adapters.py), reused untouched, with
-    the desk's own session title: `opencode run --model <smart> --format json`."""
+    the desk's own session title: `opencode run --model <smart> --format json`. The
+    failover harness since T-059 — the primary is pi on the Z.ai subscription."""
 
     def session(self, prompt: str) -> Command:
         return Command(
@@ -247,6 +264,58 @@ class LastOrderAdapter(OpenCodeAdapter):
                 prompt,
             )
         )
+
+
+class LastOrderPiAdapter(PiAdapter):
+    """The runner's Pi adapter (runtime/node/adapters.py, T-066), reused untouched in
+    argv and env — `pi -p --mode json --no-approve --offline --no-skills --skill skills
+    -- <prompt>`, the key in the agent-dir zai-key file, never in the child env — with
+    the desk's own agent-dir render (T-059): the desk has no body, so mcp.json carries
+    the hive MCP alone, `direct`, at `/last-order/mcp` with the Last Order key."""
+
+    def _render(self) -> None:
+        agent_dir = Path(self._agent_dir)
+        configs = render_pi_configs(
+            self._model, self._body_base, self._hive_url, self._node_key,
+            context_window=self._context_window,
+            keep_recent_tokens=self._keep_recent_tokens,
+            key_file=str(agent_dir / PI_KEY_FILE),
+        )
+        configs["mcp.json"] = {
+            "autoEnableCodemode": False,
+            "mcpServers": {
+                "hive": {
+                    "url": f"{self._hive_url.rstrip('/')}/last-order/mcp",
+                    "headers": {"X-Node-Key": self._node_key},
+                    "timeout": 10,
+                    "exposure": "direct",
+                },
+            },
+        }
+        # the drop_pi_agent_dir write path (runtime/node/workplace.py): the dir is the
+        # agent's own home territory, so every file is written link-safe, root-owned
+        # 0444 — except zai-key, her 0400 credential, the T-066 exposure
+        fresh_parent = not agent_dir.parent.exists()
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        if fresh_parent:
+            _own(agent_dir.parent, self._uid, self._gid)
+            _chmod(agent_dir.parent, 0o700)
+        if self._zai_key:
+            _write_file_no_links(
+                agent_dir / PI_KEY_FILE, self._zai_key, mode=0o400,
+                uid=self._uid, gid=self._gid,
+            )
+        for name, config in configs.items():
+            _write_file_no_links(
+                agent_dir / name, json.dumps(config, indent=2),
+                mode=READ_ONLY_FILE, uid=0, gid=0,
+            )
+        _own(agent_dir, self._uid, self._gid)
+        _chmod(agent_dir, 0o700)
+
+    def session(self, prompt: str) -> Command:
+        self._render()  # every session starts from the desk's own render
+        return self._command(prompt, None)
 
 
 # --- config ------------------------------------------------------------------------------------
@@ -261,7 +330,22 @@ class AdminConfig:
     gateway_url: str
     lo_key: str
     model: str
-    harness: str = "opencode"
+    # T-059: the primary harness is pi on the Z.ai Coding Plan (the operator's
+    # 2026-10-31 pick: the model gives the desk its abilities — GLM-5.3, not Flash);
+    # opencode through the gateway is the failover.
+    harness: str = "pi"
+    pi_model: str = "GLM-5.3"
+    pi_agent_dir: Path = Path("/home/sister/.pi/agent")
+    # the compaction budget of the desk's sessions (T-066's sister values by default:
+    # a desk session is short, the cap is a guard rail; T-043 may retune it)
+    pi_context_window: int = PI_CONTEXT_WINDOW
+    pi_keep_recent_tokens: int = PI_KEEP_RECENT_TOKENS
+    failover: str = "opencode"
+    # readiness of a switch target, "the same way as node-N": the entrypoint's
+    # root-only copy of the Z.ai token, and the opencode auth it renders into the
+    # agent's home (both 0400/0600 files, never the process environment)
+    zai_key_file: Path = Path("/run/node/secrets/zai_api_key")
+    opencode_auth_file: Path = Path("/home/sister/.local/share/opencode/auth.json")
     naming: str = "lab"
     every_min: float = 10.0
     batch: int = 3
@@ -271,6 +355,18 @@ class AdminConfig:
     kill_grace_s: float = 5.0
     sister_uid: int | None = None
     sister_gid: int | None = None
+
+    def __post_init__(self) -> None:
+        # the runner's validation (runtime/node/config.py): a typo in a harness name
+        # must fail the boot, not surface as a KeyError on the first session
+        if self.harness not in HARNESSES:
+            raise ValueError(f"ADMIN_HARNESS must be one of {HARNESSES}, got {self.harness!r}")
+        if self.failover and self.failover not in HARNESSES:
+            raise ValueError(
+                f"ADMIN_HARNESS_FAILOVER must be one of {HARNESSES} or empty, got {self.failover!r}"
+            )
+        if self.failover == self.harness:
+            raise ValueError("ADMIN_HARNESS_FAILOVER must differ from ADMIN_HARNESS")
 
     @classmethod
     def from_env(cls) -> "AdminConfig":
@@ -287,6 +383,7 @@ class AdminConfig:
             except ValueError:
                 return None
 
+        harness = env("ADMIN_HARNESS") or "pi"
         return cls(
             workplace=Path(env("ADMIN_WORKPLACE") or "/workplace"),
             template_dir=Path(env("ADMIN_TEMPLATE_DIR") or WORKPLACE_TEMPLATE),
@@ -295,7 +392,19 @@ class AdminConfig:
             gateway_url=env("GATEWAY_URL") or "http://llm-gateway:4000",
             lo_key=env("HIVE_MCP_LO_KEY") or "",
             model=env("ADMIN_MODEL") or "z-ai/glm-5.3-flash",
-            harness=env("ADMIN_HARNESS") or "opencode",
+            harness=harness,
+            pi_model=env("ADMIN_PI_MODEL") or "GLM-5.3",
+            pi_agent_dir=Path(env("ADMIN_PI_AGENT_DIR") or "/home/sister/.pi/agent"),
+            pi_context_window=int(_num("ADMIN_PI_CONTEXT_WINDOW", PI_CONTEXT_WINDOW)),
+            pi_keep_recent_tokens=int(_num("ADMIN_PI_KEEP_RECENT_TOKENS", PI_KEEP_RECENT_TOKENS)),
+            # the desk's failover is always the OTHER harness unless told otherwise
+            failover=env("ADMIN_HARNESS_FAILOVER")
+            or ("opencode" if harness == "pi" else "pi"),
+            zai_key_file=Path(env("ZAI_KEY_FILE") or "/run/node/secrets/zai_api_key"),
+            opencode_auth_file=Path(
+                env("OPENCODE_AUTH_FILE")
+                or "/home/sister/.local/share/opencode/auth.json"
+            ),
             naming=env("NAME_PRESET") or "lab",
             every_min=_num("ADMIN_EVERY_MIN", 10.0),
             batch=max(1, int(_num("ADMIN_PROPOSALS_BATCH", 3))),
@@ -325,15 +434,50 @@ class AdminAlarm:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], datetime] | None = None,
         log: HiveLog | None = None,
+        post_alarm: Callable[[str, str], Any] | None = None,
     ):
         self.cfg = cfg
         self._layout = layout or HiveLayout(cfg.knowledge)
-        # `--model` must carry the provider prefix ("llm-gateway/<model>"): a bare
+        # Both harnesses are built up front: pi on the subscription is the primary
+        # (T-059), opencode on the gateway is the failover. The failover's `--model`
+        # must carry the provider prefix ("llm-gateway/<model>"): a bare
         # "z-ai/glm-5.3-flash" resolves to opencode's BUILT-IN z-ai provider, which
-        # holds no key on this sandbox — proven on the stand (T-030 report).
+        # holds no key on this sandbox — proven on the stand (T-030 report). The pi
+        # agent reads the token the entrypoint materialized for this container (the
+        # root-only tmpfs copy, the same lift as node-N); no token means pi is not
+        # ready — every session checks (`_harness_usable`): a ready failover takes
+        # over with one board alarm, otherwise the desk waits (no doomed spawns).
+        zai_key = ""
+        try:
+            zai_key = cfg.zai_key_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
         self._adapters = dict(
-            adapters or {cfg.harness: LastOrderAdapter(f"llm-gateway/{cfg.model}")}
+            adapters
+            or {
+                "pi": LastOrderPiAdapter(
+                    cfg.pi_model,
+                    # the desk has no body — the body URL never leaves this render's
+                    # discarded mcp.json half (LastOrderPiAdapter._render overrides it)
+                    body_base="http://no-body",
+                    hive_url=cfg.hive_url,
+                    node_key=cfg.lo_key,
+                    zai_key=zai_key,
+                    context_window=cfg.pi_context_window,
+                    keep_recent_tokens=cfg.pi_keep_recent_tokens,
+                    agent_dir=str(cfg.pi_agent_dir),
+                    uid=cfg.sister_uid,
+                    gid=cfg.sister_gid,
+                ),
+                "opencode": LastOrderAdapter(f"llm-gateway/{cfg.model}"),
+            }
         )
+        # The runner's rule (runner.py `_life`): a life starts on the primary harness;
+        # quota marks switch to the failover for the sessions that follow, and the
+        # next life is back on the primary. The desk's "life" is this process — the
+        # switch lives here, a restart lands on pi again.
+        self._harness_name = cfg.harness
+        self._post_alarm = post_alarm or self._post_board_alarm
         self._spawn = spawn or self._spawn_child
         self._sleep = sleep
         self._clock = clock or (lambda: datetime.now(timezone.utc))
@@ -564,7 +708,9 @@ class AdminAlarm:
             return ""
 
     def _session(self, reasons: list[WakeReason], new_deaths: list[int]) -> None:
-        adapter = self._adapters[self.cfg.harness]
+        if not self._harness_usable():
+            return
+        adapter = self._adapters[self._harness_name]
         prompt = (
             f"{PROMPT_PREFIX}\n\n{self._summary(reasons, new_deaths)}\n\n"
             + (self.cfg.workplace / "SESSION_PROMPT.md").read_text(encoding="utf-8")
@@ -595,14 +741,83 @@ class AdminAlarm:
                         return
             process.wait()
             output = process.output()
+            quota = quota_exhausted(output)
             self._log.event(
                 "session.done",
                 {
                     "code": process.returncode(),
-                    "quota": quota_exhausted(output),
+                    "harness": self._harness_name,
+                    "quota": quota,
                     "tail": " ".join(output[-300:].split()),
                 },
             )
+            if quota:
+                self._quota_switch()
+
+    def _adapter_ready(self, name: str) -> bool:
+        """A harness must have its credential rendered (the runner's `_adapter_ready`):
+        the Z.ai token the entrypoint materialized for pi, the gateway auth it rendered
+        for opencode. Missing means not ready — spawning would only stack failures."""
+        if name == "pi":
+            return self.cfg.zai_key_file.exists()
+        if name == "opencode":
+            return self.cfg.opencode_auth_file.exists()
+        return True
+
+    def _harness_usable(self) -> bool:
+        """The readiness gate of the CURRENT harness, before every session (R1-1): a
+        primary without its credential must not spawn doomed sessions. A ready
+        failover takes over with the one-time board alarm (the quota switch's twin);
+        nothing ready — the desk waits (the runner's `quota.waits` shape)."""
+        if self._adapter_ready(self._harness_name):
+            return True
+        target = self.cfg.failover
+        if target and target != self._harness_name and self._adapter_ready(target):
+            self._log.event("harness.switch", {"from": self._harness_name, "to": target})
+            self._post_failover_alarm(self._harness_name, target, "no rendered credential")
+            self._harness_name = target
+            return True
+        self._log.event("harness.waits", {"harness": self._harness_name})
+        return False
+
+    def _quota_switch(self) -> None:
+        """Quota marks in a session's output move the NEXT session to the failover
+        harness (the runner's `quota.switch`) and raise the board alarm — the desk
+        left the subscription, the operator should know. Without a ready failover
+        the desk waits on the same harness (the runner's `quota.waits`)."""
+        target = self.cfg.failover
+        if not target or target == self._harness_name or not self._adapter_ready(target):
+            self._log.event("quota.waits", {"harness": self._harness_name})
+            return
+        self._log.event("quota.switch", {"from": self._harness_name, "to": target})
+        self._post_failover_alarm(self._harness_name, target, "the Z.ai quota ran out")
+        self._harness_name = target
+
+    def _post_failover_alarm(self, frm: str, target: str, reason: str) -> None:
+        """The board alarm of a harness switch — one per switch, whatever caused it.
+        The text is assembled from the pair and the reason, not hardcoded for
+        pi→opencode (R1-2): the reverse pair must read right too."""
+        text = (
+            f"last-order harness failover: {frm} is out ({reason}); sessions moved to "
+            f"{target} until the process restarts"
+        )
+        try:
+            self._post_alarm("harness_failover", text)
+        except OSError as exc:
+            self._log.event("alarm.post_failed", {"error": f"{type(exc).__name__}: {exc}"})
+
+    def _post_board_alarm(self, alarm_type: str, text: str) -> None:
+        """The environment's alarm channel (ADR-036): the Last Order key rides
+        X-Node-Key, the board stamps the author `admin`."""
+        url = f"{self.cfg.hive_url.rstrip('/')}/board/alarms"
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({"type": alarm_type, "text": text}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-Node-Key": self.cfg.lo_key},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            response.read()
 
     def _safe_spawn(self, command: Command):
         try:
@@ -621,7 +836,6 @@ class AdminAlarm:
             "LANG": "C.UTF-8",
             "NO_COLOR": "1",
             "NO_UPDATE_NOTIFIER": "1",
-            "ZCODE_DISABLE_UPDATE_CHECK": "1",
         }
         env_.update(extra)
         return env_

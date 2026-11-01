@@ -115,6 +115,13 @@ class Recorder:
 
 
 def make_cfg(tmp_path: Path, **over) -> AdminConfig:
+    if "zai_key_file" not in over:
+        # the entrypoint's materialized token: present by default, so the default
+        # (pi) harness is ready and the wake tests exercise wakes, not the gate
+        key_file = tmp_path / "secrets" / "zai_api_key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text("zai-token", encoding="utf-8")
+        over["zai_key_file"] = key_file
     values = dict(
         workplace=tmp_path / "workplace",
         template_dir=TEMPLATE,
@@ -123,6 +130,10 @@ def make_cfg(tmp_path: Path, **over) -> AdminConfig:
         gateway_url="http://llm-gateway:4000",
         lo_key="sk-lo",
         model="z-ai/glm-5.3-flash",
+        # the pi render writes real files on every session: keep them in tmp (the
+        # production paths live in the container, not on this host)
+        pi_agent_dir=tmp_path / "pi-agent",
+        zai_key_file=over.pop("zai_key_file"),
         every_min=10.0,
         batch=3,
         poll_s=0.0,
@@ -177,8 +188,8 @@ def operator_write(path: Path, text: str) -> None:
     os.chmod(path, 0o444)
 
 
-def boot(tmp_path: Path, *, clock=None, recorder=None):
-    cfg = make_cfg(tmp_path)
+def boot(tmp_path: Path, *, clock=None, recorder=None, **over):
+    cfg = make_cfg(tmp_path, **over)
     clock = clock or FakeClock()
     recorder = recorder or Recorder()
     alarm = make_alarm(cfg, recorder, clock, tmp_path)
@@ -304,7 +315,9 @@ def test_summary_rides_the_prompt(tmp_path: Path) -> None:
     )
     operator_write(alarm.cfg.workplace / "INBOX.md", "\nпроверь летопись\n")
     alarm.run_once()
-    prompt = recorder.argv[0][-1]
+    argv = recorder.argv[0]
+    # pi carries the prompt after `--`; opencode puts it last as a plain arg
+    prompt = argv[argv.index("--") + 1] if argv[0] == "pi" else argv[-1]
     assert "Wake reasons" in prompt
     assert "0012" in prompt and "wills filed" in prompt
     assert "Pending proposals: 3" in prompt
@@ -331,20 +344,19 @@ def test_session_timeout_kills_the_harness(tmp_path: Path) -> None:
 
 
 def test_spawn_env_is_fresh_and_cwd_is_the_workplace(tmp_path: Path) -> None:
+    # the default harness is pi (T-059): the child env carries only the agent-dir
+    # pointer — the Z.ai key lives in the agent-dir zai-key file (T-066), never in env
     cfg, clock, recorder, alarm = boot(tmp_path)
     add_will(tmp_path / "knowledge", 6)
     alarm.run_once()
     env = recorder.envs[0]
     assert "sk-lo" not in set(env.values())  # no key rides the child env
+    assert "ZAI_API_KEY" not in env
     assert set(env) <= {"HOME", "PATH", "LANG", "NO_COLOR", "NO_UPDATE_NOTIFIER",
-                        "ZCODE_DISABLE_UPDATE_CHECK"}
+                        "PI_CODING_AGENT_DIR"}
     assert recorder.cwds[0] == cfg.workplace
-    assert recorder.argv[0][0] == "opencode" and "--format" in recorder.argv[0]
-    # the provider prefix must ride --model: a bare "z-ai/..." would resolve to
-    # opencode's built-in z-ai provider, not the gateway (stand finding)
-    assert recorder.argv[0][recorder.argv[0].index("--model") + 1] == (
-        "llm-gateway/z-ai/glm-5.3-flash"
-    )
+    assert recorder.argv[0][0] == "pi" and "--mode" in recorder.argv[0]
+    assert env["PI_CODING_AGENT_DIR"] == str(cfg.pi_agent_dir)
 
 
 def test_unkillable_child_does_not_freeze_the_desk(tmp_path: Path) -> None:

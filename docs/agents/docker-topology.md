@@ -123,6 +123,20 @@ bash dev/board_chat_run.sh up
 - Снять стенд: `docker compose -f docker/compose.yml stop` (тома с миром и доской
   остаются). Чужой поднятый стенд (project `lastorder`) не трогать.
 
+## Last Order и выход к Z.ai (T-059)
+- Основной харнесс стола — Pi на подписке Z.ai (модель `ADMIN_PI_MODEL`, по умолчанию
+  GLM-5.3 — выбор оператора 2026-10-31), запасной — opencode через шлюз с тревогой на
+  доску. Сессия — `pi -p --mode json`, конфиги agent-dir (`/home/sister/.pi/agent`)
+  рендерит сам стол перед каждой сессией: MCP только hive (`direct`,
+  `/last-order/mcp`), потолок контекста `ADMIN_PI_CONTEXT_WINDOW` (96k, значения
+  сестёр из T-066), ключ — файл `zai-key` (0400) через `apiKey: "!cat …"`.
+- Сеть `svc-lo` остаётся internal; единственный выход — `zai-egress` с алиасом
+  `api.z.ai` (SNI-allowlist, как у слотов). Других выходов у стола нет.
+- Токен Z.ai едет тем же лифтом, что у `node-N`: `up.sh` поднимает `ZCODE_API_KEY`
+  из `ZAI_API_KEY` в `.env`, compose отдаёт в `last-order`, entrypoint материализует
+  root-only копию в tmpfs (`ZAI_KEY_FILE`) и вычищает из окружения. В env процесса
+  агента ключа нет.
+
 ## Запуск (E1)
 - `docker compose -f docker/compose.yml up -d mc-server body-1`, затем `up mind-1` — проба `tools/body_probe.py`.
 - Первый старт тела качает около 540 МБ ассетов и библиотек, это занимает 4 минуты. Всё ложится в volume

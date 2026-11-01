@@ -53,3 +53,36 @@ def test_infrastructure_restarts_on_failure():
     # Everything else keeps daemon crash-restart (the body-N row of the section 9 table)
     for name in set(COMPOSE["services"]) - set(QUOTA_SPENDERS):
         assert COMPOSE["services"][name]["restart"] == "on-failure", name
+
+
+# --- T-059: Last Order on the Z.ai Coding Plan -------------------------------------------------
+
+
+def test_last_order_rides_pi_with_gateway_failover():
+    env = COMPOSE["services"]["last-order"]["environment"]
+    assert env["ADMIN_HARNESS"] == "${ADMIN_HARNESS:-pi}"
+    assert env["ADMIN_HARNESS_FAILOVER"] == "${ADMIN_HARNESS_FAILOVER:-opencode}"
+    # the operator's pick: the model, not Flash; the compaction budget is T-066's
+    assert env["ADMIN_PI_MODEL"] == "${ADMIN_PI_MODEL:-GLM-5.3}"
+    assert env["ADMIN_PI_CONTEXT_WINDOW"] == "${ADMIN_PI_CONTEXT_WINDOW:-96000}"
+    # the token rides the same lift as node-N (up.sh lifts .env's ZAI_API_KEY as
+    # ZCODE_API_KEY), and the entrypoint materializes it the same way
+    assert env["ZAI_API_KEY"] == "${ZCODE_API_KEY:-}"
+    assert env["ZAI_KEY_FILE"] == "/run/node/secrets/zai_api_key"
+
+
+def test_last_order_key_surface_is_zai_alone():
+    # ADR-033: the subscription token is the conscious exception; the gateway virtual
+    # key and the hive key are the stand's own, no provider key rides anything else
+    env = COMPOSE["services"]["last-order"]["environment"]
+    keyish = {k for k in env if ("KEY" in k or "TOKEN" in k) and not k.endswith("_KEY_FILE")}
+    assert keyish == {"HIVE_MCP_LO_KEY", "GATEWAY_NODE_KEY", "ZAI_API_KEY"}
+
+
+def test_zai_egress_carries_api_zai_into_svc_lo():
+    # T-059: the desk's pi harness talks to api.z.ai like a sister's — the SNI
+    # passthrough is svc-lo's only way out, the network itself stays internal
+    nets = COMPOSE["services"]["zai-egress"]["networks"]
+    assert nets["svc-lo"]["aliases"] == ["api.z.ai"]
+    assert COMPOSE["networks"]["svc-lo"]["internal"] is True
+    assert COMPOSE["services"]["last-order"]["networks"] == ["svc-lo"]
