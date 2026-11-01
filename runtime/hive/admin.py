@@ -20,11 +20,11 @@ Wake sources, all read-only against the knowledge volume (the layout lives in
   (ADMIN_SESSION_MIN_GAP_S) — the budget guard of P1-6.
 
 The session is a short harness run in the workplace: the runner's adapters (runtime/
-node/adapters.py — reused, never modified). Since T-059 the primary is zcode on the Z.ai
-Coding Plan — the same subscription the sisters ride — with opencode through the gateway
-(`smart` tier) as the quota failover; MCP `/last-order/mcp` with the Last Order key is
-rendered into the workplace configs the same way a sister's node key is (T-029). The
-core files and skills are
+node/adapters.py — reused, never modified). Since T-059 the primary is pi on the Z.ai
+Coding Plan — the same subscription and the same agent-dir render the sisters ride
+(T-066) — with opencode through the gateway (`smart` tier) as the quota failover; MCP
+`/last-order/mcp` with the Last Order key is rendered into the session's configs the
+same way a sister's node key is (T-029). The core files and skills are
 rewritten from the image on every start: tampering is undone, `memory/` is never
 touched (P1-3). Children run under the sister uid with a fresh environment — no key of
 this container rides into a session.
@@ -51,18 +51,30 @@ from runtime.config import REPO_ROOT, env
 from runtime.hive.lifecycle import HiveLog
 from runtime.knowledge.slice import format_serial, parse_utc
 from runtime.lastorder.naming import node_name, preset as naming_preset
-from runtime.node.adapters import Command, OpenCodeAdapter, ZCodeAdapter, quota_exhausted
+from runtime.node.adapters import (
+    PI_SESSION_DIR,
+    Command,
+    OpenCodeAdapter,
+    PiAdapter,
+    quota_exhausted,
+)
 from runtime.node.runner import SessionProcess
 from runtime.node.workplace import (
+    PI_CONTEXT_WINDOW,
+    PI_KEY_FILE,
+    PI_KEEP_RECENT_TOKENS,
     READ_ONLY_DIR,
     READ_ONLY_FILE,
     SISTER_DIR,
     SISTER_FILE,
     WORKPLACE_DIR_MODE,
+    _chmod,
     _chmod_tree,
     _force_rmtree,
     _own,
+    _write_file_no_links,
     _write_readonly,
+    render_pi_configs,
 )
 
 # --- the knowledge layout this module reads (P1-5: one place, read-only) --------------------
@@ -79,7 +91,6 @@ CHRONICLE_REL = Path("base") / "chronicle.md"
 ADMIN_DIR = ".admin"  # the alarm's own state and events, root-owned
 STATE_FILE = "state.json"
 OPENCODE_CONFIG = "opencode.json"
-ZCODE_CONFIG = "zcode.json"
 CORE_FILES = ("PERSONA.md", "AGENTS.md", "SESSION_PROMPT.md")  # rewritten every start (P1-3)
 CORE_DIRS = ("skills",)
 OPERATOR_FILES = ("INBOX.md", "GOALS.md")  # created once, then root's alone (P1-2)
@@ -88,7 +99,7 @@ WORKPLACE_TEMPLATE = REPO_ROOT / "agent" / "network"
 
 PROMPT_PREFIX = "Last Order session."
 SESSION_TITLE = "lo-session"
-HARNESSES = ("zcode", "opencode")  # the desk's harness pair (runtime/node/config.py)
+HARNESSES = ("pi", "opencode")  # the desk's harness pair (runtime/node/config.py)
 SUMMARY_EXCERPT_CHARS = 1500
 CHRONICLE_TAIL_LINES = 5
 QUEUE_SNAPSHOT_MAX = 20
@@ -241,7 +252,7 @@ class Wake:
 class LastOrderAdapter(OpenCodeAdapter):
     """The runner's opencode adapter (runtime/node/adapters.py), reused untouched, with
     the desk's own session title: `opencode run --model <smart> --format json`. The
-    failover harness since T-059 — the primary is zcode on the Z.ai subscription."""
+    failover harness since T-059 — the primary is pi on the Z.ai subscription."""
 
     def session(self, prompt: str) -> Command:
         return Command(
@@ -255,13 +266,56 @@ class LastOrderAdapter(OpenCodeAdapter):
         )
 
 
-class LastOrderZCodeAdapter(ZCodeAdapter):
-    """The runner's zcode adapter, likewise reused untouched: a one-shot session, the
-    same shape as a sister's will session — `zcode -p <prompt> --json --no-color
-    --mode yolo --model zai-cp/<model>` on the Z.ai Coding Plan (T-059)."""
+class LastOrderPiAdapter(PiAdapter):
+    """The runner's Pi adapter (runtime/node/adapters.py, T-066), reused untouched in
+    argv and env — `pi -p --mode json --no-approve --offline --no-skills --skill skills
+    -- <prompt>`, the key in the agent-dir zai-key file, never in the child env — with
+    the desk's own agent-dir render (T-059): the desk has no body, so mcp.json carries
+    the hive MCP alone, `direct`, at `/last-order/mcp` with the Last Order key."""
+
+    def _render(self) -> None:
+        agent_dir = Path(self._agent_dir)
+        configs = render_pi_configs(
+            self._model, self._body_base, self._hive_url, self._node_key,
+            context_window=self._context_window,
+            keep_recent_tokens=self._keep_recent_tokens,
+            key_file=str(agent_dir / PI_KEY_FILE),
+        )
+        configs["mcp.json"] = {
+            "autoEnableCodemode": False,
+            "mcpServers": {
+                "hive": {
+                    "url": f"{self._hive_url.rstrip('/')}/last-order/mcp",
+                    "headers": {"X-Node-Key": self._node_key},
+                    "timeout": 10,
+                    "exposure": "direct",
+                },
+            },
+        }
+        # the drop_pi_agent_dir write path (runtime/node/workplace.py): the dir is the
+        # agent's own home territory, so every file is written link-safe, root-owned
+        # 0444 — except zai-key, her 0400 credential, the T-066 exposure
+        fresh_parent = not agent_dir.parent.exists()
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        if fresh_parent:
+            _own(agent_dir.parent, self._uid, self._gid)
+            _chmod(agent_dir.parent, 0o700)
+        if self._zai_key:
+            _write_file_no_links(
+                agent_dir / PI_KEY_FILE, self._zai_key, mode=0o400,
+                uid=self._uid, gid=self._gid,
+            )
+        for name, config in configs.items():
+            _write_file_no_links(
+                agent_dir / name, json.dumps(config, indent=2),
+                mode=READ_ONLY_FILE, uid=0, gid=0,
+            )
+        _own(agent_dir, self._uid, self._gid)
+        _chmod(agent_dir, 0o700)
 
     def session(self, prompt: str) -> Command:
-        return Command(("zcode", "-p", prompt, *self._base()))
+        self._render()  # every session starts from the desk's own render
+        return self._command(prompt, None)
 
 
 # --- config ------------------------------------------------------------------------------------
@@ -276,10 +330,16 @@ class AdminConfig:
     gateway_url: str
     lo_key: str
     model: str
-    # T-059: the primary harness is zcode on the Z.ai Coding Plan — the same
-    # subscription the sisters ride; opencode through the gateway is the failover.
-    harness: str = "zcode"
-    zcode_model: str = "GLM-5.3-Flash"
+    # T-059: the primary harness is pi on the Z.ai Coding Plan (the operator's
+    # 2026-10-31 pick: the model gives the desk its abilities — GLM-5.3, not Flash);
+    # opencode through the gateway is the failover.
+    harness: str = "pi"
+    pi_model: str = "GLM-5.3"
+    pi_agent_dir: Path = Path("/home/sister/.pi/agent")
+    # the compaction budget of the desk's sessions (T-066's sister values by default:
+    # a desk session is short, the cap is a guard rail; T-043 may retune it)
+    pi_context_window: int = PI_CONTEXT_WINDOW
+    pi_keep_recent_tokens: int = PI_KEEP_RECENT_TOKENS
     failover: str = "opencode"
     # readiness of a switch target, "the same way as node-N": the entrypoint's
     # root-only copy of the Z.ai token, and the opencode auth it renders into the
@@ -323,7 +383,7 @@ class AdminConfig:
             except ValueError:
                 return None
 
-        harness = env("ADMIN_HARNESS") or "zcode"
+        harness = env("ADMIN_HARNESS") or "pi"
         return cls(
             workplace=Path(env("ADMIN_WORKPLACE") or "/workplace"),
             template_dir=Path(env("ADMIN_TEMPLATE_DIR") or WORKPLACE_TEMPLATE),
@@ -333,10 +393,13 @@ class AdminConfig:
             lo_key=env("HIVE_MCP_LO_KEY") or "",
             model=env("ADMIN_MODEL") or "z-ai/glm-5.3-flash",
             harness=harness,
-            zcode_model=env("ADMIN_ZCODE_MODEL") or env("ZCODE_MODEL") or "GLM-5.3-Flash",
+            pi_model=env("ADMIN_PI_MODEL") or "GLM-5.3",
+            pi_agent_dir=Path(env("ADMIN_PI_AGENT_DIR") or "/home/sister/.pi/agent"),
+            pi_context_window=int(_num("ADMIN_PI_CONTEXT_WINDOW", PI_CONTEXT_WINDOW)),
+            pi_keep_recent_tokens=int(_num("ADMIN_PI_KEEP_RECENT_TOKENS", PI_KEEP_RECENT_TOKENS)),
             # the desk's failover is always the OTHER harness unless told otherwise
             failover=env("ADMIN_HARNESS_FAILOVER")
-            or ("opencode" if harness == "zcode" else "zcode"),
+            or ("opencode" if harness == "pi" else "pi"),
             zai_key_file=Path(env("ZAI_KEY_FILE") or "/run/node/secrets/zai_api_key"),
             opencode_auth_file=Path(
                 env("OPENCODE_AUTH_FILE")
@@ -375,22 +438,43 @@ class AdminAlarm:
     ):
         self.cfg = cfg
         self._layout = layout or HiveLayout(cfg.knowledge)
-        # Both harnesses are built up front: zcode on the subscription is the primary
+        # Both harnesses are built up front: pi on the subscription is the primary
         # (T-059), opencode on the gateway is the failover. The failover's `--model`
         # must carry the provider prefix ("llm-gateway/<model>"): a bare
         # "z-ai/glm-5.3-flash" resolves to opencode's BUILT-IN z-ai provider, which
-        # holds no key on this sandbox — proven on the stand (T-030 report).
+        # holds no key on this sandbox — proven on the stand (T-030 report). The pi
+        # agent reads the token the entrypoint materialized for this container (the
+        # root-only tmpfs copy, the same lift as node-N); no token means pi is not
+        # ready and the desk waits on it (the runner's `_adapter_ready` gate).
+        zai_key = ""
+        try:
+            zai_key = cfg.zai_key_file.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
         self._adapters = dict(
             adapters
             or {
-                "zcode": LastOrderZCodeAdapter(cfg.zcode_model),
+                "pi": LastOrderPiAdapter(
+                    cfg.pi_model,
+                    # the desk has no body — the body URL never leaves this render's
+                    # discarded mcp.json half (LastOrderPiAdapter._render overrides it)
+                    body_base="http://no-body",
+                    hive_url=cfg.hive_url,
+                    node_key=cfg.lo_key,
+                    zai_key=zai_key,
+                    context_window=cfg.pi_context_window,
+                    keep_recent_tokens=cfg.pi_keep_recent_tokens,
+                    agent_dir=str(cfg.pi_agent_dir),
+                    uid=cfg.sister_uid,
+                    gid=cfg.sister_gid,
+                ),
                 "opencode": LastOrderAdapter(f"llm-gateway/{cfg.model}"),
             }
         )
         # The runner's rule (runner.py `_life`): a life starts on the primary harness;
         # quota marks switch to the failover for the sessions that follow, and the
         # next life is back on the primary. The desk's "life" is this process — the
-        # switch lives here, a restart lands on zcode again.
+        # switch lives here, a restart lands on pi again.
         self._harness_name = cfg.harness
         self._post_alarm = post_alarm or self._post_board_alarm
         self._spawn = spawn or self._spawn_child
@@ -431,9 +515,6 @@ class AdminAlarm:
             (root / name).mkdir(parents=True, exist_ok=True)
             self._own_tree(root / name)
         self._rewrite_readonly(root / OPENCODE_CONFIG, json.dumps(self._opencode_config(), indent=2))
-        # zcode.json rides next to it (T-059): the primary harness reads the workplace,
-        # and the failover back needs no re-render after a switch
-        self._rewrite_readonly(root / ZCODE_CONFIG, json.dumps(self._zcode_config(), indent=2))
         (root / ADMIN_DIR).mkdir(parents=True, exist_ok=True)
         os.chmod(root / ADMIN_DIR, 0o755)
         self._load_state(self._clock())
@@ -483,22 +564,6 @@ class AdminAlarm:
                     "headers": {"X-Node-Key": self.cfg.lo_key},
                 }
             },
-        }
-
-    def _zcode_config(self) -> dict[str, Any]:
-        """zcode.json of the workplace: the network MCP alone — the desk has no body
-        (the shape of render_zcode_config, runtime/node/workplace.py)."""
-        return {
-            "mcp": {
-                "servers": {
-                    "hive": {
-                        "type": "http",
-                        "url": f"{self.cfg.hive_url.rstrip('/')}/last-order/mcp",
-                        "enabled": True,
-                        "headers": {"X-Node-Key": self.cfg.lo_key},
-                    }
-                }
-            }
         }
 
     # --- state ------------------------------------------------------------------------------
@@ -688,10 +753,10 @@ class AdminAlarm:
 
     def _adapter_ready(self, name: str) -> bool:
         """A switch target must have its credential rendered (the runner's
-        `_adapter_ready`): the Z.ai token the entrypoint materialized for zcode, the
+        `_adapter_ready`): the Z.ai token the entrypoint materialized for pi, the
         gateway auth it rendered for opencode. Missing means not ready — switching
         there would only stack spawn failures."""
-        if name == "zcode":
+        if name == "pi":
             return self.cfg.zai_key_file.exists()
         if name == "opencode":
             return self.cfg.opencode_auth_file.exists()
@@ -747,7 +812,6 @@ class AdminAlarm:
             "LANG": "C.UTF-8",
             "NO_COLOR": "1",
             "NO_UPDATE_NOTIFIER": "1",
-            "ZCODE_DISABLE_UPDATE_CHECK": "1",
         }
         env_.update(extra)
         return env_

@@ -329,14 +329,15 @@ services:
   # sessions of the network's administrator. The node image carries both harnesses (the
   # mind image of the hive does not); the sandbox reaches ONLY hive and llm-gateway over
   # the internal svc-lo network (plan review P1-1) plus, since T-059, api.z.ai through
-  # zai-egress: the primary harness is zcode on the Z.ai subscription — the ADR-033
-  # conscious exception the sisters ride too; opencode through the gateway stays as the
-  # quota failover. No mc-server and its RCON, no node slots, no other way out. The
-  # knowledge volume is read-only here — the base is written only by the hive (ADR-017),
-  # through the MCP tools the session gets. The node entrypoint renders both
-  # credentials — the gateway key into the opencode auth store, the Z.ai token into the
-  # zcode provider config — and scrubs them from the environment; no other provider key
-  # ever enters this container.
+  # zai-egress: the primary harness is pi on the Z.ai subscription (GLM-5.3, the
+  # operator's 2026-10-31 pick) — the ADR-033 conscious exception the sisters ride too;
+  # opencode through the gateway stays as the quota failover. No mc-server and its
+  # RCON, no node slots, no other way out. The knowledge volume is read-only here — the
+  # base is written only by the hive (ADR-017), through the MCP tools the session gets.
+  # The node entrypoint renders the credentials — the gateway key into the opencode
+  # auth store, the Z.ai token into the root-only tmpfs copy — and scrubs them from the
+  # environment; the pi agent-dir zai-key (the session's own credential, T-066) is the
+  # only other copy, and no other provider key ever enters this container.
   last-order:
     build:
       context: ..
@@ -363,9 +364,10 @@ services:
       GATEWAY_URL: http://llm-gateway:4000
       HIVE_MCP_LO_KEY: "${HIVE_MCP_LO_KEY:-}"
       ADMIN_MODEL: "${LO_MODEL:-z-ai/glm-5.3-flash}"   # the failover tier through the gateway
-      ADMIN_HARNESS: "${ADMIN_HARNESS:-zcode}"          # the primary: Z.ai Coding Plan (T-059)
+      ADMIN_HARNESS: "${ADMIN_HARNESS:-pi}"             # the primary: Pi on the Z.ai plan (T-059)
       ADMIN_HARNESS_FAILOVER: "${ADMIN_HARNESS_FAILOVER:-opencode}"
-      ADMIN_ZCODE_MODEL: "${ADMIN_ZCODE_MODEL:-}"       # empty -> ZCODE_MODEL -> GLM-5.3-Flash
+      ADMIN_PI_MODEL: "${ADMIN_PI_MODEL:-GLM-5.3}"      # the operator's pick: the model, not Flash
+      ADMIN_PI_CONTEXT_WINDOW: "${ADMIN_PI_CONTEXT_WINDOW:-96000}"  # the compaction budget
       ADMIN_EVERY_MIN: "${ADMIN_EVERY_MIN:-10}"
       ADMIN_PROPOSALS_BATCH: "${ADMIN_PROPOSALS_BATCH:-3}"
       ADMIN_POLL_S: "${ADMIN_POLL_S:-5}"
@@ -373,9 +375,8 @@ services:
       ADMIN_SESSION_MIN_GAP_S: "${ADMIN_SESSION_MIN_GAP_S:-30}"
       NAME_PRESET: "${NAME_PRESET:-lab}"
       GATEWAY_NODE_KEY: "${GATEWAY_KEY_LO:-}"   # the node entrypoint renders it into opencode auth
-      ZAI_API_KEY: "${ZCODE_API_KEY:-}"         # ditto: zcode provider + root-only tmpfs copy
+      ZAI_API_KEY: "${ZCODE_API_KEY:-}"         # ditto: root-only tmpfs copy + the pi zai-key
       ZAI_KEY_FILE: /run/node/secrets/zai_api_key
-      ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"   # the provider render's model (entrypoint)
       SISTER_UID: "1001"
       SISTER_GID: "1001"
     command: ["python", "-m", "runtime.hive.admin"]
@@ -513,10 +514,10 @@ services:
 
   # The only way out of a node sandbox (T-027 plan review P1-3): a TLS passthrough with an
   # SNI allowlist of exactly api.z.ai. In svc-N and svc-lo it carries the network alias
-  # `api.z.ai`, so the zcode harness talks to the official base URL and verifies the real
-  # certificate; no proxy env, no base-URL override. Everything else (internet, other
-  # hosts) is refused. svc-lo since T-059: Last Order's primary harness rides the same
-  # subscription route as the sisters.
+  # `api.z.ai`, so the pi and zcode harnesses talk to the official base URL and verify
+  # the real certificate; no proxy env, no base-URL override. Everything else (internet,
+  # other hosts) is refused. svc-lo since T-059: Last Order's primary harness rides the
+  # same subscription route as the sisters.
   zai-egress:
     image: nginx:1.27-alpine
     volumes:
