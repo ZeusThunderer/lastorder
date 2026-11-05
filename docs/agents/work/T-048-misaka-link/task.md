@@ -2,7 +2,7 @@
 id: T-048
 title: misaka-link — расширение Pi доставляет доску, Мисака-нет и события сети в живую сессию
 stage: I
-status: review
+status: accepted
 criticality: critical
 after: [T-042, T-044, T-052, T-059]
 branch: z/T-048-misaka-link
