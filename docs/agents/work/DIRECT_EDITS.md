@@ -50,3 +50,13 @@
 - Коммит: efcce7b (ветка z/T-066-sisters-pi-direct)
 - Почему не через ZCode: у ZCode нет квоты до сброса; ревью — ZCode после сброса (роли наоборот).
   Тем же решением надзор делает T-056.
+
+## D-005 · 2026-11-05 · —
+- Основание: исключение по решению оператора (ни одно из 1–4) — обновить uc до последнего релиза.
+  Оператор: «you can proceed, but do everything yourself for faster results».
+- Файлы: docker/body/Dockerfile (UC_VERSION 0.95.66, UC_SHA256 ff23056a…7961), сабмодуль unionclef
+  → v0.95.66 (a5309c8e), docs/agents/{workspace,unionclef-bridge}.md
+- Коммит: 2bcf80d
+- Почему не через ZCode: оператор попросил сделать самому ради скорости. Между v0.95.59 и v0.95.66
+  исходники py4j/gateway не менялись, только игровые фиксы. [проверено: pytest 856 passed, check.py ok]
+  Сборка образа body и смоук на стенде не прогнаны — Docker Desktop не был запущен.
