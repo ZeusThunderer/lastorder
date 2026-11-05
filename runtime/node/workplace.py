@@ -418,6 +418,20 @@ def drop_hermes_home(
 PI_AGENT_DIR = Path("/home/sister/.pi/agent")
 PI_KEY_FILE = "zai-key"
 PI_ZAI_BASE_URL = HERMES_GLM_BASE_URL  # the coding endpoint of the GLM Coding Plan
+# misaka-link (T-048): the environment's delivery extension of the live `hapi pi`
+# session (ADR-042 — stdin belongs to HAPI, so the board feed and Misaka-net reach
+# the agent only through it). Dropped from runtime/pi/misaka-link/ into the agent
+# dir's extensions/ on every render — same heal-a-replaced-file contract as the
+# configs. Explicit list, no tests and no package.json: only what Pi loads.
+MISAKA_LINK_DIR = Path(__file__).resolve().parents[1] / "pi" / "misaka-link"
+MISAKA_LINK_FILES = (
+    "index.ts",
+    "misaka-link.ts",
+    "naming.ts",
+    "envelope.ts",
+    "hive.ts",
+    "link.ts",
+)
 # The context cap (T-066). Pi compacts when the context passes
 # contextWindow - reserveTokens and keeps the last keepRecentTokens verbatim; the
 # window here is a budget, not the model's real one. On zcode one life grew to
@@ -517,7 +531,8 @@ def drop_pi_agent_dir(
     """(Re)render PI_AGENT_DIR: the three configs root-owned 0444 (the runner's files,
     the same boundary as HERMES_HOME/config.yaml, R1-2), written link-safe (the dir is
     hers, R2-1), plus zai-key — her own 0400 copy of the plan token (empty `zai_key`
-    writes none; the runner gates the pi harness on the key being present). The
+    writes none; the runner gates the pi harness on the key being present) — plus the
+    misaka-link extension under extensions/ (T-048). The
     adapter calls it before every life session: that heals a replaced file and moves
     hive back from the will proxy. The dir and its parent (~/.pi) stay the sister's
     0700 — Pi keeps its own state there. `hive_mcp_override` is the will-mode hook:
@@ -548,6 +563,16 @@ def drop_pi_agent_dir(
     for name, config in configs.items():
         _write_file_no_links(
             agent_dir / name, json.dumps(config, indent=2), mode=READ_ONLY_FILE, uid=0, gid=0
+        )
+    extensions = agent_dir / "extensions" / "misaka-link"
+    extensions.mkdir(parents=True, exist_ok=True)
+    for name in MISAKA_LINK_FILES:
+        _write_file_no_links(
+            extensions / name,
+            (MISAKA_LINK_DIR / name).read_text(encoding="utf-8"),
+            mode=READ_ONLY_FILE,
+            uid=0,
+            gid=0,
         )
     _own(agent_dir, uid, gid)
     _chmod(agent_dir, 0o700)

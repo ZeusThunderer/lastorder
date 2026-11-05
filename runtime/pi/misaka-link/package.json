@@ -1,0 +1,10 @@
+{
+  "name": "misaka-link",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi extension: delivers the hive board feed and Misaka-net messages into the live session (TASKBOARD.md section 11; no runtime dependencies).",
+  "scripts": {
+    "test": "node --test ."
+  }
+}
