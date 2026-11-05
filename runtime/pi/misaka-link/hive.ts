@@ -61,7 +61,7 @@ export class HiveClient {
   }
 
   private get fetch(): FetchFn {
-    return this.opts.fetchFn ?? (url => fetch(url));
+    return this.opts.fetchFn ?? ((url, init) => fetch(url, init));
   }
 
   private async request(
@@ -156,10 +156,13 @@ export class HiveClient {
       );
     }
     if (notify || id === undefined) return null;
-    const payload = parseSseData(await response.text()).find(
-      doc => doc && typeof doc === "object" && "result" in (doc as object)
-    );
-    const doc = payload as { result?: unknown; error?: { message?: unknown } } | undefined;
+    // A streamable-HTTP MCP answer is an SSE frame — and the server may keep the
+    // stream open after the message (observed on the live hive: the POST never
+    // EOFs), so read the stream and stop at the first frame that answers `id`
+    // instead of waiting for a body end that never comes.
+    const doc = (await firstJsonRpcFrame(response, id, this.opts.timeoutMs ?? TIMEOUT_MS)) as
+      | { result?: unknown; error?: { message?: unknown } }
+      | null;
     if (!doc) throw new HiveUnavailable(`hive mcp ${method}: no result in the response`);
     if (doc.error) throw new HiveRejected(`hive mcp ${method}: ${String(doc.error.message ?? "error")}`, 0);
     return doc.result;
@@ -211,4 +214,52 @@ export function parseSseData(text: string): unknown[] {
     }
   }
   return out;
+}
+
+/** Read an SSE stream frame by frame and resolve at the first JSON-RPC doc with
+ * `id` (or with a result/error when the server echoes no id), then cancel the
+ * stream. Falls back to whole-body parsing when the stream is not readable. */
+export async function firstJsonRpcFrame(
+  response: Response,
+  id: number,
+  timeoutMs: number
+): Promise<unknown | null> {
+  const started = Date.now();
+  const reader = response.body ? response.body.getReader() : null;
+  if (!reader) {
+    return parseSseData(await response.text()).find(isAnswer) ?? null;
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const left = timeoutMs - (Date.now() - started);
+      if (left <= 0) return null;
+      const read = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("frame timeout")), left)),
+      ]);
+      if (read.done) break;
+      buffer += decoder.decode(read.value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const docs = parseSseData(line);
+        const answer = docs.find(isAnswer);
+        if (answer !== undefined) return answer;
+      }
+    }
+    // the stream ended: whatever is left in the buffer
+    return parseSseData(buffer).find(isAnswer) ?? null;
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+
+  function isAnswer(doc: unknown): boolean {
+    if (!doc || typeof doc !== "object") return false;
+    const docId = (doc as { id?: unknown }).id;
+    if (docId === id) return true;
+    // notifications from the server carry no id; a lone result/error frame is ours
+    return docId === undefined && ("result" in doc || "error" in doc);
+  }
 }

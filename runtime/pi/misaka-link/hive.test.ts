@@ -109,10 +109,50 @@ test("inbox: initialize, then the stateless tools/call over the MCP mount", asyn
 });
 
 test("an MCP tool error surfaces as a rejection", async () => {
-  const hive = client(async () =>
-    sseResponse({ jsonrpc: "2.0", id: 1, result: { content: [{ text: "Error executing tool inbox: unknown node key" }], isError: true } })
-  );
+  const hive = client(async (_url, init) => {
+    const request = JSON.parse(String(init.body)) as { id?: number; method: string };
+    if (request.method === "notifications/initialized") return new Response(null, { status: 202 });
+    return sseResponse({
+      jsonrpc: "2.0",
+      id: request.id,
+      result:
+        request.method === "initialize"
+          ? { protocolVersion: "2025-03-26" }
+          : { content: [{ text: "Error executing tool inbox: unknown node key" }], isError: true },
+    });
+  });
   await assert.rejects(hive.inbox(), /unknown node key/);
+});
+
+test("a streamable answer that never EOFs still resolves (the live hive holds the SSE open)", async () => {
+  const encoder = new TextEncoder();
+  const hive = client(async (_url, init) => {
+    const request = JSON.parse(String(init.body)) as { id?: number; method: string };
+    if (request.method === "notifications/initialized") return new Response(null, { status: 202 });
+    const result =
+      request.method === "initialize"
+        ? { protocolVersion: "2025-03-26" }
+        : { content: [{ text: JSON.stringify({ messages: [{ from_serial: 12, text: "hi" }] }) }] };
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(`event: message\ndata: ${JSON.stringify({
+            jsonrpc: "2.0",
+            id: request.id,
+            result,
+          })}\n\n`)
+        );
+        // and then the server just keeps the stream open, forever
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  });
+  const messages = await hive.inbox(); // must return after the first frame
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0]!.from_serial, 12);
 });
 
 test("parseSseData picks the JSON payloads out of SSE frames", () => {
