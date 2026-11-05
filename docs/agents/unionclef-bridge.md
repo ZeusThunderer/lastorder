@@ -9,7 +9,7 @@ Fabric-мод: altoclef (`src/main/java/adris/altoclef`) + tungsten (pathfinder,
   но релизная линия — **1.21.11**. JDK 21.
 - `gradlew runClient`; релиз только `gradlew :1.21.11:githubRelease`.
   Перед релизом удалить `versions/*/bin`, иначе в jar попадёт старый код.
-- Для нас: брать release-jar `unionclef-1.21.11-0.95.59-all.jar` с GitHub, фиксировать sha256.
+- Для нас: брать release-jar `unionclef-1.21.11-0.95.66.jar` с GitHub, фиксировать sha256.
   Gradle-сборку не делаем.
 
 ## Управление

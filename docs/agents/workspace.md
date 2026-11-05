@@ -11,7 +11,7 @@
 | `agent/`, `tools/`, `docs/ARCHITECTURE.md`, `docs/MEMORY.md`, `README.md`, `LICENSE` | из upstream aw. Правки только коммитами `aw-fix:` / `aw-ext:` |
 | `agent/last_order/` | наш персонаж в формате aw |
 | `runtime/`, `docker/`, `tests/` | наш код |
-| `unionclef/` (uc) | сабмодуль github.com/3ndetz/unionclef @ `78c9565c` (v0.95.59+2, только документы). Fabric-мод: altoclef + tungsten |
+| `unionclef/` (uc) | сабмодуль github.com/3ndetz/unionclef @ `a5309c8e` (v0.95.66, только документы). Fabric-мод: altoclef + tungsten |
 | `NetTyan/` (nt) | сабмодуль github.com/3ndetz/NetTyan @ `b04bcb7`. Справочник. Локальная ветка `local/last-order-try` хранит пробный запуск Last Order на nt |
 | `docs/architecture/` | ARCHITECTURE.md (контуры C0–C4), DECISIONS.md (ADR), ROADMAP.md, KNOWLEDGE.md (память сети) |
 | `docs/character/LAST_ORDER.md` | бриф персонажа — источник истины |
