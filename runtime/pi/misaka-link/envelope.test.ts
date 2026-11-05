@@ -9,8 +9,8 @@ import {
 } from "./envelope.ts";
 import { makeNameOf, parseNaming } from "./naming.ts";
 
-const misaka = makeNameOf(parseNaming("Я — Мисака 00007, третья из сети."));
-const lab = makeNameOf(parseNaming("Я — узел 00003."));
+const misaka = makeNameOf(parseNaming("Your name: Мисака 00007."));
+const lab = makeNameOf(parseNaming("Your name: узел 00003."));
 const bare = makeNameOf(parseNaming("no name here"));
 
 function event(fields: Partial<Parameters<typeof boardEnvelope>[0]>): Parameters<typeof boardEnvelope>[0] {

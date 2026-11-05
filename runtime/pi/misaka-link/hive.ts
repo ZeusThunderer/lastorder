@@ -100,7 +100,13 @@ export class HiveClient {
   async feed(cursor: number | null): Promise<FeedResponse> {
     const path = cursor === null ? "/board/feed" : `/board/feed?since=${cursor}`;
     const response = await this.request("GET", path);
-    const data = (await response.json()) as Record<string, unknown>;
+    let data: Record<string, unknown>;
+    try {
+      data = (await response.json()) as Record<string, unknown>;
+    } catch (err) {
+      // a truncated or never-ending body is the same outage as a refused one
+      throw new HiveUnavailable(`hive ${path}: unreadable body (${String(err)})`);
+    }
     return {
       events: Array.isArray(data.events) ? (data.events as BoardEventLike[]) : [],
       cursor: Number(data.cursor ?? 0) || 0,
@@ -185,7 +191,12 @@ export class HiveClient {
     })) as { content?: { text?: unknown }[]; isError?: boolean } | null;
     const text = result?.content?.[0]?.text;
     if (result?.isError) throw new HiveRejected(String(text ?? "inbox failed"), 0);
-    const data = JSON.parse(String(text ?? "{}")) as { messages?: unknown };
+    let data: { messages?: unknown };
+    try {
+      data = JSON.parse(String(text ?? "{}")) as { messages?: unknown };
+    } catch (err) {
+      throw new HiveUnavailable(`hive mcp inbox: unreadable payload (${String(err)})`);
+    }
     return Array.isArray(data.messages)
       ? (data.messages as InboxMessage[]).filter(m => m && typeof m === "object")
       : [];
@@ -218,7 +229,10 @@ export function parseSseData(text: string): unknown[] {
 
 /** Read an SSE stream frame by frame and resolve at the first JSON-RPC doc with
  * `id` (or with a result/error when the server echoes no id), then cancel the
- * stream. Falls back to whole-body parsing when the stream is not readable. */
+ * stream. Falls back to whole-body parsing when the stream is not readable.
+ * A silent stream (the hive accepted the connection and hung) and a broken or
+ * truncated body are transport errors: HiveUnavailable, so the delivery loop
+ * counts them and eventually raises delivery_failing. */
 export async function firstJsonRpcFrame(
   response: Response,
   id: number,
@@ -227,17 +241,25 @@ export async function firstJsonRpcFrame(
   const started = Date.now();
   const reader = response.body ? response.body.getReader() : null;
   if (!reader) {
-    return parseSseData(await response.text()).find(isAnswer) ?? null;
+    let whole: string;
+    try {
+      whole = await response.text();
+    } catch (err) {
+      throw new HiveUnavailable(`hive mcp: unreadable body (${String(err)})`);
+    }
+    return parseSseData(whole).find(isAnswer) ?? null;
   }
   const decoder = new TextDecoder();
   let buffer = "";
   try {
     while (true) {
       const left = timeoutMs - (Date.now() - started);
-      if (left <= 0) return null;
+      if (left <= 0) throw new HiveUnavailable("hive mcp: no frame before the timeout");
       const read = await Promise.race([
         reader.read(),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("frame timeout")), left)),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new HiveUnavailable("hive mcp: frame timeout")), left)
+        ),
       ]);
       if (read.done) break;
       buffer += decoder.decode(read.value, { stream: true });
@@ -250,7 +272,12 @@ export async function firstJsonRpcFrame(
       }
     }
     // the stream ended: whatever is left in the buffer
-    return parseSseData(buffer).find(isAnswer) ?? null;
+    const answer = parseSseData(buffer).find(isAnswer);
+    if (answer === undefined) throw new HiveUnavailable("hive mcp: stream ended without a frame");
+    return answer;
+  } catch (err) {
+    if (err instanceof HiveUnavailable || err instanceof HiveRejected) throw err;
+    throw new HiveUnavailable(`hive mcp: read failed (${String(err)})`);
   } finally {
     reader.cancel().catch(() => {});
   }

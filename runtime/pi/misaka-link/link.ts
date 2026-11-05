@@ -68,21 +68,19 @@ export class LinkCore {
 
   private fail(): number {
     this.failures += 1;
-    if (this.failures >= ALARM_AFTER) this.alarmPending = this.failures;
+    // one alarm per outage: arm only when the counter crosses the threshold
+    if (this.failures === ALARM_AFTER) this.alarmPending = this.failures;
     return Math.min(RETRY_PAUSE_S * 2 ** (this.failures - 1), RETRY_MAX_S);
   }
 
-  private async hiveAnswered(slot: string, serial: number | null): Promise<void> {
-    const failed = this.failures;
-    this.failures = 0;
-    if (failed) this.log("misakalink.recovered", { after: failed });
+  private async alarmIfPending(): Promise<void> {
     if (!this.alarmPending) return;
     // delivery_failing waits for the hive to answer (section 11): send it now
     try {
       await this.hive.alarmDeliveryFailing(
-        `board delivery to slot ${slot || "?"} failed ${this.alarmPending} times in a row`,
-        slot,
-        serial
+        `board delivery to slot ${this.slot || "?"} failed ${this.alarmPending} times in a row`,
+        this.slot,
+        this.serial
       );
       this.log("misakalink.alarm", { failures: this.alarmPending });
       this.alarmPending = 0;
@@ -94,13 +92,21 @@ export class LinkCore {
     }
   }
 
+  private async feedAnswered(): Promise<void> {
+    // the failure counter belongs to the feed (R1-3): a working inbox must not
+    // reset it while the feed itself is down, or the alarm never fires
+    await this.alarmIfPending();
+    if (this.failures) this.log("misakalink.recovered", { after: this.failures });
+    this.failures = 0;
+  }
+
   /** One inbox + feed → session → ack cycle; returns the seconds to the next one. */
   async pollOnce(): Promise<number> {
     // Misaka-net first: the inbox is drained one-shot, whatever we take must go
     // out in this same cycle or it is lost.
     try {
       const messages = await this.hive.inbox();
-      await this.hiveAnswered(this.slot, this.serial);
+      await this.alarmIfPending(); // the hive answered — a pending alarm goes out
       if (messages.length) {
         const lines = messages.map(m => netEnvelope(m, this.nameOf));
         try {
@@ -139,7 +145,7 @@ export class LinkCore {
       }
       throw err;
     }
-    await this.hiveAnswered(this.slot, this.serial);
+    await this.feedAnswered();
 
     if (!response.events.length) {
       // An empty snapshot still needs its ack: the cursor row is created by the

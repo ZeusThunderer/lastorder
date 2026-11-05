@@ -1,10 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { LinkCore, RETRY_MAX_S, type HiveLink, type Sender } from "./link.ts";
-import { HiveRejected, HiveUnavailable, type FeedResponse, type InboxMessage } from "./hive.ts";
+import {
+  HiveClient,
+  HiveRejected,
+  HiveUnavailable,
+  type FeedResponse,
+  type InboxMessage,
+} from "./hive.ts";
 import { makeNameOf, parseNaming } from "./naming.ts";
 
-const nameOf = makeNameOf(parseNaming("Мисака 00007"));
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+const nameOf = makeNameOf(parseNaming("Your name: Мисака 00007."));
 
 interface Sent {
   text: string;
@@ -152,12 +165,77 @@ test("a down hive backs off to 60 s, then raises delivery_failing once it answer
   const pause = await core.pollOnce();
   assert.equal(pause, 10);
   assert.equal(hive.alarms.length, 1);
-  assert.match(hive.alarms[0]!.text, /times in a row/);
+  assert.match(hive.alarms[0]!.text, /5 times in a row/); // one alarm per outage
   assert.equal(hive.alarms[0]!.slot, "LastOrder01");
   assert.equal(hive.alarms[0]!.serial, 7);
   assert.equal(sender.sent.length, 1); // the drained message went out with it
   await core.pollOnce(); // healthy again: no second alarm
   assert.equal(hive.alarms.length, 1);
+});
+
+test("a hive that hangs mid-answer counts as down: silence five times raises the alarm (R1-2)", async () => {
+  const alarms: unknown[] = [];
+  let silent = true;
+  const fetchFn = async (url: string, init: RequestInit): Promise<Response> => {
+    if (url.endsWith("/board/alarms")) {
+      alarms.push(JSON.parse(String(init.body)));
+      return jsonResponse(null);
+    }
+    if (url.endsWith("/board/feed")) {
+      return jsonResponse({ events: [], cursor: 0, snapshot: false });
+    }
+    if (silent) {
+      // headers arrive, the body never does
+      return new Response(new ReadableStream<Uint8Array>({ start() {} }), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    }
+    const request = JSON.parse(String(init.body)) as { id?: number; method: string };
+    if (request.method === "notifications/initialized") return new Response(null, { status: 202 });
+    const result =
+      request.method === "initialize"
+        ? { protocolVersion: "2025-03-26" }
+        : { content: [{ text: JSON.stringify({ messages: [] }) }] };
+    return new Response(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}\n\n`, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  };
+  const hive = new HiveClient({
+    base: "http://hive:8000",
+    mcpUrl: "http://hive:8000/node/mcp",
+    key: "sk-node-one",
+    fetchFn,
+    timeoutMs: 40,
+  });
+  const sender = new FakeSender();
+  const core = new LinkCore({ hive, sender, nameOf, pollS: 10, slot: "LastOrder01", serial: 7 });
+  for (const expected of [2, 4, 8, 16, 32]) {
+    assert.equal(await core.pollOnce(), expected); // counted, backing off
+  }
+  silent = false; // the hive recovers
+  assert.equal(await core.pollOnce(), 10);
+  assert.equal(alarms.length, 1);
+  assert.equal((alarms[0] as { type: string }).type, "delivery_failing");
+  await core.pollOnce(); // healthy: no second alarm
+  assert.equal(alarms.length, 1);
+});
+
+test("a working inbox must not reset the feed failure counter (R1-3)", async () => {
+  const hive = new FakeHive();
+  const sender = new FakeSender();
+  const core = link(hive, sender);
+  // inbox keeps answering (empty), the feed is down five times in a row
+  for (let i = 0; i < 5; i++) hive.feedQueue.push(new HiveUnavailable("down"));
+  for (const expected of [2, 4, 8, 16, 32]) {
+    assert.equal(await core.pollOnce(), expected);
+  }
+  hive.feedQueue.push({ events: [], cursor: 0, snapshot: false });
+  await core.pollOnce();
+  assert.equal(hive.alarms.length, 1); // the outage was seen through the inbox noise
+  await core.pollOnce();
+  assert.equal(hive.alarms.length, 1); // one alarm per outage
 });
 
 test("a refused feed (bad key, dead node) is configuration, not an outage", async () => {

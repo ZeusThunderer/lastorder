@@ -155,6 +155,47 @@ test("a streamable answer that never EOFs still resolves (the live hive holds th
   assert.equal(messages[0]!.from_serial, 12);
 });
 
+test("a hive that accepts the connection and then breaks is an outage (R1-2)", async () => {
+  let calls = 0;
+  const silent = async () => {
+    calls += 1;
+    // headers arrive, the MCP body never does
+    return new Response(new ReadableStream<Uint8Array>({ start() {} }), {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  };
+  const hive = new HiveClient({
+    base: "http://hive:8000",
+    mcpUrl: "http://hive:8000/node/mcp",
+    key: "sk-node-one",
+    fetchFn: silent,
+    timeoutMs: 40,
+  });
+  await assert.rejects(hive.inbox(), HiveUnavailable);
+  assert.ok(calls >= 1);
+
+  // and a feed body that dies mid-JSON is the same outage
+  const encoder = new TextEncoder();
+  const feedHive = new HiveClient({
+    base: "http://hive:8000",
+    mcpUrl: "http://hive:8000/node/mcp",
+    key: "sk-node-one",
+    fetchFn: async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode('{"events":[{"seq":1,"entry'));
+            controller.close(); // the body ends before the JSON does
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      ),
+    timeoutMs: 40,
+  });
+  await assert.rejects(feedHive.feed(null), HiveUnavailable);
+});
+
 test("parseSseData picks the JSON payloads out of SSE frames", () => {
   const docs = parseSseData('event: message\ndata: {"a":1}\n\ndata: not-json\n\ndata: {"b":2}\n');
   assert.deepEqual(docs, [{ a: 1 }, { b: 2 }]);

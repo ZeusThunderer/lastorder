@@ -45,16 +45,13 @@ function readLinkConfig(agentDir: string, cwd: string): LinkConfig | null {
   }
   const base = url.replace(/\/node\/mcp\/?$/, "");
 
-  let naming = { prefix: null as string | null };
-  let serial: number | null = null;
+  let naming = { prefix: null as string | null, serial: null as number | null };
   try {
-    const persona = fs.readFileSync(path.join(cwd, "PERSONA.md"), "utf8");
-    naming = parseNaming(persona);
-    const match = /(?:узел|Мисака)\s+0*(\d{1,5})\b/.exec(persona);
-    if (match) serial = parseInt(match[1], 10);
+    naming = parseNaming(fs.readFileSync(path.join(cwd, "PERSONA.md"), "utf8"));
   } catch (err) {
     log("misakalink.no_persona", { cwd, error: String(err) }); // bare serials in envelopes
   }
+  const serial = naming.serial;
   return {
     hive: new HiveClient({ base, mcpUrl: url, key }),
     nameOf: makeNameOf(naming),
