@@ -1245,6 +1245,46 @@ def test_drop_pi_agent_dir_writes_the_three_configs(tmp_path: Path) -> None:
         assert stat.S_IMODE((agent_dir / "models.json").stat().st_mode) & 0o777 == 0o444
 
 
+def test_drop_pi_agent_dir_installs_the_misaka_link_extension(tmp_path: Path) -> None:
+    """T-048: every render drops the delivery extension into extensions/misaka-link —
+    root-owned 0444 like the configs (a replaced file heals on the next life session),
+    byte-identical to runtime/pi/misaka-link/, no tests and no package.json."""
+    agent_dir = tmp_path / "pi-agent"
+    workplace.drop_pi_agent_dir(
+        agent_dir,
+        model="GLM-5.3-Flash",
+        body_base="http://body-1:8700",
+        hive_url="http://hive:8000",
+        node_key="sk-node-one",
+    )
+    installed = agent_dir / "extensions" / "misaka-link"
+    for name in workplace.MISAKA_LINK_FILES:
+        dropped = installed / name
+        assert dropped.is_file(), name
+        assert dropped.read_text(encoding="utf-8") == (
+            workplace.MISAKA_LINK_DIR / name
+        ).read_text(encoding="utf-8")
+    assert not (installed / "package.json").exists()
+    assert not list(installed.glob("*.test.ts"))
+    if os.name == "posix":
+        assert stat.S_IMODE((installed / "index.ts").stat().st_mode) & 0o777 == 0o444
+    # a re-render heals a replaced file (the configs' contract); on Windows the
+    # readonly bit of 0444 has to go before the file can be tampered with at all
+    tampered = installed / "index.ts"
+    tampered.chmod(0o644)
+    tampered.write_text("tampered", encoding="utf-8")
+    workplace.drop_pi_agent_dir(
+        agent_dir,
+        model="GLM-5.3-Flash",
+        body_base="http://body-1:8700",
+        hive_url="http://hive:8000",
+        node_key="sk-node-one",
+    )
+    assert (installed / "index.ts").read_text(encoding="utf-8") == (
+        workplace.MISAKA_LINK_DIR / "index.ts"
+    ).read_text(encoding="utf-8")
+
+
 STAGED_BODY = "Урок: не ходить в горы ночью.\nШутка: жадность — наследство, я не просил."
 
 
