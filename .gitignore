@@ -19,3 +19,6 @@ docker/run/
 .zcode/skills/lo-review
 .zcode/skills/lo-direct-edit
 .worktrees/
+
+# Local skin experiments
+.tmp_skins/

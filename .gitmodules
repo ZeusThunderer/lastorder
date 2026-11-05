@@ -1,6 +1,8 @@
 [submodule "unionclef"]
 	path = unionclef
 	url = https://github.com/3ndetz/unionclef.git
+	ignore = dirty
 [submodule "NetTyan"]
 	path = NetTyan
 	url = https://github.com/3ndetz/NetTyan.git
+	ignore = dirty
