@@ -423,6 +423,9 @@ PI_ZAI_BASE_URL = HERMES_GLM_BASE_URL  # the coding endpoint of the GLM Coding P
 # process cwd — the tmpfs home dies with the container and takes the resume key
 # with it (verified live, T-045). Same value the direct mode's --session-dir uses.
 PI_WORKPLACE_SESSION_DIR = ".pi-sessions"
+# the will's own session dir, one per death (R1-2): empty and unique — the wrapper
+# cannot continue anything from there
+PI_WILL_SESSION_PREFIX = ".pi-will-"
 # misaka-link (T-048): the environment's delivery extension of the live `hapi pi`
 # session (ADR-042 — stdin belongs to HAPI, so the board feed and Misaka-net reach
 # the agent only through it). Dropped from runtime/pi/misaka-link/ into the agent
@@ -538,6 +541,7 @@ def drop_pi_agent_dir(
     slot: str = "",
     context_window: int = PI_CONTEXT_WINDOW,
     keep_recent_tokens: int = PI_KEEP_RECENT_TOKENS,
+    session_dir: str = PI_WORKPLACE_SESSION_DIR,
     uid: int | None = None,
     gid: int | None = None,
     hive_mcp_override: str | None = None,
@@ -559,7 +563,7 @@ def drop_pi_agent_dir(
         _chmod(agent_dir.parent, 0o700)
     params = dict(
         model=model, body_base=body_base, hive_url=hive_url, node_key=node_key,
-        zai_key=zai_key, slot=slot,
+        zai_key=zai_key, slot=slot, session_dir=session_dir,
         context_window=context_window, keep_recent_tokens=keep_recent_tokens,
     )
     if hive_mcp_override is None:
@@ -574,6 +578,7 @@ def drop_pi_agent_dir(
         model, body_base, hive_url, node_key,
         context_window=context_window, keep_recent_tokens=keep_recent_tokens,
         key_file=str(agent_dir / PI_KEY_FILE),
+        session_dir=session_dir,
     )
     if hive_mcp_override:
         configs["mcp.json"]["mcpServers"]["hive"]["url"] = hive_mcp_override.rstrip("/")
@@ -595,16 +600,22 @@ def drop_pi_agent_dir(
     _chmod(agent_dir, 0o700)
 
 
-def _set_pi_will_mode(proxy_url: str) -> None:
+def _set_pi_will_mode(proxy_url: str, serial: int | None = None) -> None:
     """The Pi twin of _set_hermes_will_mode: a fresh render with hive at the proxy from
-    the last life render's params. Without them (a runner restart between the last life
-    render and the will) nothing is written and the will runs unmarked — the real hive
-    refuses an unmarked submit_will and the emergency will covers it."""
+    the last life render's params — and the session dir swapped to a per-death
+    `.pi-will-<serial>` (R1-2): the wrapper may continue the cwd's latest session,
+    and the will must start where there is nothing to continue (live: a will process
+    once answered the board in the life's session instead of writing a will).
+    Without params (a runner restart between the last life render and the will)
+    nothing is written and the will runs unmarked — the real hive refuses an
+    unmarked submit_will and the emergency will covers it."""
     params = _PI_RENDER.get(PI_AGENT_DIR)
     if params is None:
         return
+    will_dir = PI_WORKPLACE_SESSION_DIR if serial is None else f"{PI_WILL_SESSION_PREFIX}{serial_dir(serial)}"
     drop_pi_agent_dir(
-        PI_AGENT_DIR, **params, hive_mcp_override=f"{proxy_url.rstrip('/')}/mcp"
+        PI_AGENT_DIR, **{**params, "session_dir": will_dir},
+        hive_mcp_override=f"{proxy_url.rstrip('/')}/mcp",
     )
 
 
@@ -697,7 +708,7 @@ def create_workplace(
     return root
 
 
-def set_will_mode(root: Path, harness: str, proxy_url: str) -> None:
+def set_will_mode(root: Path, harness: str, proxy_url: str, serial: int | None = None) -> None:
     """Point the hive MCP of the given adapter's config at the runner's will proxy for
     the will session: the proxy adds X-Runner-Session: will and the runner key, so the
     mark cannot be forged from the workplace (plan review P1-1)."""
@@ -705,7 +716,7 @@ def set_will_mode(root: Path, harness: str, proxy_url: str) -> None:
         _set_hermes_will_mode(proxy_url)
         return
     if harness == "pi":
-        _set_pi_will_mode(proxy_url)
+        _set_pi_will_mode(proxy_url, serial)
         return
     name = "zcode.json" if harness == "zcode" else "opencode.json"
     path = root / name

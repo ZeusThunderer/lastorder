@@ -40,7 +40,7 @@ from runtime.node.adapters import (
     quota_exhausted,
 )
 from runtime.node.config import NodeConfig
-from runtime.node.runner import LIFE_PREFIX, LifeState, NodeRunner
+from runtime.node.runner import LIFE_PREFIX, WILL_PREFIX, LifeState, NodeRunner
 from runtime.node.willproxy import WillProxy
 from runtime.node import workplace
 
@@ -269,6 +269,7 @@ class FakeHapiAdapter(FakeAdapter):
         )
         self.delivered: list[tuple[str, str]] = []
         self.progress = 1000
+        self.live_output = ""
         self._boot_timeout_s = 90.0
 
     @property
@@ -277,6 +278,9 @@ class FakeHapiAdapter(FakeAdapter):
 
     def boot_report(self, spawned_at: float, known: tuple[str, ...] = ()) -> "HapiBoot | None":
         return self.boot
+
+    def output_of(self, process_output: str, spawned_at: float) -> str:
+        return process_output + self.live_output
 
     def deliver_prompt(self, session_id: str, text: str) -> None:
         self.delivered.append((session_id, text.splitlines()[0]))
@@ -516,6 +520,8 @@ def test_will_session_timeout_falls_back_to_emergency(tmp_path: Path) -> None:
     rig.script(FakeProcess(hang=True))  # the will session never answers
     output = rig.runner.run_will_session(state, "zcode")
     assert output == ""  # the hung session was killed at the timeout
+    # the timeout is logged for EVERY harness — mvp_report counts these (R1-3)
+    assert any(type == "will.session_timeout" for type, _ in rig.logs)
     assert rig.hive.retires == []  # retire belongs to the death path, not the session
     rig.mind.kill()
     rig.runner._death_path(state, "game", "x", "zcode")
@@ -1867,3 +1873,66 @@ def test_a_resumed_life_learns_its_wrapper_session_for_the_wills_exclusion(tmp_p
     assert "hapi-sid-1" in rig.runner._known_session_ids
     assert "hub-sid-1" in rig.runner._known_session_ids
     assert hapi.delivered == []  # a resume carries no opener
+
+
+def test_hapi_live_quota_kills_the_session_switches_and_resets_the_resume_key(tmp_path: Path) -> None:
+    """R1-1: an rpc Pi never exits on a 429 — the wrapper's log of this spawn is
+    probed at the poll pace while the process lives; a quota mark kills it, both
+    alarms land, the very next turn rides the gateway, and the dead harness's
+    resume key never reaches the failover."""
+    rig, hapi = _hapi_rig(tmp_path, quota_action="switch")
+    state = rig.runner._birth()
+    state.session_id = "hapi-sid-1"  # the resumed life holds a pi-session key
+    rig.runner._save_state(state)
+    hapi.live_output = '{"error": "HTTP 429: rate limit exceeded"}'
+    rig.script(FakeProcess(hang=True), FakeProcess(hang=True))
+    rig.mind.kill_at_status = 8
+    rig.runner._life(state)
+    assert [call[0] for call in rig.alarms.calls] == ["quota", "harness_failover"]
+    assert any(type == "session.quota_live" for type, _ in rig.logs)
+    # the switch dropped the pi id: opencode's turn starts without a resume key
+    assert ("opencode:life", None) in rig.journal
+    assert rig.runner._load_state().session_id is None
+    # the quota kill is not a session_missing: the runner ended it on purpose
+    assert not any(
+        call[0] == "session_missing" and call[3] == state.serial for call in rig.alarms.calls
+    )
+
+
+def test_hapi_will_restarts_once_when_it_boots_the_life_session(tmp_path: Path) -> None:
+    """R1-2's safety net: if the will's boot reports the LIFE's pi session (the
+    wrapper continued the cwd's latest), the process is killed and respawned
+    once; the opener then goes to the fresh session."""
+    rig, hapi = _hapi_rig(tmp_path)
+    state = rig.runner._birth()
+    state.session_id = "hapi-sid-1"
+    rig.runner._save_state(state)
+    boots = iter([
+        HapiBoot(pi_session_id="hapi-sid-1", hub_session_id="hub-life"),  # the wrong one
+        HapiBoot(pi_session_id="hapi-sid-will", hub_session_id="hub-will"),
+    ])
+    hapi.boot_report = lambda spawned_at, known=(): next(boots, None)
+    rig.script(FakeProcess(hang=True), FakeProcess(hang=True))
+    staged = rig.cfg.pending_wills / f"{state.serial:05d}.md"
+    staged.parent.mkdir(parents=True)
+    staged.write_text(STAGED_BODY, encoding="utf-8")
+    rig.runner.run_will_session(state, "pi")
+    assert any(type == "will.wrong_session" for type, _ in rig.logs)
+    will_spawns = [entry for entry in rig.journal if entry[0] == "spawn" and entry[1][0] == "pi"]
+    assert len(will_spawns) == 2  # killed once, respawned, then the opener landed
+    assert hapi.delivered == [("hub-will", rig.runner._session_prompt(WILL_PREFIX).splitlines()[0])]
+
+
+def test_pi_will_mode_swaps_the_session_dir_to_a_per_death_one(tmp_path: Path, monkeypatch) -> None:
+    """R1-2: the will renders its session dir as `.pi-will-<serial>` — empty and
+    unique per death, so the wrapper cannot continue anything into the will."""
+    agent_dir = tmp_path / ".pi" / "agent"
+    monkeypatch.setattr(workplace, "PI_AGENT_DIR", agent_dir)
+    monkeypatch.setattr(workplace, "_PI_RENDER", {})
+    adapter = _pi_adapter(agent_dir)
+    adapter.life_turn("p", None)
+    life = json.loads((agent_dir / "settings.json").read_text(encoding="utf-8"))
+    assert life["sessionDir"] == workplace.PI_WORKPLACE_SESSION_DIR
+    workplace.set_will_mode(tmp_path, "pi", "http://127.0.0.1:8702", serial=154)
+    will = json.loads((agent_dir / "settings.json").read_text(encoding="utf-8"))
+    assert will["sessionDir"] == ".pi-will-00154"
