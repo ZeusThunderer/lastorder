@@ -706,6 +706,7 @@ class AdminAlarm:
         while True:
             if not self._harness_usable():
                 return  # switched to the failover, or nothing ready: run() takes over
+            self._adapters["pi"]._render()  # the desk's own agent-dir, healed every start
             resume = self._load_session_id()
             process = self._safe_spawn(self._hapi_command())
             if process is None:
@@ -726,7 +727,7 @@ class AdminAlarm:
             )
             while process.poll() is None:
                 self._sleep(self.cfg.poll_s)
-            output = process.output()
+            output = self._hapi_output(process)
             quota = quota_exhausted(output)
             self._log.event(
                 "hapi.exit",
@@ -746,17 +747,33 @@ class AdminAlarm:
                 continue
             self._sleep(self.cfg.hapi_restart_pause_s)
 
+    def _hapi_output(self, process) -> str:
+        """Everything the wrapper said: its stdout plus its own log file (the wrapper
+        writes the session report and provider errors to ~/.hapi/logs/*.log, not to
+        stdout — verified on the stand)."""
+        return process.output() + self._hapi_log_text()
+
+    def _hapi_log_text(self) -> str:
+        logs = self.cfg.hapi_home / "logs"
+        try:
+            newest = max(logs.glob("*.log"), key=lambda path: path.stat().st_mtime)
+        except (OSError, ValueError):
+            return ""
+        try:
+            return newest.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+
     def _await_session_id(self, process) -> str:
-        """The wrapper reports the hub session id on its stdout (`[START] Reporting
-        session <id>…`, verified on the T-044 stand): wait for that line while the
-        process lives."""
+        """The wrapper reports the hub session id (`[START] Reporting session <id>…`,
+        in its log file and on stdout): wait for that line while the process lives."""
         deadline = time.monotonic() + self.cfg.hapi_boot_timeout_s
         while process.poll() is None and time.monotonic() < deadline:
-            match = HAPI_SESSION_RE.search(process.output())
+            match = HAPI_SESSION_RE.search(self._hapi_output(process))
             if match is not None:
                 return match.group(1)
             self._sleep(0.5)
-        match = HAPI_SESSION_RE.search(process.output())
+        match = HAPI_SESSION_RE.search(self._hapi_output(process))
         return match.group(1) if match is not None else ""
 
     def run_once(self) -> list[WakeReason]:
