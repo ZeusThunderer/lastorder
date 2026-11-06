@@ -29,6 +29,7 @@ from runtime.lastorder.persona import PersonaProvider
 from runtime.lastorder.traits import Traits, load_quirks
 from runtime.node.adapters import (
     CONTINUE_MESSAGE,
+    HapiBoot,
     Command,
     HERMES_TOOLSETS,
     HermesAdapter,
@@ -261,9 +262,11 @@ class FakeHapiAdapter(FakeAdapter):
     """A long-running console adapter: the boot report, the opener over the hub,
     the session-file progress — everything the runner's hapi branch asks of it."""
 
-    def __init__(self, name: str, journal: list, *, boot_ids: list[str] | None = None):
+    def __init__(self, name: str, journal: list, *, boot: "HapiBoot | None" = None):
         super().__init__(name, journal)
-        self.boot_ids = boot_ids if boot_ids is not None else ["hapi-sid-1"]
+        self.boot = boot if boot is not None else HapiBoot(
+            pi_session_id="hapi-sid-1", hub_session_id="hub-sid-1"
+        )
         self.delivered: list[tuple[str, str]] = []
         self.progress = 1000
         self._boot_timeout_s = 90.0
@@ -272,8 +275,8 @@ class FakeHapiAdapter(FakeAdapter):
     def long_running(self) -> bool:
         return True
 
-    def new_session_ids(self, spawned_at: float) -> list[str]:
-        return list(self.boot_ids)
+    def boot_report(self, spawned_at: float) -> "HapiBoot | None":
+        return self.boot
 
     def deliver_prompt(self, session_id: str, text: str) -> None:
         self.delivered.append((session_id, text.splitlines()[0]))
@@ -1511,11 +1514,27 @@ def test_hapi_boot_report_and_the_spend_off_the_session_file(tmp_path: Path) -> 
         "[09:16:27.183] [pi] Session ID persisted to metadata: 01a1b025-2526-72b9-8b01-7af74315ea24\n",
         encoding="utf-8",
     )
+    boot_log.write_text(
+        boot_log.read_text(encoding="utf-8")
+        + "[09:16:25.000] [START] Reporting session b524f3ac-5524-4467-93ac-592383183ba5 to runner\n",
+        encoding="utf-8",
+    )
     spawned = time.time()
-    # this spawn's log alone, and its LAST line (the admin's rule, T-043)
-    assert adapter.new_session_ids(spawned) == ["01a1b025-2526-72b9-8b01-7af74315ea24"]
-    assert adapter.new_session_ids(0.0) == ["00a1adeb-3512-0000", "01a1b025-2526-72b9-8b01-7af74315ea24"]
-    assert adapter.new_session_ids(time.time() + 10_000.0) == []  # nothing of a future spawn
+    # this spawn's log alone, and its LAST line of each kind (the admin's rule, T-043)
+    assert adapter.boot_report(spawned) == HapiBoot(
+        pi_session_id="01a1b025-2526-72b9-8b01-7af74315ea24",
+        hub_session_id="b524f3ac-5524-4467-93ac-592383183ba5",
+    )
+    # a hub id without the agent's own (the wrapper died mid-boot): no report yet
+    no_pi = logs / "2026-11-06-10-00-00-pid-2000.log"
+    no_pi.write_text(
+        "[10:00:00.000] [START] Reporting session b524f3ac-5524-4467-93ac-592383183ba5 to runner\n",
+        encoding="utf-8",
+    )
+    os.utime(boot_log, (1_000_000.0, 1_000_000.0))  # only the half-boot log is fresh now
+    assert adapter.boot_report(time.time()) is None
+    assert adapter.boot_report(time.time() + 10_000.0) is None  # nothing of a future spawn
+    os.utime(boot_log, (spawned, spawned))
 
     sessions = tmp_path / ".pi" / "agent" / "sessions" / "--workplaces--"
     sessions.mkdir(parents=True)
@@ -1593,7 +1612,7 @@ def test_hapi_life_posts_the_opener_once_and_resumes_without_one(tmp_path: Path)
     rig.mind.kill_at_status = 3  # dies while the long session hangs
     death, adapter_name = rig.runner._life(state)
     assert adapter_name == "pi" and death is not None
-    assert hapi.delivered == [("hapi-sid-1", LIFE_PREFIX)]  # the opener, exactly once
+    assert hapi.delivered == [("hub-sid-1", LIFE_PREFIX)]  # the opener rides the hub id, exactly once
     assert rig.runner._load_state().session_id == "hapi-sid-1"
 
     # a life that already has a session resumes: the history carries the opener
@@ -1630,7 +1649,7 @@ def test_hapi_session_exit_alarms_and_drops_a_lost_resume(tmp_path: Path) -> Non
 
 def test_hapi_boot_timeout_restarts_the_life(tmp_path: Path) -> None:
     rig, hapi = _hapi_rig(tmp_path, restart_pause_s=0.01, restart_pause_max_s=0.02)
-    hapi.boot_ids = []  # the wrapper never reports a session
+    hapi.boot = None  # the wrapper never reports a session
     hapi._boot_timeout_s = 0.03
     state = rig.runner._birth()
     rig.script(FakeProcess(hang=True), FakeProcess(hang=True))
@@ -1733,7 +1752,7 @@ def test_hapi_will_session_ends_on_the_staged_will(tmp_path: Path) -> None:
     rig.runner.run_will_session(state, "pi")
     assert any(type == "will.staged" for type, _ in rig.logs)
     assert not any(type == "will.session_timeout" for type, _ in rig.logs)
-    assert hapi.delivered and hapi.delivered[0][0] == "hapi-sid-1"
+    assert hapi.delivered and hapi.delivered[0][0] == "hub-sid-1"
 
 
 def test_hapi_will_session_timeout_still_covers(tmp_path: Path) -> None:

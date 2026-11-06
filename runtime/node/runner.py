@@ -500,27 +500,27 @@ class NodeRunner:
                 resumed = state.session_id is not None
                 if getattr(adapter, "long_running", False) and not resumed:
                     # the console wrapper: the opener can only enter through the
-                    # hub, so wait for the fresh session file before anything else
-                    session_id = self._await_fresh_session(adapter, process, spawned_at)
-                    if session_id is None and process.poll() is None:
-                        # alive but mute past the boot deadline: no session file,
-                        # no opener — kill and let the restart loop try again
+                    # hub, so wait for the wrapper's boot report first
+                    boot = self._await_boot(adapter, process, spawned_at)
+                    if boot is None and process.poll() is None:
+                        # alive but mute past the boot deadline: no session, no
+                        # opener — kill and let the restart loop try again
                         self._log("hapi.boot_timeout", {"slot": self.cfg.slot})
                         process.terminate()
                         process.kill()
                         self._sleep(pause)
                         pause = self._capped_pause(pause)
                         continue
-                    if session_id is not None:
-                        state.session_id = session_id
+                    if boot is not None:
+                        state.session_id = boot.pi_session_id
                         self._save_state(state)
-                        if not self._deliver_opener(adapter, session_id, prompt, state):
+                        if not self._deliver_opener(adapter, boot.hub_session_id, prompt, state):
                             process.terminate()
                             process.kill()
                             self._sleep(pause)
                             pause = self._capped_pause(pause)
                             continue
-                    # a session_id of None with the process already dead is a plain
+                    # a boot of None with the process already dead is a plain
                     # crash: the end-of-session path below owns it (session_missing)
                 death = self._wait_session(state, process, adapter)
                 if death is not None:
@@ -596,18 +596,16 @@ class NodeRunner:
                 payload["cost_usd"] = round(usage["cost_usd"], 4)
         self._log("session.ended", payload)
 
-    def _await_fresh_session(self, adapter, process, spawned_at: float) -> str | None:
-        """Wait for the wrapper to create THIS spawn's Pi session file (the boot
-        report T-043 reads out of the hapi log, read here off the file itself):
-        the first record carries the id. None on timeout with the process alive."""
+    def _await_boot(self, adapter, process, spawned_at: float):
+        """Wait for the wrapper's boot report (both ids — the hub's session for
+        the opener and pi's for the resume), None on timeout."""
         deadline = self._monotonic() + adapter._boot_timeout_s
         while process.poll() is None and self._monotonic() < deadline:
-            ids = adapter.new_session_ids(spawned_at)
-            if ids:
-                return ids[-1]
+            boot = adapter.boot_report(spawned_at)
+            if boot is not None:
+                return boot
             self._sleep(0.5)
-        ids = adapter.new_session_ids(spawned_at)
-        return ids[-1] if ids else None
+        return adapter.boot_report(spawned_at)
 
     def _deliver_opener(self, adapter, session_id: str, prompt: str, state: LifeState) -> bool:
         """Post the life opener into the hub session (the operator's channel,
@@ -918,9 +916,9 @@ class NodeRunner:
             spawned_at = time.time()
             if long_running:
                 # the opener enters through the hub, like the life session's
-                session_id = self._await_fresh_session(adapter, process, spawned_at)
-                if session_id is not None:
-                    self._deliver_opener(adapter, session_id, prompt, state)
+                boot = self._await_boot(adapter, process, spawned_at)
+                if boot is not None:
+                    self._deliver_opener(adapter, boot.hub_session_id, prompt, state)
             deadline = time.monotonic() + self.cfg.will_timeout_s
             while process.poll() is None and time.monotonic() < deadline:
                 if long_running and self._staged_will(state.serial) is not None:
