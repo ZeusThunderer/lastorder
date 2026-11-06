@@ -419,6 +419,10 @@ PI_AGENT_DIR = Path("/home/sister/.pi/agent")
 PI_KEY_FILE = "zai-key"
 PI_SLOT_FILE = "slot"  # the slot name for misaka-link's delivery_failing alarm (T-048 R1-4)
 PI_ZAI_BASE_URL = HERMES_GLM_BASE_URL  # the coding endpoint of the GLM Coding Plan
+# where pi keeps its session files: the WORKPLACE (a volume), relative to the
+# process cwd — the tmpfs home dies with the container and takes the resume key
+# with it (verified live, T-045). Same value the direct mode's --session-dir uses.
+PI_WORKPLACE_SESSION_DIR = ".pi-sessions"
 # misaka-link (T-048): the environment's delivery extension of the live `hapi pi`
 # session (ADR-042 — stdin belongs to HAPI, so the board feed and Misaka-net reach
 # the agent only through it). Dropped from runtime/pi/misaka-link/ into the agent
@@ -453,6 +457,7 @@ def render_pi_configs(
     context_window: int = PI_CONTEXT_WINDOW,
     keep_recent_tokens: int = PI_KEEP_RECENT_TOKENS,
     key_file: str = str(PI_AGENT_DIR / PI_KEY_FILE),
+    session_dir: str = PI_WORKPLACE_SESSION_DIR,
 ) -> dict[str, dict]:
     """The Pi agent-dir configs: models.json + mcp.json + settings.json, by content.
     No key material in the configs: apiKey is a `!command` reference (Pi resolves a
@@ -461,7 +466,10 @@ def render_pi_configs(
     request time; the key never rides the process env, mcp.json carries the node
     key — the agent's own identity, same rule as zcode.json/config.yaml (ADR-033).
     Both servers are `direct`: Pi's default `codemode` exposure declares no MCP tool
-    to the model at all (Pi docs mcp.md)."""
+    to the model at all (Pi docs mcp.md). `session_dir` lands in settings.json so
+    the WRAPPED pi (whose argv the runner does not build) still stores its sessions
+    in the workplace volume — the tmpfs home dies with the container and takes the
+    resume key with it (verified live: "No session found matching …")."""
     glm = _glm_model(model)
     return {
         "models.json": {
@@ -501,6 +509,10 @@ def render_pi_configs(
             "defaultModel": glm,
             "enableInstallTelemetry": False,
             "enableAnalytics": False,
+            # the wrapped pi reads this (its argv is the wrapper's): sessions into
+            # the workplace volume, resolved against the process cwd — the runner
+            # spawns every session in the life's workplace root
+            "sessionDir": session_dir,
             "compaction": {
                 "enabled": True,
                 "reserveTokens": PI_RESERVE_TOKENS,

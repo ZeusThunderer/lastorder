@@ -281,10 +281,10 @@ class FakeHapiAdapter(FakeAdapter):
     def deliver_prompt(self, session_id: str, text: str) -> None:
         self.delivered.append((session_id, text.splitlines()[0]))
 
-    def session_progress(self, session_id: str) -> int | None:
+    def session_progress(self, session_id: str, sessions_dir) -> int | None:
         return self.progress
 
-    def session_spend(self, session_id: str) -> dict[str, float]:
+    def session_spend(self, session_id: str, sessions_dir) -> dict[str, float]:
         return {"tokens": 1234, "cost_usd": 0.05}
 
 
@@ -1541,7 +1541,7 @@ def test_hapi_boot_report_and_the_spend_off_the_session_file(tmp_path: Path) -> 
     known = ("01a1b025-2526-72b9-8b01-7af74315ea24", "b524f3ac-5524-4467-93ac-592383183ba5")
     assert adapter.boot_report(time.time(), known=known) is None
 
-    sessions = tmp_path / ".pi" / "agent" / "sessions" / "--workplaces--"
+    sessions = tmp_path / "wp" / "agent" / "00154" / ".pi-sessions" / "--workplaces--"
     sessions.mkdir(parents=True)
     fresh = sessions / "2026-11-06T09-16-26-793Z_01a1b025-2526-72b9-8b01-7af74315ea24.jsonl"
     fresh.write_text(
@@ -1553,14 +1553,15 @@ def test_hapi_boot_report_and_the_spend_off_the_session_file(tmp_path: Path) -> 
         '{"type":"message_end","message":{"role":"user"}}\n',
         encoding="utf-8",
     )
-    assert adapter.session_file("01a1b025-2526-72b9-8b01-7af74315ea24") == fresh
-    assert adapter.session_progress("01a1b025-2526-72b9-8b01-7af74315ea24") == fresh.stat().st_size
-    assert adapter.session_progress("nope") is None
-    assert adapter.session_spend("01a1b025-2526-72b9-8b01-7af74315ea24") == {
+    sessions_dir = sessions.parent
+    assert adapter.session_file("01a1b025-2526-72b9-8b01-7af74315ea24", sessions_dir) == fresh
+    assert adapter.session_progress("01a1b025-2526-72b9-8b01-7af74315ea24", sessions_dir) == fresh.stat().st_size
+    assert adapter.session_progress("nope", sessions_dir) is None
+    assert adapter.session_spend("01a1b025-2526-72b9-8b01-7af74315ea24", sessions_dir) == {
         "tokens": 200,
         "cost_usd": pytest.approx(0.03),
     }
-    assert adapter.session_spend("nope") is None
+    assert adapter.session_spend("nope", sessions_dir) is None
     # quota marks reach the runner through the same log (output_of)
     boot_log.write_text(
         boot_log.read_text(encoding="utf-8") + "API key auth failed: 429 rate limit\n",

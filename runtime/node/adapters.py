@@ -349,14 +349,11 @@ class PiAdapter:
                 found = value
         return found
 
-    # --- the Pi session files (hapi mode's source of truth) -----------------------------
+    # --- the Pi session files (the spend and progress source) ---------------------------
 
-    def _sessions_root(self) -> Path:
-        return Path(self._agent_dir) / "sessions"
-
-    def _session_files(self) -> list[Path]:
+    def _session_files(self, sessions_dir: Path) -> list[Path]:
         try:
-            return sorted(self._sessions_root().glob("*/*.jsonl"))
+            return sorted(sessions_dir.glob("*/*.jsonl"))
         except OSError:
             return []
 
@@ -396,29 +393,31 @@ class PiAdapter:
         except OSError:
             return []
 
-    def session_file(self, session_id: str) -> Path | None:
-        """The Pi session file of one id (`<ts>_<id>.jsonl` under a cwd slug)."""
+    def session_file(self, session_id: str, sessions_dir: Path) -> Path | None:
+        """The Pi session file of one id (`<ts>_<id>.jsonl` under a cwd slug) in
+        the life's session dir — the workplace's `.pi-sessions` since the tmpfs
+        home loses files with the container."""
         suffix = f"_{session_id}.jsonl"
-        for path in self._session_files():
+        for path in self._session_files(sessions_dir):
             if path.name.endswith(suffix):
                 return path
         return None
 
-    def session_progress(self, session_id: str) -> int | None:
+    def session_progress(self, session_id: str, sessions_dir: Path) -> int | None:
         """The session file's size in bytes — the `stuck` watch's progress signal:
         every model turn appends records. None when there is no file yet."""
-        path = self.session_file(session_id)
+        path = self.session_file(session_id, sessions_dir)
         try:
             return path.stat().st_size if path is not None else None
         except OSError:
             return None
 
-    def session_spend(self, session_id: str) -> dict[str, float] | None:
+    def session_spend(self, session_id: str, sessions_dir: Path) -> dict[str, float] | None:
         """The session's usage summed over its assistant records (the shape
         verified on the t048 stand: `usage.totalTokens` and `usage.cost.total`),
         or None without a file. Telemetry for the report — the file is the
-        sister's, so a forged record can only lie about her own spend."""
-        path = self.session_file(session_id)
+        sister's own, so a forged record can only lie about her own spend."""
+        path = self.session_file(session_id, sessions_dir)
         if path is None:
             return None
         tokens = 0

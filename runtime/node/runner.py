@@ -590,8 +590,12 @@ class NodeRunner:
         }
         spend = getattr(adapter, "session_spend", None)
         if spend is not None and state.session_id:
+            sessions_dir = (
+                self.cfg.workplaces / "agent" / workplace.serial_dir(state.serial)
+                / workplace.PI_WORKPLACE_SESSION_DIR
+            )
             try:
-                usage = spend(state.session_id)
+                usage = spend(state.session_id, sessions_dir)
             except OSError:
                 usage = None
             if usage is not None:
@@ -676,9 +680,13 @@ class NodeRunner:
         `stuck_s` means the agent has gone quiet — an alarm, not a kill: the
         operator sees it and the TTL still bounds the life."""
         next_poll = 0.0
+        sessions_dir = (
+            self.cfg.workplaces / "agent" / workplace.serial_dir(state.serial)
+            / workplace.PI_WORKPLACE_SESSION_DIR
+        )
         progress = getattr(adapter, "session_progress", None) if adapter is not None else None
         watching = progress is not None and state.session_id is not None
-        last_size = progress(state.session_id) if watching else 0
+        last_size = progress(state.session_id, sessions_dir) if watching else 0
         last_move = self._monotonic()
         stuck_raised = False
         while True:
@@ -688,7 +696,7 @@ class NodeRunner:
                 return None
             now = self._monotonic()
             if watching and now - last_move >= self.cfg.stuck_s:
-                size = progress(state.session_id)
+                size = progress(state.session_id, sessions_dir)
                 if size is not None and size != last_size:
                     last_size = size
                     last_move = now
