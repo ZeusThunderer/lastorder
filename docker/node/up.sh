@@ -32,6 +32,14 @@ lift ZCODE_API_KEY ZAI_API_KEY
 # the operator's game name (T-051) rides the same lift: a stand config value, not a key
 lift OPERATOR_MC_NAME
 lift MC_SERVER_1  # slot 1 on another server: an address, not a secret
+# player commands (ADR-043, T-053): the common deny list, per-slot extras and the
+# per-slot server login passwords — a password reaches that slot's mind ONLY
+# (compose wires MC_LOGIN_PASSWORD_N into mind-N alone; node-N never sees it)
+lift MC_COMMANDS_DENY
+for n in 1 2 3; do
+  lift "MC_COMMANDS_DENY_$n"
+  lift "MC_LOGIN_PASSWORD_$n"
+done
 for key in GATEWAY_KEY_NODE_1 GATEWAY_KEY_NODE_2 GATEWAY_KEY_NODE_3 \
            HIVE_NODE_KEY_1 HIVE_NODE_KEY_2 HIVE_NODE_KEY_3 \
            HIVE_RUNNER_KEY_1 HIVE_RUNNER_KEY_2 HIVE_RUNNER_KEY_3 \

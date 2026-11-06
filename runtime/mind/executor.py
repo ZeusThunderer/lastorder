@@ -307,6 +307,7 @@ class Executor:
         hive: HiveClient | None = None,
         jev: JevGate | None = None,
         operator_name: str = "",
+        login: "SessionLogin | None" = None,
     ):
         if not TICK_MIN_S <= tick_interval <= TICK_MAX_S:
             raise ValueError(
@@ -344,6 +345,9 @@ class Executor:
         self._birth = birth
         self._hive = hive
         self._jev = jev  # None: pure rules, byte-for-byte the pre-T-031 behavior
+        # The environment's own /login (T-053): sends on world entry, masks the
+        # password out of everything the agent or a log can see. None — off.
+        self._login = login
 
         # One lock for the whole body: the C1 thread and the MCP tool threads share it (P1-6).
         self.body_lock = threading.RLock()
@@ -428,8 +432,11 @@ class Executor:
         configured operator's lines alone. The mark is its own field (review R2-1): a
         player who happens to be named `operator` is just a player, and the text of a
         line can never forge either field. System lines carry no `from`; service
-        lines answer None."""
+        lines answer None. The login password is masked before anything else — it
+        must never reach a log, an event or observe() (T-053)."""
         text = strip_formatting(str(raw or "")).strip()
+        if self._login is not None:
+            text = self._login.mask(text)
         if not text or is_service_line(text):
             return None
         speaker, body = (None, text)
@@ -465,6 +472,17 @@ class Executor:
             state = self._body.state()
             hp = float(getattr(state, "hp", 0.0) or 0.0)
             self._hp_fallback_damage(state, hp)
+
+            if self._login is not None:
+                # the environment's /login rides the same lever the chat does; it
+                # runs before anything else — nothing acts before the server lets it
+                try:
+                    self._login.on_tick(
+                        bool(getattr(state, "in_game", False)),
+                        [str(line) for line in self._body.recent_chat(10)],
+                    )
+                except Exception as exc:  # a login problem must never kill C1
+                    self._log.record("error", scope="login", error=f"{type(exc).__name__}: {exc}")
 
             death = self._detector.feed(state, list(self._body.recent_chat(10)))
             if death is not None:

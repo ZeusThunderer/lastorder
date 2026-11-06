@@ -52,6 +52,10 @@ LOCAL_TOKENS = [
     "HIVE_NODE_KEY_1", "HIVE_NODE_KEY_2", "HIVE_NODE_KEY_3",
     "HIVE_RUNNER_KEY_1", "HIVE_RUNNER_KEY_2", "HIVE_RUNNER_KEY_3",
     "RCON_PASSWORD",
+    # MC_LOGIN_PASSWORD_N (T-053): a slot's server password, OPERATOR-entered (a
+    # stand on an external server), lifted by up.sh into that mind alone — never
+    # generated here; init only reserves the names so .env carries them.
+    "MC_LOGIN_PASSWORD_1", "MC_LOGIN_PASSWORD_2", "MC_LOGIN_PASSWORD_3",
 ]
 
 # One virtual key per gateway consumer (T-026); the alias is the label dev/gateway_keys.py list

@@ -40,6 +40,7 @@ from runtime.mind.executor import (
     JsonlLog,
 )
 from runtime.mind.jev import JevGate
+from runtime.mind.login import SessionLogin
 from runtime.perception.translate import Perception
 
 log = logging.getLogger("mcp_body")
@@ -257,7 +258,7 @@ def check_say(text: Any) -> str:
     if not cleaned:
         _err("say: empty text")
     if cleaned.startswith("/"):
-        _err("say: server commands are not available (ADR-037)")
+        _err("say: server commands are not available here — use server_command (ADR-043)")
     if cleaned.startswith("#"):
         _err("say: '#' at the start of a chat line is a pathfinder command prefix")
     if "@" in cleaned:
@@ -268,6 +269,68 @@ def check_say(text: Any) -> str:
         _err("say: formatting codes are not allowed")
     if len(cleaned) > SAY_MAX_LEN:
         _err(f"say: text longer than {SAY_MAX_LEN} characters")
+    return cleaned
+
+
+# --- player commands to the server (ADR-043, T-053) ----------------------------------------
+
+# The stand's deny list, always on top of whatever the operator configures: the
+# login/password commands are the environment's (mind-N logs in itself), and a
+# sister spending the slot's credential must stay impossible.
+DEFAULT_DENY = ("login", "l", "register", "reg", "changepassword", "unregister")
+
+
+def parse_deny(*values: str | None) -> tuple[str, ...]:
+    """MC_COMMANDS_DENY / MC_COMMANDS_DENY_SLOT into names: comma or space
+    separated, slashes optional, case lost on purpose."""
+    names: list[str] = []
+    for value in values:
+        for token in re.split(r"[,\s]+", str(value or "")):
+            token = token.strip().lstrip("/").lower()
+            if token and token not in names:
+                names.append(token)
+    return tuple(names)
+
+
+def _command_variants(name: str) -> set[str]:
+    """`authme:login` answers as both the full form and the bare name, so the
+    plugin-prefix disguise of a denied command does not slip through."""
+    variants = {name}
+    if ":" in name:
+        variants.add(name.rsplit(":", 1)[-1])
+    return variants
+
+
+def check_server_command(command: Any, deny: tuple[str, ...] = DEFAULT_DENY) -> str:
+    """Validate one player command (ADR-043): anything a player may type, minus the
+    stand's deny list. The command rides the body's chat lever — MessageSender
+    auto-detects the leading `/`, strips it and sends a command packet, never a
+    chat line (unionclef MessageSender.java:104-116, verified live: `/me` executed
+    with no raw slash line in the server log)."""
+    if not isinstance(command, str):
+        _err("server_command: command must be a string")
+    cleaned = command.strip()
+    if not cleaned:
+        _err("server_command: empty command")
+    if not cleaned.startswith("/"):
+        _err("server_command: a server command starts with /")
+    if CONTROL_RE.search(cleaned):
+        _err("server_command: control characters and line breaks are not allowed")
+    if ";" in cleaned:
+        _err("server_command: one command per call, ';' is not allowed")
+    if "§" in cleaned:
+        _err("server_command: formatting codes are not allowed")
+    if len(cleaned) > SAY_MAX_LEN:
+        _err(f"server_command: longer than {SAY_MAX_LEN} characters")
+    name = cleaned[1:].split()[0].lower()
+    # the login/password default can never be configured away: a stand's list only
+    # ever ADDS names (ADR-043 — the operator may deny / wholesale, never open /login)
+    denied = _command_variants(name) & (set(DEFAULT_DENY) | set(deny))
+    if denied:
+        _err(
+            f"server_command: '{next(iter(sorted(denied)))}' is on this stand's deny list"
+            " (ADR-043); the login commands are the environment's"
+        )
     return cleaned
 
 
@@ -284,11 +347,14 @@ class BodyMcp:
         *,
         perception: Perception | None = None,
         clock: Callable[[], float] = time.monotonic,
+        deny_commands: tuple[str, ...] = DEFAULT_DENY,
     ):
         self._x = executor
         self._perception = perception or Perception(descriptions={}, salt="", mode="plain")
         self._clock = clock
         self._last_say_at = -1e9
+        self._last_command_at = -1e9
+        self._deny = tuple(deny_commands) or DEFAULT_DENY
 
     @property
     def executor(self) -> Executor:
@@ -387,6 +453,19 @@ class BodyMcp:
             self._x.body.act("chat", {"text": cleaned})
         return {"said": True, "text": cleaned}
 
+    def server_command(self, command: str) -> dict[str, Any]:
+        """One player command to the server (ADR-043): anything a player may type,
+        minus the stand's deny list; the server enforces the rights. The answer,
+        if any, arrives as ordinary chat lines."""
+        cleaned = check_server_command(command, self._deny)
+        now = self._clock()
+        if now - self._last_command_at < SAY_MIN_INTERVAL_S:
+            _err(f"server_command: too fast, one per {SAY_MIN_INTERVAL_S:.0f} s")
+        self._last_command_at = now
+        with self._x.body_lock:
+            self._x.body.act("chat", {"text": cleaned})
+        return {"sent": True, "command": cleaned}
+
     def wait_events(self, timeout_s: float) -> dict[str, Any]:
         if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)):
             _err("wait_events: timeout_s must be a number")
@@ -427,9 +506,10 @@ def build_server(
             "The body of one slot, held by C1 between your turns. Tools: observe (state, "
             "entities, blocks, inventory, filtered chat), act (an intent from the levers; C1 "
             "applies it and may interrupt it for a threat, then returns to it), stop, say "
-            "(player chat), wait_events (sleep until an event or the timeout — you pick the "
-            "rhythm), retire_stuck (only after a task.idle event). Names are plain game "
-            "names; uc service lines are already filtered out."
+            "(player chat), server_command (a player command to the server, minus the "
+            "stand's deny list), wait_events (sleep until an event or the timeout — you "
+            "pick the rhythm), retire_stuck (only after a task.idle event). Names are plain "
+            "game names; uc service lines are already filtered out."
         ),
     )
 
@@ -456,6 +536,16 @@ def build_server(
         """One line into the player chat (no / or @, limited length and rate)."""
         return await impl._tool("say", {"text": text}, lambda: impl.say(text))
 
+    async def server_command(command: str) -> dict[str, Any]:
+        """One player command to the server, e.g. "/tpa LastOrder02" or "/sethome".
+        Anything a player may type is allowed except this stand's deny list (the
+        login/password commands: the environment logs in itself); the server
+        enforces the rights. One command per call, no ';' or line breaks, same
+        rate cap as say. The reply, if any, comes back as ordinary chat lines."""
+        return await impl._tool(
+            "server_command", {"command": command}, lambda: impl.server_command(command)
+        )
+
     async def wait_events(timeout_s: float = 30.0) -> dict[str, Any]:
         """Sleep until the next event or the timeout — you pick your own rhythm. Events:
         game.damage, game.death, chat.line, intent.done, intent.failed, task.idle (arms
@@ -476,6 +566,7 @@ def build_server(
     server.add_tool(act, name="act")
     server.add_tool(stop, name="stop")
     server.add_tool(say, name="say")
+    server.add_tool(server_command, name="server_command")
     server.add_tool(wait_events, name="wait_events")
     server.add_tool(retire_stuck, name="retire_stuck")
 
@@ -559,6 +650,8 @@ def build_mind(
     call_log: JsonlLog | None = None,
     clock: Callable[[], float] = time.monotonic,
     start_c1: bool = True,
+    deny_commands: tuple[str, ...] = DEFAULT_DENY,
+    login: "SessionLogin | None" = None,
     **executor_kwargs: Any,
 ) -> tuple[MCPServer, BodyMcp, Executor]:
     """Assemble the whole mind of one slot; tests use the impl and executor directly."""
@@ -570,9 +663,10 @@ def build_mind(
         log_=call_log or JsonlLog(),
         perception=perception,
         clock=clock,
+        login=login,
         **executor_kwargs,
     )
-    impl = BodyMcp(executor, perception=perception, clock=clock)
+    impl = BodyMcp(executor, perception=perception, clock=clock, deny_commands=deny_commands)
     server, impl = build_server(impl, start_c1=start_c1, runner_key=runner_key)
     return server, impl, executor
 
@@ -637,6 +731,20 @@ def main() -> None:
     jev = JevGate.from_env(log_=call_log)
     if jev.enabled:
         log.info("Jev wired: backend %s (threat tactics advise C1, rules stay the fallback)", jev.backend_name)
+    # Player commands (ADR-043): the stand's deny lists — the common one plus this
+    # slot's — always on top of the login/password default. The password (one
+    # slot's value, injected by compose into this mind alone) never touches a log:
+    # SessionLogin sends /login itself and masks any echo.
+    deny = parse_deny(
+        DEFAULT_DENY,
+        env("MC_COMMANDS_DENY", default="") or "",
+        env("MC_COMMANDS_DENY_SLOT", default="") or "",
+    )
+    password = env("MC_LOGIN_PASSWORD", default="") or ""
+    login = SessionLogin(password, send=lambda text: body.act("chat", {"text": text})) if password else None
+    if password:
+        log.info("login armed: mind-N logs into the server itself (the password is never logged)")
+
     server, _impl, _executor = build_mind(
         body,
         username=username,
@@ -652,6 +760,8 @@ def main() -> None:
         idle_s=_env_float("MIND_IDLE_S", 120.0),
         runner_key=env("MIND_RUNNER_KEY", default="") or "",
         operator_name=env("OPERATOR_MC_NAME", default="") or "",
+        deny_commands=deny,
+        login=login,
     )
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the harness
     # reaches the port by service name (body-1:8700) inside the docker network, not via localhost.

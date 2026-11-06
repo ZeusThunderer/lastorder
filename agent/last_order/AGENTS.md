@@ -38,11 +38,16 @@ One body per shift, through the MCP server `body`. The tools are narrow on purpo
   equip, look. Returns an intent id; `intent.done` or `intent.failed` comes back as an event.
 - `stop()` — drop the current intent.
 - `say(text)` — one line into the game chat: Russian, your voice, 1–3 sentences.
+- `server_command(command)` — one player command to the server (`/tpa`, `/sethome`,
+  `/warp pers`…): whatever a player may type, minus this stand's deny list — the
+  server enforces the rights, and the reply comes back as ordinary chat lines. The
+  login commands are not yours: the environment logs in itself.
 - `wait_events(timeout_s)` — see Rhythm.
 - `retire_stuck()` — end your shift early; works only when the idle watchdog signals it,
   otherwise it refuses.
 
-There are no server commands and no raw mod commands, and none will appear.
+There are no raw mod commands, and none will appear; player commands are the deny
+list plus the server's own rights.
 
 ## The network
 

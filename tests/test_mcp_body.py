@@ -27,11 +27,15 @@ import uvicorn
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
+from runtime.mind.login import SessionLogin
 from runtime.mind.mcp_body import (
+    DEFAULT_DENY,
     SAY_MAX_LEN,
     ToolError,
     build_mind,
     check_say,
+    check_server_command,
+    parse_deny,
     validate_args,
 )
 from runtime.mind.executor import JsonlLog
@@ -137,10 +141,15 @@ class Stack:
         idle_s: float = 10_000.0,
         runner_key: str = "",
         operator_name: str = "",
+        deny_commands: tuple[str, ...] | None = None,
+        login: "SessionLogin | None" = None,
     ):
         self.body = body or FakeBody()
         self._tmp = f".mcp-body-test-{time.monotonic_ns()}.jsonl"
         self.calls_file = JsonlLog(self._tmp)
+        extra: dict = {}
+        if deny_commands is not None:
+            extra["deny_commands"] = deny_commands
         server, self.impl, self.executor = build_mind(
             self.body,
             username="LastOrder01",
@@ -149,6 +158,8 @@ class Stack:
             idle_s=idle_s,  # the watchdog has its own tests; keep it quiet here
             runner_key=runner_key,
             operator_name=operator_name,
+            login=login,
+            **extra,
         )
         app = server.streamable_http_app(stateless_http=True, streamable_http_path="/mcp")
         config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="error")
@@ -289,6 +300,7 @@ def test_tool_set_is_exactly_section_four(stack: Stack) -> None:
         "observe",
         "retire_stuck",
         "say",
+        "server_command",
         "stop",
         "wait_events",
     ]
@@ -707,3 +719,125 @@ def test_several_chat_lines_reach_one_wait_events_call(stack: Stack) -> None:
         {"from": "Bob", "text": "два"},
         {"from": "Steve", "text": "три"},
     ]
+
+
+# --- player commands to the server (T-053, ADR-043) ---------------------------------------
+
+
+def test_check_server_command_accepts_a_player_command() -> None:
+    assert check_server_command("  /warp pers ") == "/warp pers"
+    assert check_server_command("/tpa LastOrder02") == "/tpa LastOrder02"
+    assert check_server_command("/help") == "/help"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "/login hunter2",
+        "/LOGIN hunter2",
+        "/l hunter2",
+        "/authme:login hunter2",  # the plugin-prefix disguise
+        "/Authme:Register pw pw",
+        "/reg pw pw",
+        "/changepassword a b",
+        "/unregister",
+        "/warp; /kill",  # one command per call
+        "/warp pers\n/kill",
+        "/say §kx",
+        "no slash",
+        "",
+        "x" * (SAY_MAX_LEN + 1),
+    ],
+)
+def test_check_server_command_rejections(command: str) -> None:
+    with pytest.raises(ToolError):
+        check_server_command(command)
+
+
+def test_check_server_command_reason_names_the_command() -> None:
+    with pytest.raises(ToolError, match="'login' is on this stand's deny list"):
+        check_server_command("/login secret")
+
+
+def test_parse_deny_takes_commas_spaces_and_slashes() -> None:
+    assert parse_deny("home,  warp ", "/kill", "") == ("home", "warp", "kill")
+    assert parse_deny(None, "") == ()
+
+
+def test_server_command_guards_over_mcp(stack: Stack) -> None:
+    """The tool set carries the deny list; the body sees only what passed it."""
+    result = stack.call(lambda c: c.call_tool("server_command", {"command": "/login hunter2"}))
+    assert "deny list" in error_text(result)
+    result = stack.call(lambda c: c.call_tool("server_command", {"command": "warp pers"}))
+    assert "starts with /" in error_text(result)
+    result = stack.call(lambda c: c.call_tool("server_command", {"command": "/warp pers"}))
+    assert parse(result) == {"sent": True, "command": "/warp pers"}
+    result = stack.call(lambda c: c.call_tool("server_command", {"command": "/home"}))
+    assert "too fast" in error_text(result)
+    sent = [args for lever, args in stack.body.acts if lever == "chat"]
+    assert sent == [{"text": "/warp pers"}]
+
+
+def test_server_command_takes_the_stands_slot_list(tmp_path: Path) -> None:
+    stack = Stack(deny_commands=("warp",))
+    result = stack.call(lambda c: c.call_tool("server_command", {"command": "/warp pers"}))
+    assert "deny list" in error_text(result)
+    result = stack.call(lambda c: c.call_tool("server_command", {"command": "/login x"}))
+    assert "deny list" in error_text(result)  # the login default rides on top
+
+
+# --- the environment's login (T-053) ------------------------------------------------------
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_session_login_on_world_entry_and_register(tmp_path: Path) -> None:
+    sent: list[str] = []
+    clock = FakeClock()
+    login = SessionLogin("hunter2", sent.append, clock=clock)
+    assert login.armed
+    login.on_tick(True, [])  # world entry
+    assert sent == ["/login hunter2"]
+    login.on_tick(True, ["Please register: /register <password> <password>"])
+    assert sent[-1] == "/register hunter2 hunter2"
+    # a repeated login prompt behind the cooldown only
+    login.on_tick(True, ["Use /login to play"])
+    assert len(sent) == 2
+    clock.now += 31.0
+    login.on_tick(True, ["Use /login to play"])
+    assert sent[-1] == "/login hunter2"
+    # a kick and a rejoin: the login goes out again
+    login.on_tick(False, [])
+    login.on_tick(True, [])
+    assert sent[-1] == "/login hunter2"
+
+
+def test_session_login_masks_the_password_everywhere() -> None:
+    login = SessionLogin("hunter2", lambda text: None)
+    assert login.mask("<LastOrder01> /login hunter2") == "<LastOrder01> /login ***"
+    assert login.mask("plain line") == "plain line"
+
+
+def test_the_executor_masks_the_password_out_of_chat_entries(stack: Stack) -> None:
+    """chat_entry is the single door into observe() and chat.line: the password
+    dies there, never reaching a log, an event or the agent."""
+    stack.executor._login = SessionLogin("s3cret", lambda text: None)
+    entry = stack.executor.chat_entry("<LastOrder01> /login s3cret")
+    assert entry is not None and "s3cret" not in entry["text"]
+    assert entry["text"].endswith("/login ***")
+
+
+def test_the_executor_logs_in_on_world_entry_with_a_fake_body() -> None:
+    stack = Stack(login=SessionLogin("hunter2", lambda text: stack.body.act("chat", {"text": text})))
+    stack.body.set_state(in_game=False)
+    stack.executor._tick()
+    stack.body.set_state(in_game=True)
+    stack.executor._login._was_in_game = False  # the transition the tick will see
+    stack.executor._tick()
+    assert ("chat", {"text": "/login hunter2"}) in stack.body.acts

@@ -61,6 +61,12 @@ x-mind: &mind
     # The operator's game name (T-051): the mind marks this player's chat lines with
     # `operator: true`. A stand config value, not a secret; empty leaves the marking off.
     OPERATOR_MC_NAME: "${OPERATOR_MC_NAME:-}"
+    # Player commands to the server (ADR-043, T-053): the stand's common deny list
+    # (comma/space separated, case-insensitive, plugin prefixes count) rides on top
+    # of the login/password default; per-slot extras arrive as MC_COMMANDS_DENY_SLOT
+    # below. The login PASSWORD stays in mind-N alone (MC_LOGIN_PASSWORD below): the
+    # node sandbox never sees it.
+    MC_COMMANDS_DENY: "${MC_COMMANDS_DENY:-}"
   command: ["python", "-m", "runtime.mind"]
 
 # The node sandbox of a slot (T-027, ADR-033): the runner plus both harnesses in one
@@ -180,6 +186,10 @@ services:
       MC_USERNAME: LastOrder01
       LLM_API_KEY: "${GATEWAY_KEY_MIND_1:-}"
       MIND_RUNNER_KEY: "${HIVE_RUNNER_KEY_1:-}"
+      MC_COMMANDS_DENY_SLOT: "${MC_COMMANDS_DENY_1:-}"
+      # the slot's server password (T-053): mind-N logs in itself; the value is
+      # lifted by up.sh into THIS mind alone, never into node-N
+      MC_LOGIN_PASSWORD: "${MC_LOGIN_PASSWORD_1:-}"
     volumes:
       - mind-1-run:/mind-run
       - workplaces-1:/workplaces:ro   # the Jev policy of the living sister, read-only
@@ -225,6 +235,10 @@ services:
       MC_USERNAME: LastOrder02
       LLM_API_KEY: "${GATEWAY_KEY_MIND_2:-}"
       MIND_RUNNER_KEY: "${HIVE_RUNNER_KEY_2:-}"
+      MC_COMMANDS_DENY_SLOT: "${MC_COMMANDS_DENY_2:-}"
+      # the slot's server password (T-053): mind-N logs in itself; the value is
+      # lifted by up.sh into THIS mind alone, never into node-N
+      MC_LOGIN_PASSWORD: "${MC_LOGIN_PASSWORD_2:-}"
     volumes:
       - mind-2-run:/mind-run
       - workplaces-2:/workplaces:ro
@@ -268,6 +282,10 @@ services:
       MC_USERNAME: LastOrder03
       LLM_API_KEY: "${GATEWAY_KEY_MIND_3:-}"
       MIND_RUNNER_KEY: "${HIVE_RUNNER_KEY_3:-}"
+      MC_COMMANDS_DENY_SLOT: "${MC_COMMANDS_DENY_3:-}"
+      # the slot's server password (T-053): mind-N logs in itself; the value is
+      # lifted by up.sh into THIS mind alone, never into node-N
+      MC_LOGIN_PASSWORD: "${MC_LOGIN_PASSWORD_3:-}"
     volumes:
       - mind-3-run:/mind-run
       - workplaces-3:/workplaces:ro
