@@ -2,7 +2,7 @@
 id: T-045
 title: Сёстры на Pi — адаптер раннера, жизнь и воля в Pi, запасной OpenCode с тревогой
 stage: I
-status: review
+status: changes
 criticality: critical
 after: [T-043, T-048]
 branch: z/T-045-sisters-on-pi
