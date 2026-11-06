@@ -2,10 +2,11 @@
 id: T-043
 title: Last Order на Pi — одна долгая сессия, события сети сообщениями, запасной OpenCode с тревогой
 stage: I
-status: in_progress
+status: blocked
 criticality: critical
 after: [T-048, T-059]
 branch: z/T-043-lo-long-session
+Blocked: канал поводов в живую сессию требует правок вне зоны — вопрос надзору (отчёт, Вопрос 1)
 created: 2026-10-26
 ---
 
