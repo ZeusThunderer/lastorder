@@ -2,7 +2,7 @@
 id: T-053
 title: Команды сервера сестре — команды игрока с запретным списком и вход /login средой
 stage: I
-status: review
+status: accepted
 criticality: critical
 after: [T-052, T-059]
 branch: z/T-053-server-commands
