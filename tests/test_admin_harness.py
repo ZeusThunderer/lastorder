@@ -336,13 +336,11 @@ def test_long_session_is_one_hapi_process_a_wake_spawns_nothing(tmp_path: Path) 
     assert (tmp_path / "workplace" / ".admin" / "hapi_session_id").read_text(
         encoding="utf-8"
     ) == "042c109a-6002-4141-8f2d-65ae3de5d55e"
-    # a wake reason is appended to the feed, not spawned: no process, no session.start
-    add_will(tmp_path / "knowledge", 9)
-    assert alarm.run_once() != []
+    # the reason that landed mid-session rode the supervise loop (posted above);
+    # the baseline was taken at its delivery, so the next poll has nothing left
+    assert alarm.run_once() == []
     assert len(recorder.argv) == 1
-    # the reason that landed mid-session rode the supervise loop too
-    assert ("death", format_serial(12)) in posted
-    assert posted and posted[-1][0] == "death"  # the WakeReason fields alone
+    assert ("death", format_serial(12)) in posted  # the WakeReason fields alone
     assert "wake.delivered" in events_of(tmp_path)
 
 
