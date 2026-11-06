@@ -636,3 +636,65 @@ def test_last_order_broadcast_and_limits_mirror_the_sisters(stack: Stack) -> Non
     assert out["sent"]  # both sisters
     assert "not alive" in lo_error(stack, "send", {"to": "999", "text": "hi"})
     assert "non-empty" in lo_error(stack, "send", {"to": "1", "text": "  "})
+
+
+# --- the desk's wake feed (T-043) --------------------------------------------------------------
+
+
+def _lo_wake(stack: Stack, method: str, path: str, body: dict | None = None, key: str = KEY_LO):
+    return httpx.request(
+        method, f"http://127.0.0.1:{stack.port}{path}", json=body,
+        headers={"X-Node-Key": key}, timeout=30.0,
+    )
+
+
+def test_wake_feed_appends_reads_and_acks_under_the_desk_key(stack: Stack) -> None:
+    first = _lo_wake(stack, "POST", "/lo/wake", {"kind": "timer", "detail": "10 min since"})
+    assert first.status_code == 200, first.text
+    seq1 = first.json()["seq"]
+    seq2 = _lo_wake(stack, "POST", "/lo/wake", {"kind": "death", "detail": "00002"}).json()["seq"]
+    assert seq2 == seq1 + 1
+    # the feed since 0 carries both, with the top of the whole log
+    feed = _lo_wake(stack, "GET", "/lo/wake?since=0").json()
+    assert [e["seq"] for e in feed["events"]] == [seq1, seq2]
+    assert feed["top"] == seq2
+    assert [e["kind"] for e in feed["events"]] == ["timer", "death"]
+    # the ack moves the cursor, and since= asks only for what follows
+    assert _lo_wake(stack, "POST", "/lo/wake/ack", {"seq": seq1}).status_code == 200
+    tail = _lo_wake(stack, "GET", "/lo/wake").json()  # no since: the acked cursor
+    assert [e["seq"] for e in tail["events"]] == [seq2]
+    # validation
+    assert _lo_wake(stack, "POST", "/lo/wake", {"kind": ""}).status_code == 422
+    assert _lo_wake(stack, "POST", "/lo/wake/ack", {"seq": -1}).status_code == 422
+
+
+def test_wake_feed_opens_with_the_desk_key_alone(stack: Stack) -> None:
+    stack.birth("LastOrder01")
+    # a sister's node key, the runner key, no key at all — all refused
+    for key in (KEY1, ""):
+        response = _lo_wake(stack, "POST", "/lo/wake", {"kind": "timer"}, key=key or "x")
+        assert response.status_code == 401, (key, response.text)
+    response = httpx.request(
+        "POST", f"http://127.0.0.1:{stack.port}/lo/wake",
+        json={"kind": "timer"}, headers={"X-Runner-Key": RKEY1}, timeout=30.0,
+    )
+    assert response.status_code == 401
+
+
+def test_wake_feed_survives_a_hive_restart_and_caps_its_tail(stack: Stack, tmp_path: Path) -> None:
+    seq = _lo_wake(stack, "POST", "/lo/wake", {"kind": "timer", "detail": "one"}).json()["seq"]
+    # a "restart": a fresh app over the same run dir keeps the seq and the cursor
+    stack.close()
+    stack2 = Stack(tmp_path)
+    try:
+        feed = _lo_wake(stack2, "GET", "/lo/wake?since=0").json()
+        assert [e["seq"] for e in feed["events"]] == [seq]
+        # the cap: the tail keeps only the recent history
+        from runtime.hive.app import WAKE_FEED_MAX
+        for i in range(WAKE_FEED_MAX + 5):
+            _lo_wake(stack2, "POST", "/lo/wake", {"kind": "timer", "detail": str(i)})
+        events = _lo_wake(stack2, "GET", "/lo/wake?since=0").json()["events"]
+        assert len(events) == WAKE_FEED_MAX
+        assert events[0]["seq"] > seq  # the oldest were folded away
+    finally:
+        stack2.close()

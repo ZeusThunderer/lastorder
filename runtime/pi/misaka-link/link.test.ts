@@ -70,6 +70,22 @@ class FakeHive implements HiveLink {
     this.acks.push(seq);
   }
 
+  wakeQueue: ({ events: { seq: number; kind: string; detail?: unknown }[]; top: number } | Error)[] = [];
+  wakeAcks: number[] = [];
+  wakeCalls = 0;
+
+  async wakeFeed(cursor: number | null): Promise<{ events: { seq: number; kind: string; detail?: unknown }[]; cursor: number; top: number }> {
+    this.wakeCalls += 1;
+    const next = this.wakeQueue.shift();
+    if (next instanceof Error) throw next;
+    const batch = next ?? { events: [], top: 0 };
+    return { events: batch.events, cursor: cursor ?? 0, top: batch.top };
+  }
+
+  async wakeAck(seq: number): Promise<void> {
+    this.wakeAcks.push(seq);
+  }
+
   async alarmDeliveryFailing(text: string, slot: string, serial: number | null): Promise<void> {
     this.alarms.push({ text, slot, serial });
   }
@@ -283,4 +299,51 @@ test("a refused send loses the drained inbox batch — journalled, not silent", 
   // the inbox is one-shot: the batch is gone, the next drain finds it empty
   await core.pollOnce();
   assert.equal(sender.sent.length, 0);
+});
+
+test("the desk's wake feed rides the same session as a [wake · …] envelope (T-043)", async () => {
+  const hive = new FakeHive();
+  const sender = new FakeSender();
+  hive.wakeQueue.push({
+    events: [
+      { seq: 1, kind: "death", detail: "00002, 00007" },
+      { seq: 2, kind: "timer", detail: "10 min since the last session" },
+    ],
+    top: 2,
+  });
+  const core = new LinkCore({ hive, sender, nameOf, pollS: 10, desk: true });
+  await core.pollOnce();
+  assert.equal(sender.sent.length, 1);
+  assert.deepEqual(sender.sent[0]!.text.split("\n"), [
+    "[wake · death] 00002, 00007",
+    "[wake · timer] 10 min since the last session",
+  ]);
+  assert.deepEqual(hive.wakeAcks, [2]); // the cursor moved only after the send
+  // the repeat (ack lost) lands once — the seen set absorbs it
+  hive.wakeQueue.push({ events: [{ seq: 2, kind: "timer", detail: "again" }], top: 2 });
+  await core.pollOnce();
+  assert.equal(sender.sent.length, 1);
+});
+
+test("a sister's loop never touches the wake feed (desk only)", async () => {
+  const hive = new FakeHive();
+  const sender = new FakeSender();
+  const core = new LinkCore({ hive, sender, nameOf, pollS: 10 }); // desk: false
+  await core.pollOnce();
+  assert.equal(hive.wakeCalls, 0);
+});
+
+test("a rebuilt wake feed (top below our cursor) resets the cursor", async () => {
+  const hive = new FakeHive();
+  const sender = new FakeSender();
+  hive.wakeQueue.push({ events: [{ seq: 5, kind: "operator", detail: "INBOX.md" }], top: 5 });
+  const core = new LinkCore({ hive, sender, nameOf, pollS: 10, desk: true });
+  await core.pollOnce();
+  assert.deepEqual(hive.wakeAcks, [5]);
+  // the hive rebuilt its log: the new top is behind our cursor
+  hive.wakeQueue.push({ events: [], top: 2 });
+  hive.wakeQueue.push({ events: [{ seq: 1, kind: "timer", detail: "fresh log" }], top: 1 });
+  await core.pollOnce();
+  assert.ok(sender.sent.some(s => s.text.includes("[wake · timer] fresh log")));
+  assert.ok(hive.wakeAcks.includes(1));
 });

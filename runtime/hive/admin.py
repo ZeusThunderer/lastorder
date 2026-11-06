@@ -823,11 +823,18 @@ class AdminAlarm:
         return reasons
 
     def _deliver_wake(self, reasons: list[WakeReason], new_deaths: list[int]) -> None:
-        """A wake reason of the one long session (T-043): no process is spawned — the
-        reason rides the session. The channel is the wake delivery of ADR-041; until
-        the supervision answer (see the task question) it is journalled, not lost:
-        the reason stays in the admin log for the operator and the board feed still
-        carries the underlying events to the session through misaka-link."""
+        """A wake reason of the one long session (T-043): no process is spawned —
+        the reason is appended to the desk's wake feed in the hive (the `misaka-link`
+        extension of the session reads it as a `[wake …]` envelope). The payload is
+        the WakeReason fields alone (kind, node numbers, counters — ADR-037: no raw
+        ids, no game chat); a refused append is journalled, never fatal."""
+        for reason in reasons:
+            try:
+                self._post_wake(reason.kind, reason.detail)
+            except OSError as exc:
+                self._log.event(
+                    "wake.drop", {"kind": reason.kind, "error": f"{type(exc).__name__}: {exc}"}
+                )
         self._log.event(
             "wake.delivered",
             {
@@ -835,6 +842,17 @@ class AdminAlarm:
                 "new_deaths": [format_serial(s) for s in new_deaths],
             },
         )
+
+    def _post_wake(self, kind: str, detail: str) -> None:
+        url = f"{self.cfg.hive_url.rstrip('/')}/lo/wake"
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({"kind": kind, "detail": detail}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-Node-Key": self.cfg.lo_key},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            response.read()
 
     # --- the session ------------------------------------------------------------------------
 

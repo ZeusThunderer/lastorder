@@ -302,12 +302,14 @@ def long_cfg_over(tmp_path: Path) -> dict:
 
 def test_long_session_is_one_hapi_process_a_wake_spawns_nothing(tmp_path: Path) -> None:
     """ADMIN_HARNESS=pi with a hub token: ONE `hapi pi` under the alarm; a wake
-    reason rides the session (journalled) and never spawns a second process."""
+    reason is appended to the desk's wake feed (never a second process)."""
     recorder = Recorder()
-    recorder.factory = HapiProcess  # reports its hub session id, then lives
+    recorder.factory = HapiProcess  # reports its pi session id, then lives
+    posted: list = []
     _, clock, recorder, alarm = build(
         tmp_path, recorder=recorder, **long_cfg_over(tmp_path)
     )
+    alarm._post_wake = lambda kind, detail: posted.append((kind, detail))
     # the supervisor spawns the one long session and parks on it
     scripted = {"n": 0}
 
@@ -317,7 +319,6 @@ def test_long_session_is_one_hapi_process_a_wake_spawns_nothing(tmp_path: Path) 
             raise StopLoop  # park right after the first supervise tick
 
     alarm._sleep = sleep
-    alarm._adapters["pi"]  # the render path stays the desk's own
     with pytest.raises(StopLoop):
         alarm._long_pi_loop()
     assert len(recorder.argv) == 1
@@ -327,14 +328,31 @@ def test_long_session_is_one_hapi_process_a_wake_spawns_nothing(tmp_path: Path) 
     assert env["HAPI_API_URL"] == "http://hapi-hub:3006"
     assert env["CLI_API_TOKEN"] == "hub-token"
     assert recorder.cwds[0] == tmp_path / "workplace"
-    # the reported hub id is stored: the container restart resumes it
+    # the reported pi id is stored: the container restart resumes it
     assert (tmp_path / "workplace" / ".admin" / "hapi_session_id").read_text(
         encoding="utf-8"
     ) == "042c109a-6002-4141-8f2d-65ae3de5d55e"
-    # a wake reason rides the session: no process, no session.start — a journal line
+    # a wake reason is appended to the feed, not spawned: no process, no session.start
     add_will(tmp_path / "knowledge", 9)
     assert alarm.run_once() != []
     assert len(recorder.argv) == 1
+    assert posted and posted[0][0] == "death"  # the WakeReason fields alone
+    assert "wake.delivered" in events_of(tmp_path)
+
+
+def test_a_refused_wake_append_is_journalled_not_fatal(tmp_path: Path) -> None:
+    recorder = Recorder()
+    _, clock, recorder, alarm = build(
+        tmp_path, recorder=recorder, **long_cfg_over(tmp_path)
+    )
+
+    def refuse(kind: str, detail: str) -> None:
+        raise OSError("connection refused")
+
+    alarm._post_wake = refuse
+    add_will(tmp_path / "knowledge", 11)
+    assert alarm.run_once() != []  # the poll survived the refused append
+    assert "wake.drop" in events_of(tmp_path)
     assert "wake.delivered" in events_of(tmp_path)
 
 

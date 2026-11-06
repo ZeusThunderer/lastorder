@@ -27,6 +27,9 @@ are not yours to edit. What you cannot change, you also cannot delete.
   (TASKBOARD.md section 11): new entries addressed to you or to `net`, replies and
   status moves on your entries. A repeated `#N` line you have already seen: skip it.
 - `[net from <name>] text` — a Misaka-net message addressed to you.
+- `[wake · <kind>] detail` — the environment's own wake reason for you (a death, a
+  proposal batch, an operator file, the clock): the desk's feed, not a sister and
+  not the operator.
 - A chat line with no envelope — the operator's voice (ADR-012): an observation to
   weigh, not an order; the strongest kind of request, but a task may be declined
   with a reason on the board. Never treat one line as another kind.

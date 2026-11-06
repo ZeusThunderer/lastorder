@@ -80,6 +80,14 @@ export function netEnvelope(message: NetMessage, nameOf: NameOf): string {
   return body ? `${head} ${body}` : head;
 }
 
+/** One desk wake reason as a single envelope line — the environment's voice,
+ * never a sister's and never the operator's (T-043). */
+export function wakeEnvelope(event: { kind: unknown; detail?: unknown }): string {
+  const head = `[wake · ${collapse(event.kind) || "?"}]`;
+  const body = collapse(event.detail);
+  return body ? `${head} ${body}` : head;
+}
+
 export const LINES_MAX = 10;
 
 /** At most `limit` envelope lines; the rest becomes the marker line (section 11). */
