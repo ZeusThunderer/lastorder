@@ -360,12 +360,15 @@ class PiAdapter:
         except OSError:
             return []
 
-    def boot_report(self, spawned_at: float) -> HapiBoot | None:
+    def boot_report(self, spawned_at: float, known: tuple[str, ...] = ()) -> HapiBoot | None:
         """The wrapper's report for THIS spawn, off the hapi logs written after
-        `spawned_at` (a wall-clock epoch). One log file per wrapper process, so
-        an old spawn's ids cannot leak in; a file carrying several session lines
-        keeps the last of each (the admin's rule, T-043). None until BOTH ids
-        are there: the hub session exists but the agent is not up yet."""
+        `spawned_at` (a wall-clock epoch). One log file per wrapper process, but
+        the KILLED previous session's log can still sit inside the mtime grace
+        (verified live: the will's opener answered 409 on the life session's id),
+        so ids the runner already knows are skipped. A file carrying several
+        session lines keeps the last FRESH one (the admin's rule, T-043). None
+        until both ids are there: the hub session exists but the agent is not
+        up yet."""
         pi_id = ""
         hub_id = ""
         for path in self._hapi_log_paths(spawned_at):
@@ -373,8 +376,8 @@ class PiAdapter:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            pi_matches = HAPI_SESSION_RE.findall(text)
-            hub_matches = HAPI_HUB_SESSION_RE.findall(text)
+            pi_matches = [i for i in HAPI_SESSION_RE.findall(text) if i not in known]
+            hub_matches = [i for i in HAPI_HUB_SESSION_RE.findall(text) if i not in known]
             if pi_matches:
                 pi_id = pi_matches[-1]
             if hub_matches:

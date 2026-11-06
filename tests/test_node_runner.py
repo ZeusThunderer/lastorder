@@ -275,7 +275,7 @@ class FakeHapiAdapter(FakeAdapter):
     def long_running(self) -> bool:
         return True
 
-    def boot_report(self, spawned_at: float) -> "HapiBoot | None":
+    def boot_report(self, spawned_at: float, known: tuple[str, ...] = ()) -> "HapiBoot | None":
         return self.boot
 
     def deliver_prompt(self, session_id: str, text: str) -> None:
@@ -1535,6 +1535,11 @@ def test_hapi_boot_report_and_the_spend_off_the_session_file(tmp_path: Path) -> 
     assert adapter.boot_report(time.time()) is None
     assert adapter.boot_report(time.time() + 10_000.0) is None  # nothing of a future spawn
     os.utime(boot_log, (spawned, spawned))
+    # the KILLED session's log inside the mtime grace must not be the next boot's
+    # report (live: the will's opener answered 409 on the life session's id): the
+    # runner passes the ids it already knows and only a FRESH pair counts
+    known = ("01a1b025-2526-72b9-8b01-7af74315ea24", "b524f3ac-5524-4467-93ac-592383183ba5")
+    assert adapter.boot_report(time.time(), known=known) is None
 
     sessions = tmp_path / ".pi" / "agent" / "sessions" / "--workplaces--"
     sessions.mkdir(parents=True)

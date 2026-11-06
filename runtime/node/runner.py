@@ -189,6 +189,10 @@ class NodeRunner:
         self._sweep = sweep or self._kill_sister_uid_processes
         self._alarms = alarms
         self._monotonic = monotonic or time.monotonic
+        # the console session ids this runner already used (life and will boots):
+        # a killed session's log line must not be mistaken for the next boot's
+        # report — the ids ride the exclusion set of boot_report (the will's 409)
+        self._known_session_ids: list[str] = []
 
     def _alarm(self, alarm_type: str, text: str, state: "LifeState | None" = None) -> None:
         """Raise a board alarm best-effort: a board that is down must not take
@@ -598,14 +602,26 @@ class NodeRunner:
 
     def _await_boot(self, adapter, process, spawned_at: float):
         """Wait for the wrapper's boot report (both ids — the hub's session for
-        the opener and pi's for the resume), None on timeout."""
+        the opener and pi's for the resume), None on timeout. Sessions this
+        runner already booted are excluded, and a fresh report is remembered:
+        the next spawn (a crash restart, the will) must not re-find the dead
+        session's log lines inside the mtime grace."""
+        known = tuple(self._known_session_ids)
         deadline = self._monotonic() + adapter._boot_timeout_s
         while process.poll() is None and self._monotonic() < deadline:
-            boot = adapter.boot_report(spawned_at)
+            boot = adapter.boot_report(spawned_at, known=known)
             if boot is not None:
+                self._remember_boot(boot)
                 return boot
             self._sleep(0.5)
-        return adapter.boot_report(spawned_at)
+        boot = adapter.boot_report(spawned_at, known=known)
+        if boot is not None:
+            self._remember_boot(boot)
+        return boot
+
+    def _remember_boot(self, boot) -> None:
+        self._known_session_ids.extend((boot.pi_session_id, boot.hub_session_id))
+        del self._known_session_ids[:-8]  # bounded: the last four sessions
 
     def _deliver_opener(self, adapter, session_id: str, prompt: str, state: LifeState) -> bool:
         """Post the life opener into the hub session (the operator's channel,
