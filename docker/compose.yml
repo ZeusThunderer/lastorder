@@ -93,6 +93,12 @@ x-node: &node
     HARNESS: "${NODE_HARNESS:-pi}"
     HARNESS_FAILOVER: "${NODE_HARNESS_FAILOVER:-opencode}"
     QUOTA_ACTION: "${NODE_QUOTA_ACTION:-wait}"
+    STUCK_S: "${NODE_STUCK_S:-600}"   # the board `stuck` alarm threshold (T-045)
+    # The console hub (ADR-042, T-045): with a NAMESPACED token the pi harness rides
+    # `hapi pi` — the operator sees the sister in HAPI and speaks to her mid-life.
+    # The base token NEVER enters a sandbox (T-044 R1-1/R1-3): up.sh derives the
+    # per-slot `<base>:node-N` form; an empty token keeps the direct-pi of T-066.
+    HAPI_URL: http://hapi-hub:3006
     GATEWAY_URL: http://llm-gateway:4000
     ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"  # also the Pi and Hermes model by default
     PI_CONTEXT_WINDOW: "${PI_CONTEXT_WINDOW:-96000}"  # the compaction budget (T-066)
@@ -190,6 +196,7 @@ services:
       HIVE_RUNNER_KEY: "${HIVE_RUNNER_KEY_1:-}"
       HIVE_NODE_KEY: "${HIVE_NODE_KEY_1:-}"
       GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_1:-}"
+      HAPI_TOKEN: "${HAPI_TOKEN_1:-}"
       ZAI_API_KEY: "${ZCODE_API_KEY:-}"
     volumes:
       - *hive-wills-mount
@@ -232,6 +239,7 @@ services:
       HIVE_RUNNER_KEY: "${HIVE_RUNNER_KEY_2:-}"
       HIVE_NODE_KEY: "${HIVE_NODE_KEY_2:-}"
       GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_2:-}"
+      HAPI_TOKEN: "${HAPI_TOKEN_2:-}"
       ZAI_API_KEY: "${ZCODE_API_KEY:-}"
     volumes:
       - *hive-wills-mount
@@ -274,6 +282,7 @@ services:
       HIVE_RUNNER_KEY: "${HIVE_RUNNER_KEY_3:-}"
       HIVE_NODE_KEY: "${HIVE_NODE_KEY_3:-}"
       GATEWAY_NODE_KEY: "${GATEWAY_KEY_NODE_3:-}"
+      HAPI_TOKEN: "${HAPI_TOKEN_3:-}"
       ZAI_API_KEY: "${ZCODE_API_KEY:-}"
     volumes:
       - *hive-wills-mount

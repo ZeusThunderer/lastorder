@@ -14,6 +14,7 @@ import os
 import re
 import stat
 import tempfile
+import time
 from pathlib import Path
 
 import httpx
@@ -38,7 +39,7 @@ from runtime.node.adapters import (
     quota_exhausted,
 )
 from runtime.node.config import NodeConfig
-from runtime.node.runner import LifeState, NodeRunner
+from runtime.node.runner import LIFE_PREFIX, LifeState, NodeRunner
 from runtime.node.willproxy import WillProxy
 from runtime.node import workplace
 
@@ -61,6 +62,8 @@ def make_cfg(tmp_path: Path, **over) -> NodeConfig:
         node_key="sk-node-one",
         runner_key="rk-runner-one",
         zai_key="zai-token",
+        hapi_url="http://hapi-hub:3006",
+        hapi_token="",
         gateway_url="http://llm-gateway:4000",
         gateway_key="gk-node",
         zcode_model="GLM-5.3-Flash",
@@ -75,6 +78,7 @@ def make_cfg(tmp_path: Path, **over) -> NodeConfig:
         restart_pause_s=5.0,
         restart_pause_max_s=60.0,
         restart_reset_after_s=300.0,
+        stuck_s=600.0,
         kill_grace_s=0.1,
         hive_retry_pause_s=0.01,
         hive_retry_max_s=0.05,
@@ -237,6 +241,50 @@ class FakeAdapter:
         return match.group(1) if match else None
 
 
+class FakeAlarms:
+    """The board alarms recorder: (type, text, slot, serial) of every raised alarm."""
+
+    def __init__(self, journal: list | None = None):
+        self.calls: list[tuple[str, str, str, int | None]] = []
+        self.fail: Exception | None = None
+        self._journal = journal
+
+    def alarm(self, alarm_type: str, text: str, *, slot: str, serial: int | None) -> None:
+        if self.fail is not None:
+            raise self.fail
+        self.calls.append((alarm_type, text, slot, serial))
+        if self._journal is not None:
+            self._journal.append((f"alarm:{alarm_type}",))
+
+
+class FakeHapiAdapter(FakeAdapter):
+    """A long-running console adapter: the boot report, the opener over the hub,
+    the session-file progress — everything the runner's hapi branch asks of it."""
+
+    def __init__(self, name: str, journal: list, *, boot_ids: list[str] | None = None):
+        super().__init__(name, journal)
+        self.boot_ids = boot_ids if boot_ids is not None else ["hapi-sid-1"]
+        self.delivered: list[tuple[str, str]] = []
+        self.progress = 1000
+        self._boot_timeout_s = 90.0
+
+    @property
+    def long_running(self) -> bool:
+        return True
+
+    def new_session_ids(self, spawned_at: float) -> list[str]:
+        return list(self.boot_ids)
+
+    def deliver_prompt(self, session_id: str, text: str) -> None:
+        self.delivered.append((session_id, text.splitlines()[0]))
+
+    def session_progress(self, session_id: str) -> int | None:
+        return self.progress
+
+    def session_spend(self, session_id: str) -> dict[str, float]:
+        return {"tokens": 1234, "cost_usd": 0.05}
+
+
 class FakeProxy:
     def __init__(self, journal: list):
         self.journal = journal
@@ -287,6 +335,7 @@ class Rig:
         self.opencode = FakeAdapter("opencode", self.journal)
         self.proxy = FakeProxy(self.journal)
         self.boardlink = FakeBoardLink(self.journal)
+        self.alarms = FakeAlarms(self.journal)
         self.pauses: list[float] = []
         self.runner = NodeRunner(
             self.cfg,
@@ -303,6 +352,7 @@ class Rig:
             boardlink_factory=lambda state: self.boardlink,
             log=lambda type, payload=None: self.logs.append((type, payload or {})),
             sweep=lambda: self.journal.append(("sweep",)),
+            alarms=self.alarms,
         )
 
     def script(self, *processes: FakeProcess) -> None:
@@ -1321,7 +1371,7 @@ def test_will_proxy_adds_the_runner_mark_and_streams_the_body() -> None:
         "http://hive:8000/node/mcp",
         node_key="sk-node-one",
         runner_key="rk-runner-one",
-        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        client=httpx.Client(transport=httpx.MockTransport(handler), base_url="http://hapi-hub:3006"),
     )
     url = proxy.start()
     try:
@@ -1377,3 +1427,343 @@ def test_boardlink_default_factory_follows_the_node_key(tmp_path: Path) -> None:
     link = rig2.runner._make_boardlink(LifeState(7, BORN, 45, {}))
     assert isinstance(link, BoardLink)
     assert link._thread is None  # born stopped; only _life starts it
+
+
+# --- T-045: the console wrapper (`hapi pi`), the board alarms, the failover -----------------
+
+
+def _hapi_adapter(tmp_path: Path, http: httpx.Client | None = None) -> PiAdapter:
+    return PiAdapter(
+        "GLM-5.3-Flash",
+        body_base="http://body-1:8700",
+        hive_url="http://hive:8000",
+        node_key="sk-node-one",
+        zai_key="zai-token",
+        context_window=96_000,
+        keep_recent_tokens=20_000,
+        agent_dir=str(tmp_path / ".pi" / "agent"),
+        slot="LastOrder01",
+        hapi_url="http://hapi-hub:3006",
+        hapi_token="hub-token:node-1",
+        hapi_home=tmp_path / ".hapi",
+        boot_timeout_s=0.2,
+        transport=http,
+    )
+
+
+def test_hapi_pi_adapter_argv_env_and_the_base_token_refusal(tmp_path: Path) -> None:
+    """T-045: with a namespaced hub token the pi harness rides `hapi pi` — stdin is
+    HAPI's, so the prompt never rides argv and the token (the ONLY token a sandbox
+    may hold, T-044 R1-1/R1-3) rides the env of that child alone. Without a token
+    the adapter stays the direct-pi of T-066 (covered by the tests above)."""
+    adapter = _hapi_adapter(tmp_path)
+    assert adapter.hapi and adapter.long_running
+    first = adapter.life_turn("Life session.\n\nlong prompt", None)
+    assert first.argv == ("hapi", "pi")
+    assert "Life session." not in " ".join(first.argv)
+    assert first.env == {
+        "PI_CODING_AGENT_DIR": str(tmp_path / ".pi" / "agent"),
+        "HAPI_API_URL": "http://hapi-hub:3006",
+        "CLI_API_TOKEN": "hub-token:node-1",
+        "HAPI_HOME": str(tmp_path / ".hapi"),
+    }
+    resume = adapter.life_turn("p", "0193-abcd")
+    assert resume.argv == ("hapi", "pi", "--session-id", "0193-abcd")
+    assert adapter.will_session("Will session (you have just died).").argv == ("hapi", "pi")
+    # the life turn re-rendered the agent dir — a replaced config never survives into
+    # the next session (R2-3), and the slot file is there for misaka-link's alarm
+    for name in ("models.json", "mcp.json", "settings.json", "zai-key", "slot"):
+        assert (tmp_path / ".pi" / "agent" / name).is_file(), name
+    assert (tmp_path / ".pi" / "agent" / "slot").read_text(encoding="utf-8") == "LastOrder01"
+    # fail-closed: the BASE console token reads every session of the network
+    with pytest.raises(ValueError, match="namespaced"):
+        PiAdapter(
+            "GLM-5.3-Flash",
+            body_base="http://body-1:8700",
+            hive_url="http://hive:8000",
+            node_key="k",
+            zai_key="zai",
+            context_window=96_000,
+            keep_recent_tokens=20_000,
+            hapi_url="http://hapi-hub:3006",
+            hapi_token="the-base-token",
+        )
+
+
+def test_pi_session_files_carry_the_id_and_the_spend(tmp_path: Path) -> None:
+    """Hapi mode's source of truth is Pi's own session file: the first record is
+    the boot report (the id `--session-id` resumes), the assistant records carry
+    the usage — the report's quota and money numbers (verified on the t048 stand)."""
+    adapter = _hapi_adapter(tmp_path)
+    adapter.life_turn("p", None)
+    sessions = tmp_path / ".pi" / "agent" / "sessions" / "--workplaces--"
+    sessions.mkdir(parents=True)
+    old = sessions / "2026-11-05T10-00-00-000Z_00old.jsonl"
+    old.write_text(
+        '{"type":"session","version":3,"id":"00old","timestamp":"t","cwd":"/w"}\n', encoding="utf-8"
+    )
+    os.utime(old, (1_000_000.0, 1_000_000.0))  # long before any spawn
+    fresh = sessions / "2026-11-06T09-16-26-793Z_01a1b025-2526.jsonl"
+    fresh.write_text(
+        '{"type":"session","version":3,"id":"01a1b025-2526","timestamp":"t","cwd":"/w"}\n'
+        '{"type":"message_end","message":{"role":"assistant","usage":'
+        '{"totalTokens":120,"cost":{"total":0.02}}}}\n'
+        '{"type":"message_end","message":{"role":"assistant","usage":'
+        '{"totalTokens":80,"cost":{"total":0.01}}}}\n'
+        '{"type":"message_end","message":{"role":"user"}}\n',
+        encoding="utf-8",
+    )
+    spawned = time.time()
+    assert adapter.new_session_ids(spawned) == ["01a1b025-2526"]  # the old file predates the spawn
+    assert adapter.new_session_ids(0.0) == ["00old", "01a1b025-2526"]  # name order
+    assert adapter.session_file("01a1b025-2526") == fresh
+    assert adapter.session_progress("01a1b025-2526") == fresh.stat().st_size
+    assert adapter.session_progress("nope") is None
+    assert adapter.session_spend("01a1b025-2526") == {
+        "tokens": 200,
+        "cost_usd": pytest.approx(0.03),
+    }
+    assert adapter.session_spend("nope") is None
+
+
+def test_hapi_pi_delivers_the_opener_over_the_hub(tmp_path: Path) -> None:
+    """The session opener enters through the hub's own message route (T-044's
+    verified operator channel) under the slot's namespaced token; a refusal
+    raises so the runner can retry and then restart the session."""
+    calls: list[tuple[str, dict | None, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode()) if request.content else None
+        calls.append((str(request.url.path), body, request.headers.get("Authorization")))
+        if request.url.path == "/api/auth":
+            return httpx.Response(200, json={"token": "jwt-42"})
+        return httpx.Response(200, json={"ok": True})
+
+    adapter = _hapi_adapter(tmp_path, httpx.Client(transport=httpx.MockTransport(handler), base_url="http://hapi-hub:3006"))
+    adapter.deliver_prompt("01a1b025-2526", "Life session.\n\nlong prompt")
+    assert calls == [
+        ("/api/auth", {"accessToken": "hub-token:node-1"}, None),
+        (
+            "/api/sessions/01a1b025-2526/messages",
+            {"text": "Life session.\n\nlong prompt"},
+            "Bearer jwt-42",
+        ),
+    ]
+
+    def refused(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/auth":
+            return httpx.Response(200, json={"token": "jwt-42"})
+        return httpx.Response(404)
+
+    strict = _hapi_adapter(tmp_path, httpx.Client(transport=httpx.MockTransport(refused), base_url="http://hapi-hub:3006"))
+    with pytest.raises(httpx.HTTPStatusError):
+        strict.deliver_prompt("x", "p")
+
+
+def _hapi_rig(tmp_path: Path, **cfg_over) -> tuple[Rig, FakeHapiAdapter]:
+    rig = Rig(tmp_path, harness="pi", failover="opencode", **cfg_over)
+    hapi = FakeHapiAdapter("pi", rig.journal)
+    rig.runner._adapters["pi"] = hapi
+    return rig, hapi
+
+
+def test_hapi_life_posts_the_opener_once_and_resumes_without_one(tmp_path: Path) -> None:
+    rig, hapi = _hapi_rig(tmp_path)
+    state = rig.runner._birth()
+    rig.script(FakeProcess(hang=True))
+    rig.mind.kill_at_status = 3  # dies while the long session hangs
+    death, adapter_name = rig.runner._life(state)
+    assert adapter_name == "pi" and death is not None
+    assert hapi.delivered == [("hapi-sid-1", LIFE_PREFIX)]  # the opener, exactly once
+    assert rig.runner._load_state().session_id == "hapi-sid-1"
+
+    # a life that already has a session resumes: the history carries the opener
+    rig2, hapi2 = _hapi_rig(tmp_path)
+    state2 = rig2.runner._birth()
+    state2.session_id = "hapi-sid-1"
+    rig2.runner._save_state(state2)
+    rig2.script(FakeProcess(hang=True))
+    rig2.mind.kill_at_status = 3
+    rig2.runner._life(state2)
+    assert hapi2.delivered == []
+    assert ("pi:life", "hapi-sid-1") in rig2.journal
+
+
+def test_hapi_session_exit_alarms_and_drops_a_lost_resume(tmp_path: Path) -> None:
+    """A long session that dies while the body lives is `session_missing` on the
+    board; a resume the hub no longer holds (T-043's resume_lost) would crash-loop
+    until the TTL — after two instant deaths the runner starts fresh instead."""
+    rig, hapi = _hapi_rig(tmp_path, restart_pause_s=0.05)
+    state = rig.runner._birth()
+    rig.script(
+        FakeProcess(code=1, output=""),  # fresh: boots, then dies
+        FakeProcess(code=1, output=""),  # resume #1: instant death
+        FakeProcess(code=1, output=""),  # resume #2: instant death → the key is dropped
+        FakeProcess(hang=True),          # the fresh restart lives until the body dies
+    )
+    rig.mind.kill_at_status = 20
+    rig.runner._life(state)
+    assert "session_missing" in [call[0] for call in rig.alarms.calls]
+    resumes = [entry[1] for entry in rig.journal if entry[0] == "pi:life"]
+    assert resumes == [None, "hapi-sid-1", "hapi-sid-1", None]
+    assert any(type == "hapi.resume_lost" for type, _ in rig.logs)
+
+
+def test_hapi_boot_timeout_restarts_the_life(tmp_path: Path) -> None:
+    rig, hapi = _hapi_rig(tmp_path, restart_pause_s=0.01, restart_pause_max_s=0.02)
+    hapi.boot_ids = []  # the wrapper never reports a session
+    hapi._boot_timeout_s = 0.03
+    state = rig.runner._birth()
+    rig.script(FakeProcess(hang=True), FakeProcess(hang=True))
+    rig.mind.kill_at_status = 10
+    rig.runner._life(state)
+    # both silent spawns were killed at the boot deadline and the loop moved on —
+    # no infinite wait on a wrapper that never reports a session
+    assert len([1 for type, _ in rig.logs if type == "hapi.boot_timeout"]) == 2
+    assert len(rig.spawns.calls) >= 2
+
+
+def test_hapi_stuck_alarm_when_the_session_goes_quiet(tmp_path: Path) -> None:
+    rig, hapi = _hapi_rig(tmp_path, stuck_s=0.05, poll_s=0.01)
+    state = rig.runner._birth()
+    rig.script(FakeProcess(hang=True))
+    rig.mind.kill_at_status = 30
+    rig.runner._life(state)
+    kinds = [call[0] for call in rig.alarms.calls]
+    assert "stuck" in kinds
+    assert kinds.count("stuck") == 1  # one alarm per quiet stretch, not per poll
+
+
+def test_boardlink_is_off_for_the_pi_harness(tmp_path: Path) -> None:
+    """The T-048 note (2026-11-05): under harness=pi the misaka-link extension
+    delivers the feed itself — the bridge and it would ack one tape (hive keeps
+    one cursor per serial), so the runner must not start the bridge at all."""
+    rig = Rig(tmp_path, harness="pi")
+    assert rig.runner._make_boardlink(LifeState(7, BORN, 45, {})) is None
+    assert any(
+        type == "boardlink.off" and payload.get("why") == "pi (misaka-link)"
+        for type, payload in rig.logs
+    )
+
+
+def test_quota_switch_alarms_the_board_and_fails_over_to_opencode(tmp_path: Path) -> None:
+    """Z.ai's death on quota is two board alarms (section 7: `quota` and the
+    `harness_failover` transition) and the very next turn rides the gateway."""
+    rig = Rig(tmp_path, quota_action="switch", failover="opencode", restart_reset_after_s=9999.0)
+    state = rig.runner._birth()
+    rig.script(
+        FakeProcess(code=1, output='{"error": "HTTP 429: rate limit exceeded"}'),
+        FakeProcess(hang=True),
+    )
+    rig.mind.kill_at_status = 3
+    rig.runner._life(state)
+    assert [call[0] for call in rig.alarms.calls] == ["quota", "harness_failover"]
+    assert ("opencode:life", None) in rig.journal
+
+
+def test_quota_wait_alarms_the_board(tmp_path: Path) -> None:
+    rig = Rig(tmp_path, restart_reset_after_s=9999.0)
+    state = rig.runner._birth()
+    quota_output = '{"error": "HTTP 429: rate limit exceeded"}'
+    rig.script(
+        FakeProcess(code=1, output=quota_output),
+        FakeProcess(code=1, output=quota_output),
+        FakeProcess(hang=True),
+    )
+    rig.mind.kill_at_status = 4
+    rig.runner._life(state)
+    assert [call[0] for call in rig.alarms.calls] == ["quota", "quota"]  # the hive folds repeats
+
+
+def test_emergency_will_alarms_the_board(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    rig.script(FakeProcess(code=0, output="silent"))
+    rig.mind.kill()
+    rig.runner._death_path(state, "game", "x", "zcode")
+    assert [call[0] for call in rig.alarms.calls] == ["emergency_will"]
+    assert rig.alarms.calls[0][2:] == ("LastOrder01", state.serial)  # slot + serial ride the body
+
+
+def test_an_agent_will_raises_no_alarm(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    staged = rig.cfg.pending_wills / f"{state.serial:05d}.md"
+    staged.parent.mkdir(parents=True)
+    rig.mind.kill()
+
+    def spawn_will(argv, cwd, env):
+        staged.write_text(STAGED_BODY, encoding="utf-8")
+        return FakeProcess(code=0, output="will done")
+
+    rig.runner._spawn = spawn_will
+    rig.alarms.calls.clear()
+    rig.runner._death_path(state, "game", "x", "zcode")
+    assert rig.alarms.calls == []
+
+
+def test_hapi_will_session_ends_on_the_staged_will(tmp_path: Path) -> None:
+    """A console will session never ends its turn — the staged will file is the
+    real end; the timeout stays the backstop, and the opener rides the hub too."""
+    rig, hapi = _hapi_rig(tmp_path)
+    state = rig.runner._birth()
+    staged = rig.cfg.pending_wills / f"{state.serial:05d}.md"
+    staged.parent.mkdir(parents=True)
+    staged.write_text(STAGED_BODY, encoding="utf-8")
+    rig.script(FakeProcess(hang=True))
+    rig.runner.run_will_session(state, "pi")
+    assert any(type == "will.staged" for type, _ in rig.logs)
+    assert not any(type == "will.session_timeout" for type, _ in rig.logs)
+    assert hapi.delivered and hapi.delivered[0][0] == "hapi-sid-1"
+
+
+def test_hapi_will_session_timeout_still_covers(tmp_path: Path) -> None:
+    rig, _ = _hapi_rig(tmp_path, will_timeout_s=0.15)
+    state = rig.runner._birth()
+    rig.script(FakeProcess(hang=True))  # no staged will ever lands
+    rig.runner.run_will_session(state, "pi")
+    assert any(type == "will.session_timeout" for type, _ in rig.logs)
+
+
+def test_pi_agent_dir_slot_file_heals_over_a_substitution(tmp_path: Path) -> None:
+    """The slot file misaka-link reads (T-048 R1-4): rendered 0444 root-owned with
+    the configs, and a substituted copy never survives the next render (R2-3)."""
+    def drop(slot_dir: Path, slot: str) -> None:
+        workplace.drop_pi_agent_dir(
+            slot_dir,
+            model="GLM-5.3-Flash",
+            body_base="http://body-1:8700",
+            hive_url="http://hive:8000",
+            node_key="k",
+            slot=slot,
+        )
+
+    agent_dir = tmp_path / ".pi" / "agent"
+    drop(agent_dir, "LastOrder02")
+    slot = agent_dir / "slot"
+    assert slot.read_text(encoding="utf-8") == "LastOrder02"
+    if os.name == "posix":
+        assert stat.S_IMODE(slot.stat().st_mode) & 0o777 == 0o444
+    os.chmod(slot, 0o644)
+    slot.write_text("LastOrder99", encoding="utf-8")  # her substitution
+    drop(agent_dir, "LastOrder02")
+    assert slot.read_text(encoding="utf-8") == "LastOrder02"
+    # no slot name — no file (an older render; misaka-link logs it and moves on)
+    bare = tmp_path / ".pi-bare"
+    workplace.drop_pi_agent_dir(
+        bare, model="GLM-5.3-Flash", body_base="http://b", hive_url="http://h", node_key="k"
+    )
+    assert not (bare / "slot").exists()
+
+
+def test_config_rejects_the_base_console_token(monkeypatch) -> None:
+    monkeypatch.setenv("NODE_SLOT", "LastOrder01")
+    monkeypatch.setattr("runtime.node.config._from_file", lambda value, env_name: value or "")
+    monkeypatch.setenv("HAPI_TOKEN", "plain-base-token")
+    with pytest.raises(ValueError, match="namespaced"):
+        NodeConfig.from_env()
+    monkeypatch.setenv("HAPI_TOKEN", "hub-token:node-2")
+    cfg = NodeConfig.from_env()
+    assert cfg.hapi_token == "hub-token:node-2"
+    assert cfg.hapi_url == "http://hapi-hub:3006"
+    assert cfg.stuck_s == 600.0

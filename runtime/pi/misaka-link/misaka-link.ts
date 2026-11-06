@@ -80,6 +80,14 @@ export default function misakaLink(pi: unknown) {
     const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
     const config = readLinkConfig(agentDir, ctx.cwd);
     if (config === null) return;
+    // the slot name for the delivery_failing alarm: root-rendered file beside the
+    // configs (T-045, the T-048 R1-4 note); absent → the alarm stays slot-less
+    let slot = "";
+    try {
+      slot = fs.readFileSync(path.join(agentDir, "slot"), "utf8").trim();
+    } catch {
+      // an older render: the serial still identifies the node
+    }
     const sender = {
       send: (text: string, deliverAs: "steer" | "followUp") =>
         api.sendUserMessage(text, { deliverAs }),
@@ -91,9 +99,10 @@ export default function misakaLink(pi: unknown) {
       nameOf: config.nameOf,
       journal: (type, payload) => log(type, payload),
       serial: config.serial,
+      slot,
       desk: config.desk,
     });
-    log("misakalink.start", { agentDir, serial: config.serial, desk: config.desk });
+    log("misakalink.start", { agentDir, serial: config.serial, slot: slot || null, desk: config.desk });
     stopped = false;
     running = (async () => {
       while (!stopped) {

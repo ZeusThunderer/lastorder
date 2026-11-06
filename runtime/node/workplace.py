@@ -417,6 +417,7 @@ def drop_hermes_home(
 # process env, so no `env` in a bash tool can leak it into a session or an archive).
 PI_AGENT_DIR = Path("/home/sister/.pi/agent")
 PI_KEY_FILE = "zai-key"
+PI_SLOT_FILE = "slot"  # the slot name for misaka-link's delivery_failing alarm (T-048 R1-4)
 PI_ZAI_BASE_URL = HERMES_GLM_BASE_URL  # the coding endpoint of the GLM Coding Plan
 # misaka-link (T-048): the environment's delivery extension of the live `hapi pi`
 # session (ADR-042 — stdin belongs to HAPI, so the board feed and Misaka-net reach
@@ -522,6 +523,7 @@ def drop_pi_agent_dir(
     hive_url: str,
     node_key: str,
     zai_key: str = "",
+    slot: str = "",
     context_window: int = PI_CONTEXT_WINDOW,
     keep_recent_tokens: int = PI_KEEP_RECENT_TOKENS,
     uid: int | None = None,
@@ -532,7 +534,8 @@ def drop_pi_agent_dir(
     the same boundary as HERMES_HOME/config.yaml, R1-2), written link-safe (the dir is
     hers, R2-1), plus zai-key — her own 0400 copy of the plan token (empty `zai_key`
     writes none; the runner gates the pi harness on the key being present) — plus the
-    misaka-link extension under extensions/ (T-048). The
+    misaka-link extension under extensions/ (T-048) and the `slot` file it reads for
+    its delivery_failing alarm (T-048 R1-4). The
     adapter calls it before every life session: that heals a replaced file and moves
     hive back from the will proxy. The dir and its parent (~/.pi) stay the sister's
     0700 — Pi keeps its own state there. `hive_mcp_override` is the will-mode hook:
@@ -544,7 +547,7 @@ def drop_pi_agent_dir(
         _chmod(agent_dir.parent, 0o700)
     params = dict(
         model=model, body_base=body_base, hive_url=hive_url, node_key=node_key,
-        zai_key=zai_key,
+        zai_key=zai_key, slot=slot,
         context_window=context_window, keep_recent_tokens=keep_recent_tokens,
     )
     if hive_mcp_override is None:
@@ -553,6 +556,8 @@ def drop_pi_agent_dir(
         _write_file_no_links(
             agent_dir / PI_KEY_FILE, zai_key, mode=0o400, uid=uid, gid=gid
         )
+    if slot:
+        _write_file_no_links(agent_dir / PI_SLOT_FILE, slot, mode=READ_ONLY_FILE, uid=0, gid=0)
     configs = render_pi_configs(
         model, body_base, hive_url, node_key,
         context_window=context_window, keep_recent_tokens=keep_recent_tokens,

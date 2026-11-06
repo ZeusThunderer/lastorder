@@ -56,6 +56,8 @@ class NodeConfig:
     node_key: str  # the agent's X-Node-Key
     runner_key: str  # the runner's own key: hive /registry/*, mind /runner/*, the will proxy
     zai_key: str  # Z.ai Coding Plan token (ADR-033 exception; rendered by the entrypoint)
+    hapi_url: str  # the console hub (ADR-042): pi rides `hapi pi` when a token is set too
+    hapi_token: str  # the NAMESPACED hub token (<base>:node-N, T-044 R1-1/R1-3); "" = direct pi
     gateway_url: str  # llm-gateway for the opencode adapter
     gateway_key: str  # the node's virtual gateway key (opencode auth, entrypoint-rendered)
     zcode_model: str
@@ -70,6 +72,7 @@ class NodeConfig:
     restart_pause_s: float
     restart_pause_max_s: float
     restart_reset_after_s: float  # a session this stable resets the restart pause
+    stuck_s: float  # no session-file growth this long → the board `stuck` alarm
     kill_grace_s: float  # SIGTERM → SIGKILL window
     hive_retry_pause_s: float
     hive_retry_max_s: float
@@ -108,6 +111,12 @@ class NodeConfig:
         runner_key = _secret("RUNNER_KEY_FILE", "HIVE_RUNNER_KEY")
         node_key = _secret("HIVE_NODE_KEY_FILE", "HIVE_NODE_KEY")
         zai_key = _secret("ZAI_KEY_FILE", "ZAI_API_KEY")
+        hapi_token = _secret("HAPI_TOKEN_FILE", "HAPI_TOKEN")
+        if hapi_token and ":" not in hapi_token:
+            raise ValueError(
+                "HAPI_TOKEN must be the namespaced form (<token>:node-N) — the base "
+                "console token reads the whole network (T-044)"
+            )
         gateway_key = _secret("GATEWAY_KEY_FILE", "GATEWAY_NODE_KEY")
         posix_uid = env("SISTER_UID", default="") or ""
         uid = int(posix_uid) if posix_uid.isdigit() else None
@@ -126,6 +135,8 @@ class NodeConfig:
             node_key=node_key,
             runner_key=runner_key,
             zai_key=zai_key,
+            hapi_url=env("HAPI_URL", default="http://hapi-hub:3006") or "http://hapi-hub:3006",
+            hapi_token=hapi_token,
             gateway_url=env("GATEWAY_URL", default="http://llm-gateway:4000") or "",
             gateway_key=gateway_key,
             zcode_model=zcode_model,
@@ -147,6 +158,7 @@ class NodeConfig:
             restart_pause_s=_float("RESTART_PAUSE_S", 5.0),
             restart_pause_max_s=_float("RESTART_PAUSE_MAX_S", 60.0),
             restart_reset_after_s=_float("RESTART_RESET_AFTER_S", 300.0),
+            stuck_s=_float("STUCK_S", 600.0),
             kill_grace_s=_float("KILL_GRACE_S", 10.0),
             hive_retry_pause_s=_float("HIVE_RETRY_PAUSE_S", 2.0),
             hive_retry_max_s=_float("HIVE_RETRY_MAX_S", 60.0),
