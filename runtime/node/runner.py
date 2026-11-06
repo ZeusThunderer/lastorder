@@ -502,6 +502,12 @@ class NodeRunner:
                     pause = self._capped_pause(pause)
                     continue
                 resumed = state.session_id is not None
+                if getattr(adapter, "long_running", False) and resumed:
+                    # a resumed wrapper reports its own hub session in the log
+                    # too: learn it (best-effort, short wait), or the will's boot
+                    # report cannot exclude it later and posts into the dead
+                    # session (live: 409 session_inactive)
+                    self._await_boot(adapter, process, spawned_at, timeout_s=10.0)
                 if getattr(adapter, "long_running", False) and not resumed:
                     # the console wrapper: the opener can only enter through the
                     # hub, so wait for the wrapper's boot report first
@@ -604,14 +610,15 @@ class NodeRunner:
                 payload["cost_usd"] = round(usage["cost_usd"], 4)
         self._log("session.ended", payload)
 
-    def _await_boot(self, adapter, process, spawned_at: float):
+    def _await_boot(self, adapter, process, spawned_at: float, timeout_s: float | None = None):
         """Wait for the wrapper's boot report (both ids — the hub's session for
         the opener and pi's for the resume), None on timeout. Sessions this
         runner already booted are excluded, and a fresh report is remembered:
         the next spawn (a crash restart, the will) must not re-find the dead
         session's log lines inside the mtime grace."""
         known = tuple(self._known_session_ids)
-        deadline = self._monotonic() + adapter._boot_timeout_s
+        budget = adapter._boot_timeout_s if timeout_s is None else timeout_s
+        deadline = self._monotonic() + budget
         while process.poll() is None and self._monotonic() < deadline:
             boot = adapter.boot_report(spawned_at, known=known)
             if boot is not None:

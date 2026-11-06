@@ -1841,3 +1841,29 @@ def test_pi_will_mode_after_a_runner_restart_still_has_its_provider(tmp_path: Pa
     assert models["providers"]["zai"]["apiKey"].startswith("!cat ")
     settings = json.loads((agent_dir / "settings.json").read_text(encoding="utf-8"))
     assert settings["sessionDir"] == workplace.PI_WORKPLACE_SESSION_DIR
+
+
+def test_a_resumed_life_learns_its_wrapper_session_for_the_wills_exclusion(tmp_path: Path) -> None:
+    """A resumed wrapper reports its own hub session in the log; the runner must
+    learn it, or the will's boot report cannot exclude the dead life session and
+    posts the opener into it (live: 409 session_inactive). The resume itself
+    never waits on the report — a mute wrapper must not stall the life."""
+    rig, hapi = _hapi_rig(tmp_path)
+    state = rig.runner._birth()
+    state.session_id = "hapi-sid-1"
+    rig.runner._save_state(state)
+    seen: list[object] = []
+    real_report = hapi.boot_report
+
+    def report(spawned_at, known=()):
+        seen.append(tuple(known))
+        return real_report(spawned_at, known)
+
+    hapi.boot_report = report
+    rig.script(FakeProcess(hang=True))
+    rig.mind.kill_at_status = 3
+    rig.runner._life(state)
+    assert seen  # the resume path asked for the boot report (and remembered it)
+    assert "hapi-sid-1" in rig.runner._known_session_ids
+    assert "hub-sid-1" in rig.runner._known_session_ids
+    assert hapi.delivered == []  # a resume carries no opener
