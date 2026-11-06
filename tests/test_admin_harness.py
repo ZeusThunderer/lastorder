@@ -18,6 +18,7 @@ import pytest
 
 from runtime.hive.admin import AdminAlarm, AdminConfig
 from runtime.hive.lifecycle import HiveLog
+from runtime.knowledge.slice import format_serial
 
 from test_admin_wake import FakeClock, FakeProcess, Recorder, add_will, make_cfg
 
@@ -310,13 +311,16 @@ def test_long_session_is_one_hapi_process_a_wake_spawns_nothing(tmp_path: Path) 
         tmp_path, recorder=recorder, **long_cfg_over(tmp_path)
     )
     alarm._post_wake = lambda kind, detail: posted.append((kind, detail))
-    # the supervisor spawns the one long session and parks on it
+    # the supervisor spawns the one long session and parks on it; the wake
+    # detection runs INSIDE the supervise loop (a reason lands while it lives)
     scripted = {"n": 0}
 
     def sleep(seconds: float) -> None:
         scripted["n"] += 1
         if scripted["n"] == 1:
-            raise StopLoop  # park right after the first supervise tick
+            add_will(tmp_path / "knowledge", 12)  # a reason lands mid-session
+        if scripted["n"] >= 2:
+            raise StopLoop  # park after one supervise tick
 
     alarm._sleep = sleep
     with pytest.raises(StopLoop):
@@ -336,7 +340,9 @@ def test_long_session_is_one_hapi_process_a_wake_spawns_nothing(tmp_path: Path) 
     add_will(tmp_path / "knowledge", 9)
     assert alarm.run_once() != []
     assert len(recorder.argv) == 1
-    assert posted and posted[0][0] == "death"  # the WakeReason fields alone
+    # the reason that landed mid-session rode the supervise loop too
+    assert ("death", format_serial(12)) in posted
+    assert posted and posted[-1][0] == "death"  # the WakeReason fields alone
     assert "wake.delivered" in events_of(tmp_path)
 
 

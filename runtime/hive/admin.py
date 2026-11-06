@@ -730,6 +730,12 @@ class AdminAlarm:
             )
             while process.poll() is None:
                 self._sleep(self.cfg.poll_s)
+                try:
+                    # the wake detection rides the long session: reasons are
+                    # appended to the feed (never a spawned process)
+                    self.run_once()
+                except Exception as exc:  # service-grade, same as run()
+                    self._log.event("admin.error", {"error": f"{type(exc).__name__}: {exc}"})
             output = self._hapi_output(process)
             quota = quota_exhausted(output)
             self._log.event(
