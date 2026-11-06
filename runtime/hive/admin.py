@@ -8,7 +8,7 @@ HAPI, so the environment's own lines reach the agent only through the misaka-lin
 extension of T-048) instead of a short harness run per wake.
 
 - ADMIN_HARNESS=pi (the default): the alarm keeps one `hapi pi` process alive from
-  the workplace, resuming the stored hub session id after a container restart (the
+  the workplace, resuming the stored PI session id after a container restart (the
   hub volume outlives the sandbox); a resume target the hub no longer has is dropped
   for one fresh session. A wake reason does NOT spawn a process — it is delivered
   into the same session; a Z.ai quota death hands the desk to the failover's SHORT
@@ -711,11 +711,12 @@ class AdminAlarm:
                 return  # switched to the failover, or nothing ready: run() takes over
             self._adapters["pi"]._render()  # the desk's own agent-dir, healed every start
             resume = self._load_session_id()
+            spawned_at = time.time()
             process = self._safe_spawn(self._hapi_command())
             if process is None:
                 self._sleep(self.cfg.hapi_restart_pause_s)
                 continue
-            session_id = self._await_session_id(process)
+            session_id = self._await_session_id(process, spawned_at)
             if session_id:
                 if session_id != resume:
                     self._save_session_id(session_id)
@@ -726,7 +727,7 @@ class AdminAlarm:
                 self._log.event("hapi.resume_lost", {"session": resume})
             self._log.event(
                 "hapi.session",
-                {"pid": None, "session": session_id or "", "resumed": bool(resume and session_id)},
+                {"session": session_id or "", "resumed": bool(resume and session_id)},
             )
             while process.poll() is None:
                 self._sleep(self.cfg.poll_s)
@@ -736,7 +737,7 @@ class AdminAlarm:
                     self.run_once()
                 except Exception as exc:  # service-grade, same as run()
                     self._log.event("admin.error", {"error": f"{type(exc).__name__}: {exc}"})
-            output = self._hapi_output(process)
+            output = self._hapi_output(process, spawned_at)
             quota = quota_exhausted(output)
             self._log.event(
                 "hapi.exit",
@@ -756,16 +757,22 @@ class AdminAlarm:
                 continue
             self._sleep(self.cfg.hapi_restart_pause_s)
 
-    def _hapi_output(self, process) -> str:
-        """Everything the wrapper said: its stdout plus its own log file (the wrapper
+    def _hapi_output(self, process, spawned_at: float) -> str:
+        """Everything THIS wrapper said: its stdout plus its own log file (the wrapper
         writes the session report and provider errors to ~/.hapi/logs/*.log, not to
-        stdout — verified on the stand)."""
-        return process.output() + self._hapi_log_text()
+        stdout — verified on the stand). Only logs written after the spawn count, so
+        a restart cannot read the previous run's lines."""
+        return process.output() + self._hapi_log_text(spawned_at)
 
-    def _hapi_log_text(self) -> str:
+    def _hapi_log_text(self, spawned_at: float | None = None) -> str:
         logs = self.cfg.hapi_home / "logs"
         try:
-            newest = max(logs.glob("*.log"), key=lambda path: path.stat().st_mtime)
+            candidates = [
+                path
+                for path in logs.glob("*.log")
+                if spawned_at is None or path.stat().st_mtime >= spawned_at - 1.0
+            ]
+            newest = max(candidates, key=lambda path: path.stat().st_mtime)
         except (OSError, ValueError):
             return ""
         try:
@@ -773,17 +780,25 @@ class AdminAlarm:
         except OSError:
             return ""
 
-    def _await_session_id(self, process) -> str:
-        """The wrapper reports the hub session id (`[START] Reporting session <id>…`,
-        in its log file and on stdout): wait for that line while the process lives."""
+    def _await_session_id(self, process, spawned_at: float) -> str:
+        """The wrapper prints the PI session id once its agent process starts
+        (`[pi] Session ID persisted to metadata: <id>` — the id `--session-id`
+        resumes). Wait for that line while the process lives and take the LAST
+        match of the spawn's own log: one log file can carry an earlier id of the
+        same wrapper session."""
         deadline = time.monotonic() + self.cfg.hapi_boot_timeout_s
+
+        def latest() -> str:
+            text = self._hapi_log_text(spawned_at) or process.output()
+            matches = HAPI_SESSION_RE.findall(text)
+            return matches[-1] if matches else ""
+
         while process.poll() is None and time.monotonic() < deadline:
-            match = HAPI_SESSION_RE.search(self._hapi_output(process))
-            if match is not None:
-                return match.group(1)
+            found = latest()
+            if found:
+                return found
             self._sleep(0.5)
-        match = HAPI_SESSION_RE.search(self._hapi_output(process))
-        return match.group(1) if match is not None else ""
+        return latest()
 
     def run_once(self) -> list[WakeReason]:
         """One poll; returns the reasons a session ran for (empty: no session)."""

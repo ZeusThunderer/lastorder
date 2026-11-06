@@ -95,3 +95,11 @@ test("net envelope: one Misaka-net message per line", () => {
 test("capLines leaves short batches untouched", () => {
   assert.deepEqual(capLines(["a", "b"]), ["a", "b"]);
 });
+
+test("the desk's Misaka-net line reads 'from last-order', not a phantom sister", () => {
+  const nameOf = makeNameOf(parseNaming("Your name: Мисака 00007."));
+  assert.equal(
+    netEnvelope({ from_serial: 0, text: "The chronicle hour is due." }, nameOf),
+    "[net from last-order] The chronicle hour is due."
+  );
+});

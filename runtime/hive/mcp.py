@@ -74,8 +74,8 @@ RUNNER_KEY_HEADER = "x-runner-key"  # the node runner's own key (T-027): gates t
 WILL_SESSION = "will"
 ALL_ADDRESSEE = "all"  # broadcast of Misaka-net: every living node except the sender
 # The desk's Misaka-net address (T-043): Last Order speaks and listens as address 0 —
-# serials start at 1, so 0 is never a registry node. The sisters' envelope renders it
-# by name, never as a number (the naming fix rides the wake-channel answer).
+# serials start at 1, so 0 is never a registry node. The sisters' envelope renders
+# address 0 as `last-order` (naming.ts, review R1-1).
 LO_SERIAL = 0
 
 MATCHED_MAX = 20  # query hits cap: the tool is a glance, not a dump

@@ -465,3 +465,40 @@ def test_long_session_render_carries_the_delivery_extension(tmp_path: Path) -> N
 
 def events_of(tmp_path: Path) -> str:
     return (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+
+
+def test_the_session_id_is_the_last_match_of_this_spawns_log(tmp_path: Path) -> None:
+    """One wrapper log can carry an earlier id of the same session (reconnects):
+    the resume key must be the LAST 'Session ID persisted' line, and only from a
+    log written after the spawn (review R1-2)."""
+    import time as _time
+
+    recorder = Recorder()
+    recorder.factory = HapiProcess  # its stdout also carries one id
+    _, clock, recorder, alarm = build(
+        tmp_path, recorder=recorder, hapi_home=tmp_path / "hapi-home",
+        **long_cfg_over(tmp_path),
+    )
+    logs = tmp_path / "hapi-home" / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    spawned_at = _time.time()
+    (logs / "old.log").write_text(
+        "[pi] Session ID persisted to metadata: 11111111-1111-4111-8111-111111111111\n",
+        encoding="utf-8",
+    )
+    import os as _os
+
+    (logs / "new.log").write_text(
+        "[pi] Session ID persisted to metadata: 22222222-2222-4222-8222-222222222222\n"
+        "[pi] Session ID persisted to metadata: 33333333-3333-4333-8333-333333333333\n",
+        encoding="utf-8",
+    )
+    _os.utime(logs / "old.log", (spawned_at - 60, spawned_at - 60))
+    _os.utime(logs / "new.log", (spawned_at + 1, spawned_at + 1))
+    process = recorder.factory()
+    assert alarm._await_session_id(process, spawned_at) == "33333333-3333-4333-8333-333333333333"
+    # a spawn younger than every log reads none of them: only THIS process's own
+    # stdout stays (its single id), never a previous run's log line
+    assert alarm._await_session_id(process, spawned_at + 120) == (
+        "042c109a-6002-4141-8f2d-65ae3de5d55e"
+    )
