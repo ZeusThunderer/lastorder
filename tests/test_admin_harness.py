@@ -268,7 +268,7 @@ class HapiProcess(FakeProcess):
         return None
 
     def output(self) -> str:
-        text = f"[START] Reporting session {self._report} to runner\n"
+        text = f"[pi] Session ID persisted to metadata: {self._report}\n"
         if self._quota:
             text += '{"type":"error","message":"HTTP 429: rate limit, code 1302"}\n'
         return text
@@ -338,7 +338,7 @@ def test_long_session_is_one_hapi_process_a_wake_spawns_nothing(tmp_path: Path) 
     assert "wake.delivered" in events_of(tmp_path)
 
 
-def test_long_session_resumes_the_stored_hub_id(tmp_path: Path) -> None:
+def test_long_session_resumes_the_stored_pi_session_id(tmp_path: Path) -> None:
     recorder = Recorder()
     _, clock, recorder, alarm = build(
         tmp_path, recorder=recorder, **long_cfg_over(tmp_path)

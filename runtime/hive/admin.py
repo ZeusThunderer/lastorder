@@ -103,8 +103,11 @@ QUEUE_SNAPSHOT_MAX = 20
 
 # --- the one long hapi session (T-043, ADR-041) ----------------------------------------------
 HAPI_SESSION_FILE = "hapi_session_id"  # in ADMIN_DIR, the resume key across restarts
-# the hub-reported id of the session the wrapper starts ([START] Reporting session …)
-HAPI_SESSION_RE = re.compile(r"Reporting session ([0-9a-fA-F-]{8,64})")
+# The PI session id the wrapper prints once it starts the agent process
+# (`[pi] Session ID persisted to metadata: <id>`, verified on the stand): the
+# wrapper's `--session-id` flag resumes THAT id (a hub session id would die with
+# "No session found matching …" and loop the desk through fresh sessions).
+HAPI_SESSION_RE = re.compile(r"Session ID persisted to metadata: ([0-9a-fA-F-]{8,64})")
 
 
 class HiveLayout:
