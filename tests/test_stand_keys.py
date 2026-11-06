@@ -62,7 +62,7 @@ def test_key_lists_cover_the_stand():
             names.update(block.replace("\\\n", " ").split())
     keyish = {n for n in names if re.search(r"KEY|PASSWORD", n)}
     known = (set(stand_keys.LOCAL_TOKENS) | set(stand_keys.VIRTUAL_KEYS)
-             | set(stand_keys.PROVIDER_KEYS))
+             | set(stand_keys.PROVIDER_KEYS) | set(stand_keys.OPERATOR_KEYS))
     # HIVE_*_KEYS maps are assembled by node/up.sh from the per-node keys; ZCODE_API_KEY is the
     # env-only override, the .env name is ZAI_API_KEY.
     derived = {"HIVE_MCP_NODE_KEYS", "HIVE_RUNNER_KEYS", "ZCODE_API_KEY"}
@@ -254,3 +254,19 @@ def test_node_up_sh_passes_after_init(tmp_path):
     args = args_file.read_text(encoding="utf-8").splitlines()
     assert "up" in args and "-d" in args, args  # it got as far as `docker compose up -d`
     assert not any("=" in a for a in args), args  # no key=value ever rides the argv
+
+
+def test_init_never_generates_the_slot_login_passwords(tmp_path, capsys) -> None:
+    """R1-1: a generated password would log every slot into an external server
+    under a credential nobody knows — the operator enters these by hand."""
+    env = tmp_path / "env"
+    assert stand_keys.main(["init", "--env", str(env)]) == 0
+    values = stand_keys.read_env(env) if hasattr(stand_keys, "read_env") else {
+        line.split("=", 1)[0]: line.split("=", 1)[1]
+        for line in env.read_text().splitlines()
+        if "=" in line
+    }
+    for name in stand_keys.OPERATOR_KEYS:
+        assert values.get(name, "") == "", name
+    out = capsys.readouterr().out
+    assert "MC_LOGIN_PASSWORD_1" in out  # init names them, it never fills them
