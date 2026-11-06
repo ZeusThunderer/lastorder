@@ -67,3 +67,51 @@ $ git diff --stat main...HEAD — только зона задачи (см. от
 
 ### Вопросы
 - нет
+
+## Раунд 2 · 2026-11-06
+Коммиты: 5522451 (R1-1..R1-4)
+
+### Ответ на ревью
+- R1-1 · fixed 5522451 — `_wait_session` для long-running зондирует `output_of` (лог обёртки этого
+  запуска) в темпе опроса при живом процессе: метка квоты гасит процесс (`session.quota_live`) и
+  уходит в общий путь quota (тревога + switch/wait). При смене харнесса `state.session_id`
+  сбрасывается. Тест на hapi-адаптере: `test_hapi_live_quota_kills_the_session_switches_and_resets_the_resume_key`
+  (живой процесс + квота в логе → тревоги quota и harness_failover, следующий ход `opencode:life`
+  без resume, session_missing не поднимается).
+- R1-2 · fixed 5522451 — `set_will_mode(…, serial=…)` рендерит воле свой пустой каталог на смерть:
+  `settings.json.sessionDir = .pi-will-<serial>` (жизнь остаётся в `.pi-sessions`); страховка:
+  boot воли с pi-id жизни → `will.wrong_session`, процесс гасится и перезапускается один раз.
+  Тесты: `test_pi_will_mode_swaps_the_session_dir_to_a_per_death_one`,
+  `test_hapi_will_restarts_once_when_it_boots_the_life_session`. Стенд [проверено: 15:19 UTC,
+  RCON-смерть 158]: воля в свежей сессии (`.pi-will-00158/…01a1b171` ≠ жизнь `…01a1b16f`),
+  `will.staged` через 49 c → `will.written origin=agent`; первая попытка (156) дала аварийную волю
+  по вине самой сестры — `submit_will` дважды отклонён hive («expected 2-4 lines, got 1», затем
+  перебор квоты 220 токенов), сестра честно остановилась по навыку, аварийный путь сработал как
+  задуман (таймаут 900 c, тревога, retire).
+- R1-3 · fixed 5522451 — `will.session_timeout` пишется для всех харнессов (условие
+  `not long_running or staged is None`); проверка добавлена в
+  `test_will_session_timeout_falls_back_to_emergency`.
+- R1-4 · fixed 5522451 — фраза о границе доверия в докстринге `_wait_session`: лог обёртки — файл
+  сестры, подделка даёт лишь переход на шлюз, потолок шлюза ограничивает расход.
+- R1-5 · принято надзором, не трогал.
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 891 passed, 3 skipped, 2 warnings in 93.02s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+$ node --test runtime/pi/misaka-link/*.test.ts   # ℹ tests 38, pass 38 (раунд 1, без изменений)
+```
+
+### Отклонения от задачи
+- нет новых.
+
+### Вне задачи
+- Воле 156 сестра не смогла оформить тело (две ошибки формата — навык write-will, не код);
+  аварийная воля закрыла смерть. Возможно, навык стоит смягчить (подсказка формата в ошибке
+  hive уже есть) — зона надзора/персонажей.
+- В сессии воли 156 misaka-link 17 раз не дотянул ленту доски (TimeoutError) — hive отвечал
+  медленно в момент смерти; доставка восстановилась, тревога не поднята (5-порог не достигнут).
+
+### Вопросы
+- нет
