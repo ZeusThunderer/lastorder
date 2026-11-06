@@ -329,6 +329,14 @@ class PiAdapter:
         # No render here: set_will_mode has just pointed the hive MCP at the proxy.
         return self._command(prompt, None)
 
+    def prepare_will(self) -> None:
+        """Render the full config set BEFORE set_will_mode layers the will proxy
+        on top. The stored-params shortcut alone breaks after a runner restart
+        (the fresh process has no last life render, so nothing would be written
+        and the will session would start without a provider — verified live:
+        "No API key found for the selected model")."""
+        self._render()
+
     def session_id(self, output: str) -> str | None:
         """The id of the last `session` header on stdout (the first JSON-mode record).
         Direct mode only: hapi owns the wrapper's stdout, so in hapi mode the ids

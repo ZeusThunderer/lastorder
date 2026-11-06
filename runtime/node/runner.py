@@ -929,6 +929,9 @@ class NodeRunner:
             f"{self.cfg.hive_url.rstrip('/')}/node/mcp", self.cfg.node_key, self.cfg.runner_key
         )
         url = proxy.start()
+        prepare = getattr(adapter, "prepare_will", None)
+        if prepare is not None:
+            prepare()  # pi: the full config set, so set_will_mode has params to override
         workplace.set_will_mode(root, adapter_name, url)
         self._log("will.session", {"serial": state.serial, "harness": adapter_name, "proxy": url})
         prompt = self._session_prompt(WILL_PREFIX)

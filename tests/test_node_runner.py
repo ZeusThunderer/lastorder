@@ -1812,3 +1812,32 @@ def test_config_rejects_the_base_console_token(monkeypatch) -> None:
     assert cfg.hapi_token == "hub-token:node-2"
     assert cfg.hapi_url == "http://hapi-hub:3006"
     assert cfg.stuck_s == 600.0
+
+
+def test_pi_will_mode_after_a_runner_restart_still_has_its_provider(tmp_path: Path, monkeypatch) -> None:
+    """A fresh runner process has no last life render in `_PI_RENDER`, so the
+    stored-params shortcut of set_will_mode would write nothing and the will
+    session would start without a provider (live: "No API key found"). The
+    adapter's prepare_will renders first; set_will_mode then layers the proxy."""
+    agent_dir = tmp_path / ".pi" / "agent"
+    monkeypatch.setattr(workplace, "PI_AGENT_DIR", agent_dir)
+    monkeypatch.setattr(workplace, "_PI_RENDER", {})  # a restarted runner
+    adapter = PiAdapter(
+        "GLM-5.3-Flash",
+        body_base="http://body-1:8700",
+        hive_url="http://hive:8000",
+        node_key="sk-node-one",
+        zai_key="zai-token",
+        context_window=96_000,
+        keep_recent_tokens=20_000,
+        agent_dir=str(agent_dir),
+    )
+    adapter.prepare_will()
+    workplace.set_will_mode(tmp_path, "pi", "http://127.0.0.1:8702")
+    assert (agent_dir / "zai-key").read_text(encoding="utf-8") == "zai-token"
+    mcp = json.loads((agent_dir / "mcp.json").read_text(encoding="utf-8"))
+    assert mcp["mcpServers"]["hive"]["url"] == "http://127.0.0.1:8702/mcp"
+    models = json.loads((agent_dir / "models.json").read_text(encoding="utf-8"))
+    assert models["providers"]["zai"]["apiKey"].startswith("!cat ")
+    settings = json.loads((agent_dir / "settings.json").read_text(encoding="utf-8"))
+    assert settings["sessionDir"] == workplace.PI_WORKPLACE_SESSION_DIR
