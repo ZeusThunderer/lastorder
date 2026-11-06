@@ -352,8 +352,11 @@ class PiAdapter:
     # --- the Pi session files (the spend and progress source) ---------------------------
 
     def _session_files(self, sessions_dir: Path) -> list[Path]:
+        """Both layouts pi uses: a custom sessionDir keeps files at its root
+        (verified live), the default agent-dir store nests them under a cwd slug."""
         try:
-            return sorted(sessions_dir.glob("*/*.jsonl"))
+            files = {*sessions_dir.glob("*.jsonl"), *sessions_dir.glob("*/*.jsonl")}
+            return sorted(files)
         except OSError:
             return []
 

@@ -1541,7 +1541,8 @@ def test_hapi_boot_report_and_the_spend_off_the_session_file(tmp_path: Path) -> 
     known = ("01a1b025-2526-72b9-8b01-7af74315ea24", "b524f3ac-5524-4467-93ac-592383183ba5")
     assert adapter.boot_report(time.time(), known=known) is None
 
-    sessions = tmp_path / "wp" / "agent" / "00154" / ".pi-sessions" / "--workplaces--"
+    # a custom sessionDir keeps files at its root (verified live), no cwd slug
+    sessions = tmp_path / "wp" / "agent" / "00154" / ".pi-sessions"
     sessions.mkdir(parents=True)
     fresh = sessions / "2026-11-06T09-16-26-793Z_01a1b025-2526-72b9-8b01-7af74315ea24.jsonl"
     fresh.write_text(
@@ -1553,7 +1554,7 @@ def test_hapi_boot_report_and_the_spend_off_the_session_file(tmp_path: Path) -> 
         '{"type":"message_end","message":{"role":"user"}}\n',
         encoding="utf-8",
     )
-    sessions_dir = sessions.parent
+    sessions_dir = sessions
     assert adapter.session_file("01a1b025-2526-72b9-8b01-7af74315ea24", sessions_dir) == fresh
     assert adapter.session_progress("01a1b025-2526-72b9-8b01-7af74315ea24", sessions_dir) == fresh.stat().st_size
     assert adapter.session_progress("nope", sessions_dir) is None
