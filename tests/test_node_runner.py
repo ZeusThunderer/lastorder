@@ -1490,22 +1490,38 @@ def test_hapi_pi_adapter_argv_env_and_the_base_token_refusal(tmp_path: Path) -> 
         )
 
 
-def test_pi_session_files_carry_the_id_and_the_spend(tmp_path: Path) -> None:
-    """Hapi mode's source of truth is Pi's own session file: the first record is
-    the boot report (the id `--session-id` resumes), the assistant records carry
-    the usage — the report's quota and money numbers (verified on the t048 stand)."""
+def test_hapi_boot_report_and_the_spend_off_the_session_file(tmp_path: Path) -> None:
+    """The boot report is the wrapper's log line (an rpc Pi writes NO session file
+    until its first turn — verified live: an idle session leaves the dir empty);
+    the spend is summed off the session file that exists once turns have landed
+    (verified on the t048 stand: assistant records carry `usage`)."""
     adapter = _hapi_adapter(tmp_path)
     adapter.life_turn("p", None)
+    logs = tmp_path / ".hapi" / "logs"
+    logs.mkdir(parents=True)
+    stale_log = logs / "2026-11-05-22-53-54-pid-54.log"
+    stale_log.write_text(
+        "[22:53:56.428] [pi] Session ID persisted to metadata: 00a1adeb-3512-0000\n",
+        encoding="utf-8",
+    )
+    os.utime(stale_log, (1_000_000.0, 1_000_000.0))  # a previous spawn's log
+    boot_log = logs / "2026-11-06-09-16-24-pid-1872.log"
+    boot_log.write_text(
+        "[09:16:26.100] [pi] Session ID persisted to metadata: 00dead000-0000-0000\n"
+        "[09:16:27.183] [pi] Session ID persisted to metadata: 01a1b025-2526-72b9-8b01-7af74315ea24\n",
+        encoding="utf-8",
+    )
+    spawned = time.time()
+    # this spawn's log alone, and its LAST line (the admin's rule, T-043)
+    assert adapter.new_session_ids(spawned) == ["01a1b025-2526-72b9-8b01-7af74315ea24"]
+    assert adapter.new_session_ids(0.0) == ["00a1adeb-3512-0000", "01a1b025-2526-72b9-8b01-7af74315ea24"]
+    assert adapter.new_session_ids(time.time() + 10_000.0) == []  # nothing of a future spawn
+
     sessions = tmp_path / ".pi" / "agent" / "sessions" / "--workplaces--"
     sessions.mkdir(parents=True)
-    old = sessions / "2026-11-05T10-00-00-000Z_00old.jsonl"
-    old.write_text(
-        '{"type":"session","version":3,"id":"00old","timestamp":"t","cwd":"/w"}\n', encoding="utf-8"
-    )
-    os.utime(old, (1_000_000.0, 1_000_000.0))  # long before any spawn
-    fresh = sessions / "2026-11-06T09-16-26-793Z_01a1b025-2526.jsonl"
+    fresh = sessions / "2026-11-06T09-16-26-793Z_01a1b025-2526-72b9-8b01-7af74315ea24.jsonl"
     fresh.write_text(
-        '{"type":"session","version":3,"id":"01a1b025-2526","timestamp":"t","cwd":"/w"}\n'
+        '{"type":"session","version":3,"id":"01a1b025-2526-72b9-8b01-7af74315ea24","timestamp":"t","cwd":"/w"}\n'
         '{"type":"message_end","message":{"role":"assistant","usage":'
         '{"totalTokens":120,"cost":{"total":0.02}}}}\n'
         '{"type":"message_end","message":{"role":"assistant","usage":'
@@ -1513,17 +1529,20 @@ def test_pi_session_files_carry_the_id_and_the_spend(tmp_path: Path) -> None:
         '{"type":"message_end","message":{"role":"user"}}\n',
         encoding="utf-8",
     )
-    spawned = time.time()
-    assert adapter.new_session_ids(spawned) == ["01a1b025-2526"]  # the old file predates the spawn
-    assert adapter.new_session_ids(0.0) == ["00old", "01a1b025-2526"]  # name order
-    assert adapter.session_file("01a1b025-2526") == fresh
-    assert adapter.session_progress("01a1b025-2526") == fresh.stat().st_size
+    assert adapter.session_file("01a1b025-2526-72b9-8b01-7af74315ea24") == fresh
+    assert adapter.session_progress("01a1b025-2526-72b9-8b01-7af74315ea24") == fresh.stat().st_size
     assert adapter.session_progress("nope") is None
-    assert adapter.session_spend("01a1b025-2526") == {
+    assert adapter.session_spend("01a1b025-2526-72b9-8b01-7af74315ea24") == {
         "tokens": 200,
         "cost_usd": pytest.approx(0.03),
     }
     assert adapter.session_spend("nope") is None
+    # quota marks reach the runner through the same log (output_of)
+    boot_log.write_text(
+        boot_log.read_text(encoding="utf-8") + "API key auth failed: 429 rate limit\n",
+        encoding="utf-8",
+    )
+    assert "429" in adapter.output_of("child stdout", spawned)
 
 
 def test_hapi_pi_delivers_the_opener_over_the_hub(tmp_path: Path) -> None:

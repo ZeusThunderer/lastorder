@@ -191,7 +191,12 @@ class ZCodeAdapter:
 PI_SESSION_DIR = ".pi-sessions"
 HAPI_HUB_URL = "http://hapi-hub:3006"
 HAPI_HOME = Path("/home/sister/.hapi")
-HAPI_BOOT_TIMEOUT_S = 90.0  # waiting for the wrapper to create the session file
+HAPI_BOOT_TIMEOUT_S = 90.0  # waiting for the wrapper to report its session
+# the wrapper's boot report (the same line T-043's admin resumes on): an rpc Pi
+# writes NO session file until its first turn lands (verified live on the stand:
+# an idle session leaves the sessions dir empty), so the log is the only early
+# signal that the hub session exists and may take the opener
+HAPI_SESSION_RE = re.compile(r"Session ID persisted to metadata: ([0-9a-fA-F-]{8,64})")
 
 
 class PiAdapter:
@@ -345,24 +350,31 @@ class PiAdapter:
             return []
 
     def new_session_ids(self, spawned_at: float) -> list[str]:
-        """The ids of session files CREATED after `spawned_at` (a wall-clock
-        epoch): the wrapper's own boot report. The id rides the first record of
-        each file; only files whose mtime moved are considered, so a resumed
-        session (an appended old file) is not mistaken for a fresh one."""
+        """The ids the wrapper reported for THIS spawn: the `Session ID persisted
+        to metadata` lines of the hapi logs written after `spawned_at` (a
+        wall-clock epoch). One log file per wrapper process, so an old spawn's
+        ids cannot leak in; a file carrying several lines keeps the last (the
+        admin's rule, T-043)."""
         found: list[str] = []
-        for path in self._session_files():
+        for path in self._hapi_log_paths(spawned_at):
             try:
-                if path.stat().st_mtime < spawned_at - 1.0:
-                    continue
-                first = path.read_text(encoding="utf-8", errors="replace").splitlines()[0]
-                doc = json.loads(first)
-            except (OSError, IndexError, ValueError):
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
                 continue
-            if isinstance(doc, dict) and doc.get("type") == "session":
-                value = doc.get("id")
-                if isinstance(value, str) and value:
-                    found.append(value)
+            matches = HAPI_SESSION_RE.findall(text)
+            if matches:
+                found.append(matches[-1])
         return found
+
+    def _hapi_log_paths(self, spawned_at: float) -> list[Path]:
+        try:
+            return [
+                path
+                for path in (self._hapi_home / "logs").glob("*.log")
+                if path.stat().st_mtime >= spawned_at - 1.0
+            ]
+        except OSError:
+            return []
 
     def session_file(self, session_id: str) -> Path | None:
         """The Pi session file of one id (`<ts>_<id>.jsonl` under a cwd slug)."""
@@ -424,12 +436,9 @@ class PiAdapter:
 
     def _hapi_log_text(self, spawned_at: float) -> str:
         try:
-            candidates = [
-                path
-                for path in (self._hapi_home / "logs").glob("*.log")
-                if path.stat().st_mtime >= spawned_at - 1.0
-            ]
-            newest = max(candidates, key=lambda path: path.stat().st_mtime)
+            newest = max(
+                self._hapi_log_paths(spawned_at), key=lambda path: path.stat().st_mtime
+            )
         except (OSError, ValueError):
             return ""
         try:

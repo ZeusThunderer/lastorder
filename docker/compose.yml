@@ -114,6 +114,9 @@ x-node: &node
     # (verified on the stand: a sister could read the runner key), so files-under-
     # /run/secrets cannot hold the boundary. Per-slot values come below.
     ZAI_KEY_FILE: /run/node/secrets/zai_api_key
+    # the console hub token file (T-045): the entrypoint materializes the namespaced
+    # <base>:node-N value and scrubs the plain env; the file is the runner's only copy
+    HAPI_TOKEN_FILE: /run/node/secrets/hapi_key
     # fail-closed (review R2-6): without both keys the runner logs runner.no_keys and
     # waits instead of birthing an open node; NODE_DEV_OPEN=1 is the dev exception
     NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
