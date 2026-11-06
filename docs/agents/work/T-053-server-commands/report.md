@@ -61,3 +61,32 @@ $ docker compose -f docker/compose.yml config | grep MC_LOGIN_PASSWORD   # то�
 
 ### Вопросы
 - нет
+
+## Раунд 2 · 2026-11-06
+Коммиты: b95e7de (R1-1..R1-4)
+
+### Ответ на ревью
+- R1-1 · fixed b95e7de — `MC_LOGIN_PASSWORD_1..3` вынесены из `LOCAL_TOKENS` в новый список
+  `OPERATOR_KEYS` (как провайдерские: `init` не пишет значение, только называет отсутствующие —
+  `report_operators`). Тест `test_init_never_generates_the_slot_login_passwords`: после `init`
+  все три пусты и упомянуты в выводе.
+- R1-2 · fixed b95e7de — `"/"` и `"/   "` → отказ «empty command name» (тест добавлен).
+- R1-3 · fixed b95e7de — `DEFAULT_DENY` больше не передаётся в `parse_deny` значением (дефолт
+  неотменяем в самой проверке, стенд-списки только добавляют).
+- R1-4 · fixed b95e7de — текст ошибки волевого логина проходит через `self._login.mask(...)`.
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 916 passed, 3 skipped, 2 warnings in 120.08s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+```
+
+### Отклонения от задачи
+- нет новых.
+
+### Вне задачи
+- нет новых (мусор `.mcp-body-test-*.jsonl` — из `main`, вне этой задачи по ревью).
+
+### Вопросы
+- нет
