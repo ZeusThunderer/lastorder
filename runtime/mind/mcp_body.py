@@ -314,6 +314,8 @@ def check_server_command(command: Any, deny: tuple[str, ...] = DEFAULT_DENY) -> 
         _err("server_command: empty command")
     if not cleaned.startswith("/"):
         _err("server_command: a server command starts with /")
+    if not cleaned[1:].strip():
+        _err("server_command: empty command name")
     if CONTROL_RE.search(cleaned):
         _err("server_command: control characters and line breaks are not allowed")
     if ";" in cleaned:
@@ -735,8 +737,8 @@ def main() -> None:
     # slot's — always on top of the login/password default. The password (one
     # slot's value, injected by compose into this mind alone) never touches a log:
     # SessionLogin sends /login itself and masks any echo.
+    # DEFAULT_DENY is not passed here: it is unremovable inside the check itself
     deny = parse_deny(
-        DEFAULT_DENY,
         env("MC_COMMANDS_DENY", default="") or "",
         env("MC_COMMANDS_DENY_SLOT", default="") or "",
     )

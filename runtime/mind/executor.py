@@ -481,8 +481,13 @@ class Executor:
                         bool(getattr(state, "in_game", False)),
                         [str(line) for line in self._body.recent_chat(10)],
                     )
-                except Exception as exc:  # a login problem must never kill C1
-                    self._log.record("error", scope="login", error=f"{type(exc).__name__}: {exc}")
+                except Exception as exc:  # a login problem must never kill C1 —
+                    # and its text must never carry the password into the log (R1-4)
+                    self._log.record(
+                        "error",
+                        scope="login",
+                        error=self._login.mask(f"{type(exc).__name__}: {exc}"),
+                    )
 
             death = self._detector.feed(state, list(self._body.recent_chat(10)))
             if death is not None:

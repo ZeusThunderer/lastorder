@@ -841,3 +841,10 @@ def test_the_executor_logs_in_on_world_entry_with_a_fake_body() -> None:
     stack.executor._login._was_in_game = False  # the transition the tick will see
     stack.executor._tick()
     assert ("chat", {"text": "/login hunter2"}) in stack.body.acts
+
+
+def test_check_server_command_rejects_a_bare_slash() -> None:
+    with pytest.raises(ToolError, match="empty command name"):
+        check_server_command("/")
+    with pytest.raises(ToolError, match="empty command name"):
+        check_server_command("  /   ")

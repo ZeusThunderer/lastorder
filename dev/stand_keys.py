@@ -52,10 +52,6 @@ LOCAL_TOKENS = [
     "HIVE_NODE_KEY_1", "HIVE_NODE_KEY_2", "HIVE_NODE_KEY_3",
     "HIVE_RUNNER_KEY_1", "HIVE_RUNNER_KEY_2", "HIVE_RUNNER_KEY_3",
     "RCON_PASSWORD",
-    # MC_LOGIN_PASSWORD_N (T-053): a slot's server password, OPERATOR-entered (a
-    # stand on an external server), lifted by up.sh into that mind alone — never
-    # generated here; init only reserves the names so .env carries them.
-    "MC_LOGIN_PASSWORD_1", "MC_LOGIN_PASSWORD_2", "MC_LOGIN_PASSWORD_3",
 ]
 
 # One virtual key per gateway consumer (T-026); the alias is the label dev/gateway_keys.py list
@@ -70,6 +66,12 @@ VIRTUAL_KEYS = {
 # Read by the gateway / the zcode harness; bought by the operator, never generated here.
 # ZAI_API_KEY is the .env name (docker/node/up.sh lifts it as ZCODE_API_KEY).
 PROVIDER_KEYS = ["OPENROUTER_API_KEY", "ZAI_API_KEY"]
+
+# Slot server-login passwords (T-053): OPERATOR-entered values, never generated —
+# a generated password would log every slot into an external server under a
+# credential nobody knows (review R1-1). init only names the missing ones, like
+# provider keys; up.sh lifts the value into that slot's mind alone.
+OPERATOR_KEYS = ["MC_LOGIN_PASSWORD_1", "MC_LOGIN_PASSWORD_2", "MC_LOGIN_PASSWORD_3"]
 
 KEY_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
@@ -149,6 +151,13 @@ def report_providers(path: Path) -> list[str]:
     return missing
 
 
+def report_operators(path: Path) -> list[str]:
+    missing = missing_keys(path, OPERATOR_KEYS)
+    for name in missing:
+        print(f"slot login password not set (enter it by hand when the server needs one): {name}")
+    return missing
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     env = Path(args.env)
     values = {name: generate(name) for name in LOCAL_TOKENS}
@@ -156,6 +165,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     report("added", filled)
     report("kept", kept)
     report_providers(env)
+    report_operators(env)
     not_issued = missing_keys(env, VIRTUAL_KEYS)
     if not_issued:
         print("virtual keys not set: " + ", ".join(not_issued))
