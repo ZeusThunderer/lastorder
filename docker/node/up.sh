@@ -55,6 +55,17 @@ parts() { # parts <prefix> -> "LastOrder01=k1;LastOrder02=k2;..." non-empty entr
 export HIVE_MCP_NODE_KEYS="${HIVE_MCP_NODE_KEYS:-$(parts HIVE_NODE_KEY)}"
 export HIVE_RUNNER_KEYS="${HIVE_RUNNER_KEYS:-$(parts HIVE_RUNNER_KEY)}"
 
+# The console tokens of the slots (T-044 R1-1/R1-3, T-045): the hub's namespace form
+# `<base>:node-N` — the base token alone reads every session of the network and must
+# never enter a sandbox. Derived from the one HAPI_CLI_KEY the hub itself uses; the
+# operator's own page login is `<base>:node-N` per slot (one page = one namespace).
+if [ -n "${HAPI_CLI_KEY:-}" ]; then
+  for n in 1 2 3; do
+    eval "current=\"\${HAPI_TOKEN_${n}:-}\""  # indirect default: plain ${x_${n}:-} is not bash
+    [ -n "$current" ] || export "HAPI_TOKEN_${n}=${HAPI_CLI_KEY}:node-${n}"
+  done
+fi
+
 # Fail-closed (review R2-6): a stand raised without keys would come up open (empty
 # HIVE_RUNNER_KEYS ungates the registry/memory/comms routes) and nobody would notice.
 # Refuse instead; NODE_DEV_OPEN=1 is the explicit dev exception (exported for compose,

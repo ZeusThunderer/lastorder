@@ -50,11 +50,14 @@ from runtime.lastorder.will import (
 from runtime.node import workplace
 from runtime.node.boardlink import BoardLink, MindEventPoster
 from runtime.node.adapters import Command, quota_exhausted
-from runtime.node.remotes import HiveApi, MindApi
+from runtime.node.remotes import BaseApi, HiveApi, MindApi
 from runtime.node.willproxy import WillProxy
 
 LIFE_PREFIX = "Life session."
 WILL_PREFIX = "Will session (you have just died)."
+# _wait_session's quota sentinel: the long session died on quota while the body
+# lives — not a Death, the life loop owns the switch/wait after it
+QUOTA_DURING_SESSION = "quota-during-session"
 
 
 def _tail(text: str, limit: int) -> str:
@@ -132,6 +135,18 @@ class SessionProcess:
         return "".join(self._chunks)
 
 
+class BoardAlarms(BaseApi):
+    """The runner's voice on the board (TASKBOARD.md section 7): environment
+    alarms with the slot's runner key. One attempt per call — repeats fold into
+    `count` on the hive, and an alarm must never stall the loop that raises it."""
+
+    def alarm(self, alarm_type: str, text: str, *, slot: str, serial: int | None) -> None:
+        payload: dict[str, Any] = {"type": alarm_type, "text": text, "slot": slot}
+        if serial is not None:
+            payload["serial"] = serial
+        self._request("post", "/board/alarms", payload)
+
+
 class NodeRunner:
     """All wiring, no policy: every state is hive's, the mind's or the workplace's."""
 
@@ -153,6 +168,8 @@ class NodeRunner:
         will_proxy_factory: Callable[[str, str, str], Any] | None = None,
         boardlink_factory: Callable[["LifeState"], Any] | None = None,
         sweep: Callable[[], None] | None = None,
+        alarms: BoardAlarms | None = None,
+        monotonic: Callable[[], float] | None = None,
     ):
         self.cfg = cfg
         self._mind = mind
@@ -173,6 +190,29 @@ class NodeRunner:
         )
         self._boardlink_factory = boardlink_factory or self._make_boardlink
         self._sweep = sweep or self._kill_sister_uid_processes
+        self._alarms = alarms
+        self._monotonic = monotonic or time.monotonic
+        # the console session ids this runner already used (life and will boots):
+        # a killed session's log line must not be mistaken for the next boot's
+        # report — the ids ride the exclusion set of boot_report (the will's 409)
+        self._known_session_ids: list[str] = []
+
+    def _alarm(self, alarm_type: str, text: str, state: "LifeState | None" = None) -> None:
+        """Raise a board alarm best-effort: a board that is down must not take
+        the runner down with it — the log keeps the attempt either way."""
+        if self._alarms is None:
+            return
+        try:
+            self._alarms.alarm(
+                alarm_type,
+                text,
+                slot=self.cfg.slot,
+                serial=state.serial if state is not None else None,
+            )
+        except Exception as exc:
+            self._log("alarm.post_failed", {"type": alarm_type, "error": f"{type(exc).__name__}: {exc}"})
+            return
+        self._log("alarm.posted", {"type": alarm_type})
 
     # --- plumbing -----------------------------------------------------------------------
 
@@ -417,7 +457,13 @@ class NodeRunner:
     def _make_boardlink(self, state: LifeState):
         """The temporary board bridge of this life (T-050). None — and the bridge
         stays off — when the slot has no node key: without it the feed answers 401
-        for as long as the operator does not fix the keys."""
+        for as long as the operator does not fix the keys. Also off for the pi
+        harness: the misaka-link extension of the session (T-048) delivers the
+        feed itself, and the two would ack one tape — hive keeps one cursor per
+        serial (the T-048 review note, 2026-11-05)."""
+        if self.cfg.harness == "pi":
+            self._log("boardlink.off", {"serial": state.serial, "why": "pi (misaka-link)"})
+            return None
         if not self.cfg.node_key:
             self._log("boardlink.off", {"serial": state.serial, "why": "no node key"})
             return None
@@ -441,6 +487,7 @@ class NodeRunner:
         if boardlink is not None:
             boardlink.start()  # the bridge lives exactly as long as the life session
         try:
+            quick_exits = 0  # consecutive instant deaths of a RESUMED long session
             while True:
                 death = self._death_status()
                 if death is not None:
@@ -451,32 +498,84 @@ class NodeRunner:
                     continue
                 command = adapter.life_turn(prompt, state.session_id)
                 started = time.monotonic()
+                spawned_at = time.time()
                 process = self._safe_spawn(command, root)
                 if process is None:
                     self._sleep(pause)
                     pause = self._capped_pause(pause)
                     continue
-                death = self._wait_session(state, process)
-                if death is not None:
+                resumed = state.session_id is not None
+                if getattr(adapter, "long_running", False) and resumed:
+                    # a resumed wrapper reports its own hub session in the log
+                    # too: learn it (best-effort, short wait), or the will's boot
+                    # report cannot exclude it later and posts into the dead
+                    # session (live: 409 session_inactive)
+                    self._await_boot(adapter, process, spawned_at, timeout_s=10.0)
+                if getattr(adapter, "long_running", False) and not resumed:
+                    # the console wrapper: the opener can only enter through the
+                    # hub, so wait for the wrapper's boot report first
+                    boot = self._await_boot(adapter, process, spawned_at)
+                    if boot is None and process.poll() is None:
+                        # alive but mute past the boot deadline: no session, no
+                        # opener — kill and let the restart loop try again
+                        self._log("hapi.boot_timeout", {"slot": self.cfg.slot})
+                        process.terminate()
+                        process.kill()
+                        self._sleep(pause)
+                        pause = self._capped_pause(pause)
+                        continue
+                    if boot is not None:
+                        state.session_id = boot.pi_session_id
+                        self._save_state(state)
+                        if not self._deliver_opener(adapter, boot.hub_session_id, prompt, state):
+                            process.terminate()
+                            process.kill()
+                            self._sleep(pause)
+                            pause = self._capped_pause(pause)
+                            continue
+                    # a boot of None with the process already dead is a plain
+                    # crash: the end-of-session path below owns it (session_missing)
+                death = self._wait_session(state, process, adapter, spawned_at)
+                if isinstance(death, Death):
                     return death, adapter_name
-                output = process.output()
+                quota_live = death == QUOTA_DURING_SESSION
+                output_enrich = getattr(adapter, "output_of", None)
+                output = (
+                    output_enrich(process.output(), spawned_at)
+                    if output_enrich is not None
+                    else process.output()
+                )
                 session_id = adapter.session_id(output)
                 if session_id:
                     state.session_id = session_id
                     self._save_state(state)
                 ran_for = time.monotonic() - started
-                self._log(
-                    "session.ended",
-                    {
-                        "harness": adapter_name,
-                        "code": process.returncode(),
-                        "ran_s": round(ran_for, 1),
-                        "tail": _tail(output, 300),
-                    },
-                )
+                self._log_session_end(adapter, adapter_name, state, process, output, ran_for)
+                if getattr(adapter, "long_running", False) and not quota_live:
+                    # rpc mode never ends its turn: an exit with the body alive is
+                    # the session vanishing, not a completed turn (section 7)
+                    self._alarm("session_missing", "the hapi pi session died while the body lives", state)
+                    if resumed and ran_for < self.cfg.restart_pause_s:
+                        quick_exits += 1
+                        if quick_exits >= 2:
+                            # the hub no longer holds that session (verified: T-043,
+                            # resume_lost) — a resume key that cannot resume would
+                            # crash-loop until the TTL kills the body
+                            self._log("hapi.resume_lost", {"session": state.session_id})
+                            state.session_id = None
+                            self._save_state(state)
+                            quick_exits = 0
+                    else:
+                        quick_exits = 0
                 if quota_exhausted(output):
-                    switched = self._quota_switch(adapter_name)
+                    self._alarm("quota", "the provider says the quota ran out", state)
+                    switched = self._quota_switch(adapter_name, state)
                     if switched is not None:
+                        # the resume key belongs to the dead harness (a pi id would
+                        # ride into opencode's --continue world as garbage)
+                        if state.session_id is not None:
+                            state.session_id = None
+                            self._save_state(state)
                         adapter_name, adapter = switched
                         pause = self.cfg.restart_pause_s
                         continue
@@ -494,12 +593,86 @@ class NodeRunner:
             if boardlink is not None:
                 boardlink.stop()  # before the death path: no bridge in the will session
 
-    def _quota_switch(self, adapter_name: str) -> tuple[str, Any] | None:
+    def _log_session_end(self, adapter, adapter_name: str, state: LifeState, process, output: str, ran_for: float) -> None:
+        """session.ended plus, in hapi mode, the life's spend off the Pi session
+        file — the report's quota and money numbers (telemetry: the file is the
+        sister's own, so it can only misstate her own spend)."""
+        payload: dict[str, Any] = {
+            "harness": adapter_name,
+            "code": process.returncode(),
+            "ran_s": round(ran_for, 1),
+            "tail": _tail(output, 300),
+        }
+        spend = getattr(adapter, "session_spend", None)
+        if spend is not None and state.session_id:
+            sessions_dir = (
+                self.cfg.workplaces / "agent" / workplace.serial_dir(state.serial)
+                / workplace.PI_WORKPLACE_SESSION_DIR
+            )
+            try:
+                usage = spend(state.session_id, sessions_dir)
+            except OSError:
+                usage = None
+            if usage is not None:
+                payload["session"] = state.session_id
+                payload["tokens"] = usage["tokens"]
+                payload["cost_usd"] = round(usage["cost_usd"], 4)
+        self._log("session.ended", payload)
+
+    def _await_boot(self, adapter, process, spawned_at: float, timeout_s: float | None = None):
+        """Wait for the wrapper's boot report (both ids — the hub's session for
+        the opener and pi's for the resume), None on timeout. Sessions this
+        runner already booted are excluded, and a fresh report is remembered:
+        the next spawn (a crash restart, the will) must not re-find the dead
+        session's log lines inside the mtime grace."""
+        known = tuple(self._known_session_ids)
+        budget = adapter._boot_timeout_s if timeout_s is None else timeout_s
+        deadline = self._monotonic() + budget
+        while process.poll() is None and self._monotonic() < deadline:
+            boot = adapter.boot_report(spawned_at, known=known)
+            if boot is not None:
+                self._remember_boot(boot)
+                return boot
+            self._sleep(0.5)
+        boot = adapter.boot_report(spawned_at, known=known)
+        if boot is not None:
+            self._remember_boot(boot)
+        return boot
+
+    def _remember_boot(self, boot) -> None:
+        self._known_session_ids.extend((boot.pi_session_id, boot.hub_session_id))
+        del self._known_session_ids[:-8]  # bounded: the last four sessions
+
+    def _deliver_opener(self, adapter, session_id: str, prompt: str, state: LifeState) -> bool:
+        """Post the life opener into the hub session (the operator's channel,
+        T-044): a few bounded retries, then the restart loop owns it. The prompt
+        rides the body of a hub message — never argv (stdin is HAPI's)."""
+        for attempt in range(3):
+            try:
+                adapter.deliver_prompt(session_id, prompt)
+            except Exception as exc:
+                self._log(
+                    "hapi.prompt_retry",
+                    {"session": session_id, "attempt": attempt + 1, "error": f"{type(exc).__name__}: {exc}"},
+                )
+                self._sleep(self._hive_pause(attempt))
+                continue
+            self._log("hapi.prompt_delivered", {"session": session_id, "serial": state.serial})
+            return True
+        self._log("hapi.prompt_failed", {"session": session_id, "slot": self.cfg.slot})
+        return False
+
+    def _quota_switch(self, adapter_name: str, state: LifeState | None = None) -> tuple[str, Any] | None:
         if self.cfg.quota_action != "switch" or not self.cfg.failover:
             return None
         if adapter_name == self.cfg.failover or not self._adapter_ready(self.cfg.failover):
             return None
         self._log("quota.switch", {"from": adapter_name, "to": self.cfg.failover})
+        self._alarm(
+            "harness_failover",
+            f"Z.ai died on quota: the node moves from {adapter_name} to {self.cfg.failover}",
+            state,
+        )
         return self.cfg.failover, self._adapters[self.cfg.failover]
 
     def _adapter_ready(self, name: str) -> bool:
@@ -516,15 +689,57 @@ class NodeRunner:
             self._log("session.spawn_failed", {"error": f"{type(exc).__name__}: {exc}"})
             return None
 
-    def _wait_session(self, state: LifeState, process) -> Death | None:
-        """Watch the mind's death status while the harness process runs."""
+    def _wait_session(self, state: LifeState, process, adapter=None, spawned_at: float | None = None):
+        """Watch the mind's death status while the harness process runs. For a
+        long-running session also two watches (section 7 and R1-1): the `stuck`
+        watch — every model turn appends records to the Pi session file, so a
+        size that does not move for `stuck_s` means the agent has gone quiet —
+        an alarm, not a kill; and the live quota probe — rpc Pi never exits on
+        a 429, so the wrapper's log of THIS spawn is scanned at the poll pace
+        and a quota mark kills the process and returns QUOTA_DURING_SESSION.
+        The log source is the sister's own home (she could forge a quota line):
+        the worst a forgery buys is a move onto the failover gateway, whose
+        per-key ceiling caps the spend (R1-4) — accepted."""
         next_poll = 0.0
+        sessions_dir = (
+            self.cfg.workplaces / "agent" / workplace.serial_dir(state.serial)
+            / workplace.PI_WORKPLACE_SESSION_DIR
+        )
+        progress = getattr(adapter, "session_progress", None) if adapter is not None else None
+        watching = progress is not None and state.session_id is not None
+        last_size = progress(state.session_id, sessions_dir) if watching else 0
+        last_move = self._monotonic()
+        stuck_raised = False
+        output_of = getattr(adapter, "output_of", None) if adapter is not None else None
+        probing = (
+            getattr(adapter, "long_running", False)
+            and output_of is not None
+            and spawned_at is not None
+        )
         while True:
             code = process.poll()
             if code is not None:
                 process.wait()
                 return None
-            if time.monotonic() >= next_poll:
+            now = self._monotonic()
+            if watching and now - last_move >= self.cfg.stuck_s:
+                size = progress(state.session_id, sessions_dir)
+                if size is not None and size != last_size:
+                    last_size = size
+                    last_move = now
+                    stuck_raised = False
+                elif not stuck_raised:
+                    self._alarm("stuck", "no agent turns for a while: the session went quiet", state)
+                    stuck_raised = True
+                    last_move = now  # one alarm per quiet stretch, not per poll
+            if now >= next_poll:
+                if probing and quota_exhausted(output_of(process.output(), spawned_at)):
+                    process.terminate()
+                    if process.poll() is None:
+                        process.wait(self.cfg.kill_grace_s)
+                    process.kill()
+                    self._log("session.quota_live", {"serial": state.serial})
+                    return QUOTA_DURING_SESSION
                 death = self._death_status()
                 if death is not None:
                     process.terminate()
@@ -534,7 +749,7 @@ class NodeRunner:
                     self._log("session.stopped_for_death", {"serial": state.serial})
                     self._sweep()  # detached sisters die with their node (R2-4)
                     return death
-                next_poll = time.monotonic() + self.cfg.poll_s
+                next_poll = now + self.cfg.poll_s
             time.sleep(min(0.2, self.cfg.poll_s))
 
     def _quiet_status(self) -> dict[str, Any] | None:
@@ -574,6 +789,10 @@ class NodeRunner:
             "will.written" if will_origin == "agent" else "will.emergency",
             {"serial": serial, "origin": will_origin},
         )
+        if will_origin != "agent":
+            # section 7: the runner, not the agent, wrote the will — the operator
+            # wants to know a node died without speaking for herself
+            self._alarm("emergency_will", "the will is the runner's emergency template, not the agent's", state)
         self._retire(state, cause, will_text)
         root = self.cfg.workplaces / "agent" / workplace.serial_dir(serial)
         if root.exists():
@@ -735,34 +954,76 @@ class NodeRunner:
 
     def run_will_session(self, state: LifeState, adapter_name: str) -> str:
         """The will session behind a timeout; returns the harness output. Used by the
-        death path through `_will_session` and directly by tests."""
+        death path through `_will_session` and directly by tests. A long-running
+        (console) session never ends its turn: the timeout stays the backstop, but
+        the staged will file ends it early — the agent said her piece."""
         adapter = self._adapters[adapter_name]
         root = self.cfg.workplaces / "agent" / workplace.serial_dir(state.serial)
         proxy = self._will_proxy_factory(
             f"{self.cfg.hive_url.rstrip('/')}/node/mcp", self.cfg.node_key, self.cfg.runner_key
         )
         url = proxy.start()
-        workplace.set_will_mode(root, adapter_name, url)
+        prepare = getattr(adapter, "prepare_will", None)
+        if prepare is not None:
+            prepare()  # pi: the full config set, so set_will_mode has params to override
+        workplace.set_will_mode(root, adapter_name, url, serial=state.serial)
         self._log("will.session", {"serial": state.serial, "harness": adapter_name, "proxy": url})
         prompt = self._session_prompt(WILL_PREFIX)
-        process = self._safe_spawn(adapter.will_session(prompt), root)
+        command = adapter.will_session(prompt)
+        process = self._safe_spawn(command, root)
         output = ""
         if process is not None:
-            deadline = time.monotonic() + self.cfg.will_timeout_s
-            while process.poll() is None and time.monotonic() < deadline:
-                time.sleep(0.05)
-            if process.poll() is None:
-                process.terminate()
+            long_running = getattr(adapter, "long_running", False)
+            spawned_at = time.time()
+            if long_running:
+                # the opener enters through the hub, like the life session's — and
+                # the boot must be a FRESH session: a will landed in the life's
+                # session once (the wrapper continued the cwd's latest) and the
+                # dying node answered board work instead of writing a will. Kill
+                # and respawn once; still wrong — the timeout and the emergency
+                # will own it (R1-2's safety net over the per-death session dir).
+                boot = self._await_boot(adapter, process, spawned_at)
+                if boot is not None and boot.pi_session_id == state.session_id:
+                    self._log(
+                        "will.wrong_session", {"serial": state.serial, "session": boot.pi_session_id}
+                    )
+                    process.terminate()
+                    if process.poll() is None:
+                        process.wait(self.cfg.kill_grace_s)
+                    process.kill()
+                    process.wait()
+                    process = self._safe_spawn(command, root)
+                    if process is not None:
+                        spawned_at = time.time()
+                        boot = self._await_boot(adapter, process, spawned_at)
+                if process is not None and boot is not None:
+                    self._deliver_opener(adapter, boot.hub_session_id, prompt, state)
+            if process is not None:
+                deadline = time.monotonic() + self.cfg.will_timeout_s
+                while process.poll() is None and time.monotonic() < deadline:
+                    if long_running and self._staged_will(state.serial) is not None:
+                        self._log("will.staged", {"serial": state.serial})
+                        break
+                    time.sleep(0.05)
                 if process.poll() is None:
-                    process.wait(self.cfg.kill_grace_s)
-                process.kill()
-                self._log(
-                    "will.session_timeout",
-                    {"serial": state.serial, "timeout_s": self.cfg.will_timeout_s, "tail": _tail(process.output(), 300)},
-                )
-            process.wait()
-            output = process.output()
-            self._log("will.session_done", {"serial": state.serial, "tail": _tail(output, 300)})
+                    process.terminate()
+                    if process.poll() is None:
+                        process.wait(self.cfg.kill_grace_s)
+                    process.kill()
+                    if not long_running or self._staged_will(state.serial) is None:
+                        # direct harnesses end their turn on their own, so an alive
+                        # process at the deadline is a hang; mvp_report counts
+                        # these (R1-3)
+                        self._log(
+                            "will.session_timeout",
+                            {"serial": state.serial, "timeout_s": self.cfg.will_timeout_s, "tail": _tail(process.output(), 300)},
+                        )
+                process.wait()
+                output = process.output()
+                output_enrich = getattr(adapter, "output_of", None)
+                if output_enrich is not None:
+                    output = output_enrich(output, spawned_at)
+                self._log("will.session_done", {"serial": state.serial, "tail": _tail(output, 300)})
         self._sweep()  # the will session's strays must not meet the heir (R2-4)
         proxy.stop()
         return output

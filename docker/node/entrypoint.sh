@@ -31,6 +31,9 @@ materialize runner_key "${HIVE_RUNNER_KEY:-}"
 materialize node_mcp_key "${HIVE_NODE_KEY:-}"
 materialize gateway_node_key "${GATEWAY_NODE_KEY:-}"
 materialize zai_api_key "${ZAI_API_KEY:-}"
+# the console hub token, already in the namespaced <base>:node-N form (T-044/T-045:
+# the base token reads every session of the network and never enters a sandbox)
+materialize hapi_key "${HAPI_TOKEN:-}"
 
 # 2. The sister's home (tmpfs): zcode provider + opencode auth, rendered from secrets.
 mkdir -p "$SISTER_HOME/.zcode/v2" "$SISTER_HOME/.local/share/opencode"
@@ -90,6 +93,6 @@ drop_hermes_home(
 
 # 3. Nothing secret may ride further: not into the runner's /proc/environ (execve
 #    rebuilds it from what is left), not into any child the runner spawns.
-unset HIVE_RUNNER_KEY HIVE_NODE_KEY GATEWAY_NODE_KEY ZAI_API_KEY
+unset HIVE_RUNNER_KEY HIVE_NODE_KEY GATEWAY_NODE_KEY ZAI_API_KEY HAPI_TOKEN
 
 exec "$@"

@@ -417,7 +417,15 @@ def drop_hermes_home(
 # process env, so no `env` in a bash tool can leak it into a session or an archive).
 PI_AGENT_DIR = Path("/home/sister/.pi/agent")
 PI_KEY_FILE = "zai-key"
+PI_SLOT_FILE = "slot"  # the slot name for misaka-link's delivery_failing alarm (T-048 R1-4)
 PI_ZAI_BASE_URL = HERMES_GLM_BASE_URL  # the coding endpoint of the GLM Coding Plan
+# where pi keeps its session files: the WORKPLACE (a volume), relative to the
+# process cwd — the tmpfs home dies with the container and takes the resume key
+# with it (verified live, T-045). Same value the direct mode's --session-dir uses.
+PI_WORKPLACE_SESSION_DIR = ".pi-sessions"
+# the will's own session dir, one per death (R1-2): empty and unique — the wrapper
+# cannot continue anything from there
+PI_WILL_SESSION_PREFIX = ".pi-will-"
 # misaka-link (T-048): the environment's delivery extension of the live `hapi pi`
 # session (ADR-042 — stdin belongs to HAPI, so the board feed and Misaka-net reach
 # the agent only through it). Dropped from runtime/pi/misaka-link/ into the agent
@@ -452,6 +460,7 @@ def render_pi_configs(
     context_window: int = PI_CONTEXT_WINDOW,
     keep_recent_tokens: int = PI_KEEP_RECENT_TOKENS,
     key_file: str = str(PI_AGENT_DIR / PI_KEY_FILE),
+    session_dir: str = PI_WORKPLACE_SESSION_DIR,
 ) -> dict[str, dict]:
     """The Pi agent-dir configs: models.json + mcp.json + settings.json, by content.
     No key material in the configs: apiKey is a `!command` reference (Pi resolves a
@@ -460,7 +469,10 @@ def render_pi_configs(
     request time; the key never rides the process env, mcp.json carries the node
     key — the agent's own identity, same rule as zcode.json/config.yaml (ADR-033).
     Both servers are `direct`: Pi's default `codemode` exposure declares no MCP tool
-    to the model at all (Pi docs mcp.md)."""
+    to the model at all (Pi docs mcp.md). `session_dir` lands in settings.json so
+    the WRAPPED pi (whose argv the runner does not build) still stores its sessions
+    in the workplace volume — the tmpfs home dies with the container and takes the
+    resume key with it (verified live: "No session found matching …")."""
     glm = _glm_model(model)
     return {
         "models.json": {
@@ -500,6 +512,10 @@ def render_pi_configs(
             "defaultModel": glm,
             "enableInstallTelemetry": False,
             "enableAnalytics": False,
+            # the wrapped pi reads this (its argv is the wrapper's): sessions into
+            # the workplace volume, resolved against the process cwd — the runner
+            # spawns every session in the life's workplace root
+            "sessionDir": session_dir,
             "compaction": {
                 "enabled": True,
                 "reserveTokens": PI_RESERVE_TOKENS,
@@ -522,8 +538,10 @@ def drop_pi_agent_dir(
     hive_url: str,
     node_key: str,
     zai_key: str = "",
+    slot: str = "",
     context_window: int = PI_CONTEXT_WINDOW,
     keep_recent_tokens: int = PI_KEEP_RECENT_TOKENS,
+    session_dir: str = PI_WORKPLACE_SESSION_DIR,
     uid: int | None = None,
     gid: int | None = None,
     hive_mcp_override: str | None = None,
@@ -532,7 +550,8 @@ def drop_pi_agent_dir(
     the same boundary as HERMES_HOME/config.yaml, R1-2), written link-safe (the dir is
     hers, R2-1), plus zai-key — her own 0400 copy of the plan token (empty `zai_key`
     writes none; the runner gates the pi harness on the key being present) — plus the
-    misaka-link extension under extensions/ (T-048). The
+    misaka-link extension under extensions/ (T-048) and the `slot` file it reads for
+    its delivery_failing alarm (T-048 R1-4). The
     adapter calls it before every life session: that heals a replaced file and moves
     hive back from the will proxy. The dir and its parent (~/.pi) stay the sister's
     0700 — Pi keeps its own state there. `hive_mcp_override` is the will-mode hook:
@@ -544,7 +563,7 @@ def drop_pi_agent_dir(
         _chmod(agent_dir.parent, 0o700)
     params = dict(
         model=model, body_base=body_base, hive_url=hive_url, node_key=node_key,
-        zai_key=zai_key,
+        zai_key=zai_key, slot=slot, session_dir=session_dir,
         context_window=context_window, keep_recent_tokens=keep_recent_tokens,
     )
     if hive_mcp_override is None:
@@ -553,10 +572,13 @@ def drop_pi_agent_dir(
         _write_file_no_links(
             agent_dir / PI_KEY_FILE, zai_key, mode=0o400, uid=uid, gid=gid
         )
+    if slot:
+        _write_file_no_links(agent_dir / PI_SLOT_FILE, slot, mode=READ_ONLY_FILE, uid=0, gid=0)
     configs = render_pi_configs(
         model, body_base, hive_url, node_key,
         context_window=context_window, keep_recent_tokens=keep_recent_tokens,
         key_file=str(agent_dir / PI_KEY_FILE),
+        session_dir=session_dir,
     )
     if hive_mcp_override:
         configs["mcp.json"]["mcpServers"]["hive"]["url"] = hive_mcp_override.rstrip("/")
@@ -578,16 +600,22 @@ def drop_pi_agent_dir(
     _chmod(agent_dir, 0o700)
 
 
-def _set_pi_will_mode(proxy_url: str) -> None:
+def _set_pi_will_mode(proxy_url: str, serial: int | None = None) -> None:
     """The Pi twin of _set_hermes_will_mode: a fresh render with hive at the proxy from
-    the last life render's params. Without them (a runner restart between the last life
-    render and the will) nothing is written and the will runs unmarked — the real hive
-    refuses an unmarked submit_will and the emergency will covers it."""
+    the last life render's params — and the session dir swapped to a per-death
+    `.pi-will-<serial>` (R1-2): the wrapper may continue the cwd's latest session,
+    and the will must start where there is nothing to continue (live: a will process
+    once answered the board in the life's session instead of writing a will).
+    Without params (a runner restart between the last life render and the will)
+    nothing is written and the will runs unmarked — the real hive refuses an
+    unmarked submit_will and the emergency will covers it."""
     params = _PI_RENDER.get(PI_AGENT_DIR)
     if params is None:
         return
+    will_dir = PI_WORKPLACE_SESSION_DIR if serial is None else f"{PI_WILL_SESSION_PREFIX}{serial_dir(serial)}"
     drop_pi_agent_dir(
-        PI_AGENT_DIR, **params, hive_mcp_override=f"{proxy_url.rstrip('/')}/mcp"
+        PI_AGENT_DIR, **{**params, "session_dir": will_dir},
+        hive_mcp_override=f"{proxy_url.rstrip('/')}/mcp",
     )
 
 
@@ -680,7 +708,7 @@ def create_workplace(
     return root
 
 
-def set_will_mode(root: Path, harness: str, proxy_url: str) -> None:
+def set_will_mode(root: Path, harness: str, proxy_url: str, serial: int | None = None) -> None:
     """Point the hive MCP of the given adapter's config at the runner's will proxy for
     the will session: the proxy adds X-Runner-Session: will and the runner key, so the
     mark cannot be forged from the workplace (plan review P1-1)."""
@@ -688,7 +716,7 @@ def set_will_mode(root: Path, harness: str, proxy_url: str) -> None:
         _set_hermes_will_mode(proxy_url)
         return
     if harness == "pi":
-        _set_pi_will_mode(proxy_url)
+        _set_pi_will_mode(proxy_url, serial)
         return
     name = "zcode.json" if harness == "zcode" else "opencode.json"
     path = root / name
