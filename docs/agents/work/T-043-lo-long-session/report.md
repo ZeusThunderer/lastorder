@@ -144,3 +144,35 @@ $ node --test runtime/pi/misaka-link   # из каталога расширен�
 
 ### Вопросы
 - нет
+
+## Раунд 3 · 2026-11-06
+Коммиты: 783ddac
+
+### Ответ на ревью
+- R1-1 · fixed 783ddac — `naming.ts`: адрес 0 рендерится как `last-order` при любом
+  пресете (и без якоря); тесты naming («address 0 is the desk») и envelope
+  («[net from last-order] …»); комментарий `LO_SERIAL` в mcp.py исправлен.
+- R1-2 · fixed 783ddac — `_await_session_id(process, spawned_at)`: читаются только
+  логи с mtime после спавна, берётся ПОСЛЕДНИЙ match «Session ID persisted»
+  (переподключившийся обёрт-лог может нести ранний id); тест с двумя id в одном
+  логе + старым логом до спавна.
+- R1-3 · fixed 783ddac — докстринги (шапка модуля и `_await_session_id`) говорят
+  про PI session id; событие `hapi.session` без поля `pid`.
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 870 passed, 3 skipped in 99.11s
+check.py: ok · Every workplace is intact…
+$ node --test runtime/pi/misaka-link
+ℹ tests 38, pass 38, fail 0
+```
+
+### Отклонения от задачи
+- нет
+
+### Вне задачи
+- нет (стенд — как в раунде 2)
+
+### Вопросы
+- нет
