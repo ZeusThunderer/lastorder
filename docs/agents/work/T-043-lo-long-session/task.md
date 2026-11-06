@@ -2,7 +2,7 @@
 id: T-043
 title: Last Order на Pi — одна долгая сессия, события сети сообщениями, запасной OpenCode с тревогой
 stage: I
-status: review
+status: accepted
 criticality: critical
 after: [T-048, T-059]
 branch: z/T-043-lo-long-session
