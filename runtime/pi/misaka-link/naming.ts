@@ -25,11 +25,14 @@ export function parseNaming(personaText: string): Naming {
   return { prefix: name[1].trim(), serial: parseInt(name[2], 10) };
 }
 
-/** The name of one board/comms actor in an envelope line. */
+/** The name of one board/comms actor in an envelope line. Address 0 is the desk
+ * (`last-order`, the Misaka-net address T-043 gave it) — never padded into a
+ * serial, so a sister cannot mistake the desk for «Мисака 00000». */
 export function makeNameOf(naming: Naming): (actor: unknown) => string {
   return (actor: unknown): string => {
     const text = actor === null || actor === undefined ? "" : String(actor);
     if (/^\d+$/.test(text)) {
+      if (parseInt(text, 10) === 0) return "last-order";
       if (naming.prefix === null) return text;
       return `${naming.prefix} ${String(parseInt(text, 10)).padStart(5, "0")}`;
     }

@@ -200,3 +200,20 @@ test("parseSseData picks the JSON payloads out of SSE frames", () => {
   const docs = parseSseData('event: message\ndata: {"a":1}\n\ndata: not-json\n\ndata: {"b":2}\n');
   assert.deepEqual(docs, [{ a: 1 }, { b: 2 }]);
 });
+
+test("the desk's mount (/last-order/mcp) yields the same HTTP base as a sister's", async () => {
+  // T-043: the LO agent-dir mcp.json points at /last-order/mcp — the board HTTP
+  // base (feed/ack/alarms) is still the hive root, not the MCP path
+  const calls: string[] = [];
+  const desk = new HiveClient({
+    base: "http://hive:8000/last-order/mcp".replace(/\/(node|last-order)\/mcp\/?$/, ""),
+    mcpUrl: "http://hive:8000/last-order/mcp",
+    key: "sk-lo",
+    fetchFn: async url => {
+      calls.push(url);
+      return jsonResponse({ events: [], cursor: 0, snapshot: false });
+    },
+  });
+  await desk.feed(null);
+  assert.equal(calls[0], "http://hive:8000/board/feed");
+});

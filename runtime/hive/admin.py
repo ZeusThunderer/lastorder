@@ -1,33 +1,27 @@
-"""Last Order's alarm and short sessions (T-030; ADR-036, plan review P1-1..P1-7).
+"""Last Order's desk: the alarm and the one long session (T-043; ADR-036, ADR-041).
 
-The alarm is file-driven and single-threaded: one session at a time, and events that
-land during a session accumulate into the next wake (ADR-036 "события во время сессии
-копятся"): the whole baseline — deaths, pending proposals, the digests of the operator
-files — is taken at SESSION START, so whatever lands while the session runs is still
-"new" on the next poll. The operator files are root-owned and read-only for the agent
-(P1-2), so a digest change can only be the operator's doing, and the agent's own memory
-writes are not watched at all.
+The alarm is file-driven and single-threaded, and the wake sources are unchanged
+(T-030): death (a new will), a full batch of new proposals, an operator edit of
+`INBOX.md`/`GOALS.md`, and the clock (ADMIN_EVERY_MIN). What T-043 changes is the
+session: since ADR-041 the desk lives in ONE LONG `hapi pi` session (stdin belongs to
+HAPI, so the environment's own lines reach the agent only through the misaka-link
+extension of T-048) instead of a short harness run per wake.
 
-Wake sources, all read-only against the knowledge volume (the layout lives in
-`HiveLayout`, P1-5; the hive stays the only writer, ADR-017):
+- ADMIN_HARNESS=pi (the default): the alarm keeps one `hapi pi` process alive from
+  the workplace, resuming the stored PI session id after a container restart (the
+  hub volume outlives the sandbox); a resume target the hub no longer has is dropped
+  for one fresh session. A wake reason does NOT spawn a process — it is delivered
+  into the same session; a Z.ai quota death hands the desk to the failover's SHORT
+  sessions (the T-030 loop) with the harness_failover and quota board alarms.
+- ADMIN_HARNESS=opencode (or the failover): the T-030 short sessions per wake.
 
-- death: a new `nodes/<serial>/will.md` — there is no death without a will, so the will
-  IS the signal;
-- batch: new pending proposals (`base/proposals/p-NNNN.json`, status read from the file
-  content) with the open queue at >= ADMIN_PROPOSALS_BATCH;
-- operator: `INBOX.md` or `GOALS.md` changed in the workplace;
-- clock: ADMIN_EVERY_MIN since the last session, plus a floor pause between sessions
-  (ADMIN_SESSION_MIN_GAP_S) — the budget guard of P1-6.
-
-The session is a short harness run in the workplace: the runner's adapters (runtime/
-node/adapters.py — reused, never modified). Since T-059 the primary is pi on the Z.ai
-Coding Plan — the same subscription and the same agent-dir render the sisters ride
-(T-066) — with opencode through the gateway (`smart` tier) as the quota failover; MCP
-`/last-order/mcp` with the Last Order key is rendered into the session's configs the
-same way a sister's node key is (T-029). The core files and skills are
-rewritten from the image on every start: tampering is undone, `memory/` is never
-touched (P1-3). Children run under the sister uid with a fresh environment — no key of
-this container rides into a session.
+The wake baseline is taken at session start (ADR-036 "события во время сессии
+копятся"): whatever lands while a long session runs stays "new" for the next poll.
+The operator files are root-owned and read-only for the agent (P1-2), so a digest
+change can only be the operator's doing. The core files and skills are rewritten from
+the image on every start: tampering is undone, `memory/` is never touched (P1-3).
+Children run under the sister uid with a fresh environment — no key of this container
+rides into a session except the hub token the `hapi` CLI needs.
 
 No LLM call happens outside the session itself (P1-6); everything the agent decides, it
 decides through the MCP tools of T-028.
@@ -38,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -60,6 +55,8 @@ from runtime.node.adapters import (
 )
 from runtime.node.runner import SessionProcess
 from runtime.node.workplace import (
+    MISAKA_LINK_DIR,
+    MISAKA_LINK_FILES,
     PI_CONTEXT_WINDOW,
     PI_KEY_FILE,
     PI_KEEP_RECENT_TOKENS,
@@ -103,6 +100,14 @@ HARNESSES = ("pi", "opencode")  # the desk's harness pair (runtime/node/config.p
 SUMMARY_EXCERPT_CHARS = 1500
 CHRONICLE_TAIL_LINES = 5
 QUEUE_SNAPSHOT_MAX = 20
+
+# --- the one long hapi session (T-043, ADR-041) ----------------------------------------------
+HAPI_SESSION_FILE = "hapi_session_id"  # in ADMIN_DIR, the resume key across restarts
+# The PI session id the wrapper prints once it starts the agent process
+# (`[pi] Session ID persisted to metadata: <id>`, verified on the stand): the
+# wrapper's `--session-id` flag resumes THAT id (a hub session id would die with
+# "No session found matching …" and loop the desk through fresh sessions).
+HAPI_SESSION_RE = re.compile(r"Session ID persisted to metadata: ([0-9a-fA-F-]{8,64})")
 
 
 class HiveLayout:
@@ -310,6 +315,18 @@ class LastOrderPiAdapter(PiAdapter):
                 agent_dir / name, json.dumps(config, indent=2),
                 mode=READ_ONLY_FILE, uid=0, gid=0,
             )
+        # the delivery extension (T-048) rides the long session too: the desk reads
+        # the board feed and its inbox as `last-order` (the lo key in mcp.json)
+        extensions = agent_dir / "extensions" / "misaka-link"
+        extensions.mkdir(parents=True, exist_ok=True)
+        for name in MISAKA_LINK_FILES:
+            _write_file_no_links(
+                extensions / name,
+                (MISAKA_LINK_DIR / name).read_text(encoding="utf-8"),
+                mode=READ_ONLY_FILE,
+                uid=0,
+                gid=0,
+            )
         _own(agent_dir, self._uid, self._gid)
         _chmod(agent_dir, 0o700)
 
@@ -336,11 +353,17 @@ class AdminConfig:
     harness: str = "pi"
     pi_model: str = "GLM-5.3"
     pi_agent_dir: Path = Path("/home/sister/.pi/agent")
-    # the compaction budget of the desk's sessions (T-066's sister values by default:
-    # a desk session is short, the cap is a guard rail; T-043 may retune it)
+    # the compaction budget of the one long session (T-043): the desk's context grows
+    # for the life of the process, so the cap is the real budget, not a guard rail
     pi_context_window: int = PI_CONTEXT_WINDOW
     pi_keep_recent_tokens: int = PI_KEEP_RECENT_TOKENS
     failover: str = "opencode"
+    # the one long session (T-043): `hapi pi` under the alarm, the hub on svc-lo
+    hapi_url: str = "http://hapi-hub:3006"
+    hapi_token: str = ""  # the hub's CLI token (HAPI_CLI_KEY) — see the task question
+    hapi_home: Path = Path("/home/sister/.hapi")
+    hapi_restart_pause_s: float = 15.0
+    hapi_boot_timeout_s: float = 90.0  # waiting for the wrapper's session report
     # readiness of a switch target, "the same way as node-N": the entrypoint's
     # root-only copy of the Z.ai token, and the opencode auth it renders into the
     # agent's home (both 0400/0600 files, never the process environment)
@@ -397,6 +420,11 @@ class AdminConfig:
             pi_agent_dir=Path(env("ADMIN_PI_AGENT_DIR") or "/home/sister/.pi/agent"),
             pi_context_window=int(_num("ADMIN_PI_CONTEXT_WINDOW", PI_CONTEXT_WINDOW)),
             pi_keep_recent_tokens=int(_num("ADMIN_PI_KEEP_RECENT_TOKENS", PI_KEEP_RECENT_TOKENS)),
+            hapi_url=env("ADMIN_HAPI_URL") or "http://hapi-hub:3006",
+            hapi_token=env("ADMIN_HAPI_TOKEN") or env("HAPI_CLI_KEY") or "",
+            hapi_home=Path(env("HAPI_HOME") or "/home/sister/.hapi"),
+            hapi_restart_pause_s=_num("ADMIN_HAPI_RESTART_PAUSE_S", 15.0),
+            hapi_boot_timeout_s=_num("ADMIN_HAPI_BOOT_TIMEOUT_S", 90.0),
             # the desk's failover is always the OTHER harness unless told otherwise
             failover=env("ADMIN_HARNESS_FAILOVER")
             or ("opencode" if harness == "pi" else "pi"),
@@ -622,14 +650,155 @@ class AdminAlarm:
                 "batch": self.cfg.batch,
                 "harness": self.cfg.harness,
                 "model": self.cfg.model,
+                "long_session": self._long_session_mode(),
             },
         )
         while True:
             try:
+                if self._long_session_mode():
+                    # returns only when the desk moved to the failover's short
+                    # sessions (a Z.ai quota death) or pi lost its credential
+                    self._long_pi_loop()
                 self.run_once()
             except Exception as exc:  # service-grade: the loop outlives any single poll
                 self._log.event("admin.error", {"error": f"{type(exc).__name__}: {exc}"})
             self._sleep(self.cfg.poll_s)
+
+    def _long_session_mode(self) -> bool:
+        """The one long `hapi pi` session (T-043): pi primary, a hub to reach and a
+        token for the CLI. Without a token the desk cannot ride hapi at all and the
+        alarm falls back to the short-session loop of T-030 (pi or opencode)."""
+        return self._harness_name == "pi" and bool(self.cfg.hapi_url and self.cfg.hapi_token)
+
+    # --- the one long hapi session (T-043) ---------------------------------------------------
+
+    def _session_id_path(self) -> Path:
+        return self.cfg.workplace / ADMIN_DIR / HAPI_SESSION_FILE
+
+    def _load_session_id(self) -> str:
+        try:
+            return self._session_id_path().read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+
+    def _save_session_id(self, session_id: str) -> None:
+        path = self._session_id_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(session_id, encoding="utf-8")
+
+    def _hapi_command(self) -> Command:
+        argv: tuple[str, ...] = ("hapi", "pi")
+        resume = self._load_session_id()
+        if resume:
+            argv += ("--session-id", resume)
+        return Command(
+            argv,
+            env={
+                "HAPI_API_URL": self.cfg.hapi_url,
+                "CLI_API_TOKEN": self.cfg.hapi_token,
+                "HAPI_HOME": str(self.cfg.hapi_home),
+                "PI_CODING_AGENT_DIR": str(self.cfg.pi_agent_dir),
+            },
+        )
+
+    def _long_pi_loop(self) -> None:
+        """Keep ONE `hapi pi` alive from the workplace: wake reasons never spawn a
+        process (they ride the session), a container restart resumes the stored hub
+        session id, and a Z.ai quota death hands the desk to the failover with the
+        board alarms. A plain death restarts the session after a pause."""
+        while True:
+            if not self._harness_usable():
+                return  # switched to the failover, or nothing ready: run() takes over
+            self._adapters["pi"]._render()  # the desk's own agent-dir, healed every start
+            resume = self._load_session_id()
+            spawned_at = time.time()
+            process = self._safe_spawn(self._hapi_command())
+            if process is None:
+                self._sleep(self.cfg.hapi_restart_pause_s)
+                continue
+            session_id = self._await_session_id(process, spawned_at)
+            if session_id:
+                if session_id != resume:
+                    self._save_session_id(session_id)
+            elif resume:
+                # died before reporting with a resume key: the hub no longer has
+                # that session — drop the key, the next spawn starts fresh
+                self._save_session_id("")
+                self._log.event("hapi.resume_lost", {"session": resume})
+            self._log.event(
+                "hapi.session",
+                {"session": session_id or "", "resumed": bool(resume and session_id)},
+            )
+            while process.poll() is None:
+                self._sleep(self.cfg.poll_s)
+                try:
+                    # the wake detection rides the long session: reasons are
+                    # appended to the feed (never a spawned process)
+                    self.run_once()
+                except Exception as exc:  # service-grade, same as run()
+                    self._log.event("admin.error", {"error": f"{type(exc).__name__}: {exc}"})
+            output = self._hapi_output(process, spawned_at)
+            quota = quota_exhausted(output)
+            self._log.event(
+                "hapi.exit",
+                {
+                    "code": process.returncode(),
+                    "session": session_id,
+                    "quota": quota,
+                    "tail": " ".join(output[-300:].split()),
+                },
+            )
+            if quota:
+                if self._quota_switch():  # raises the harness_failover + quota alarms
+                    return  # the failover's short sessions take over
+                # no ready failover: do not hammer a dead subscription with restarts —
+                # wait a quota window, then try the long session again
+                self._sleep(self.cfg.every_min * 60.0)
+                continue
+            self._sleep(self.cfg.hapi_restart_pause_s)
+
+    def _hapi_output(self, process, spawned_at: float) -> str:
+        """Everything THIS wrapper said: its stdout plus its own log file (the wrapper
+        writes the session report and provider errors to ~/.hapi/logs/*.log, not to
+        stdout — verified on the stand). Only logs written after the spawn count, so
+        a restart cannot read the previous run's lines."""
+        return process.output() + self._hapi_log_text(spawned_at)
+
+    def _hapi_log_text(self, spawned_at: float | None = None) -> str:
+        logs = self.cfg.hapi_home / "logs"
+        try:
+            candidates = [
+                path
+                for path in logs.glob("*.log")
+                if spawned_at is None or path.stat().st_mtime >= spawned_at - 1.0
+            ]
+            newest = max(candidates, key=lambda path: path.stat().st_mtime)
+        except (OSError, ValueError):
+            return ""
+        try:
+            return newest.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+
+    def _await_session_id(self, process, spawned_at: float) -> str:
+        """The wrapper prints the PI session id once its agent process starts
+        (`[pi] Session ID persisted to metadata: <id>` — the id `--session-id`
+        resumes). Wait for that line while the process lives and take the LAST
+        match of the spawn's own log: one log file can carry an earlier id of the
+        same wrapper session."""
+        deadline = time.monotonic() + self.cfg.hapi_boot_timeout_s
+
+        def latest() -> str:
+            text = self._hapi_log_text(spawned_at) or process.output()
+            matches = HAPI_SESSION_RE.findall(text)
+            return matches[-1] if matches else ""
+
+        while process.poll() is None and time.monotonic() < deadline:
+            found = latest()
+            if found:
+                return found
+            self._sleep(0.5)
+        return latest()
 
     def run_once(self) -> list[WakeReason]:
         """One poll; returns the reasons a session ran for (empty: no session)."""
@@ -651,14 +820,17 @@ class AdminAlarm:
         # next poll. The operator files cannot be changed by the agent (P1-2), so a
         # changed digest is always the operator's and never the session's own echo.
         baseline = self._wake.snapshot(now)
-        self._log.event(
-            "session.start",
-            {
-                "reasons": [{"kind": r.kind, "detail": r.detail} for r in reasons],
-                "new_deaths": [format_serial(s) for s in new_deaths],
-            },
-        )
-        self._session(reasons, new_deaths)
+        if self._long_session_mode():
+            self._deliver_wake(reasons, new_deaths)
+        else:
+            self._log.event(
+                "session.start",
+                {
+                    "reasons": [{"kind": r.kind, "detail": r.detail} for r in reasons],
+                    "new_deaths": [format_serial(s) for s in new_deaths],
+                },
+            )
+            self._session(reasons, new_deaths)
         end_now = self._clock()
         self._save_state(
             WakeState(
@@ -670,6 +842,38 @@ class AdminAlarm:
             )
         )
         return reasons
+
+    def _deliver_wake(self, reasons: list[WakeReason], new_deaths: list[int]) -> None:
+        """A wake reason of the one long session (T-043): no process is spawned —
+        the reason is appended to the desk's wake feed in the hive (the `misaka-link`
+        extension of the session reads it as a `[wake …]` envelope). The payload is
+        the WakeReason fields alone (kind, node numbers, counters — ADR-037: no raw
+        ids, no game chat); a refused append is journalled, never fatal."""
+        for reason in reasons:
+            try:
+                self._post_wake(reason.kind, reason.detail)
+            except OSError as exc:
+                self._log.event(
+                    "wake.drop", {"kind": reason.kind, "error": f"{type(exc).__name__}: {exc}"}
+                )
+        self._log.event(
+            "wake.delivered",
+            {
+                "reasons": [{"kind": r.kind, "detail": r.detail} for r in reasons],
+                "new_deaths": [format_serial(s) for s in new_deaths],
+            },
+        )
+
+    def _post_wake(self, kind: str, detail: str) -> None:
+        url = f"{self.cfg.hive_url.rstrip('/')}/lo/wake"
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({"kind": kind, "detail": detail}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "X-Node-Key": self.cfg.lo_key},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            response.read()
 
     # --- the session ------------------------------------------------------------------------
 
@@ -780,18 +984,29 @@ class AdminAlarm:
         self._log.event("harness.waits", {"harness": self._harness_name})
         return False
 
-    def _quota_switch(self) -> None:
+    def _quota_switch(self) -> bool:
         """Quota marks in a session's output move the NEXT session to the failover
-        harness (the runner's `quota.switch`) and raise the board alarm — the desk
-        left the subscription, the operator should know. Without a ready failover
-        the desk waits on the same harness (the runner's `quota.waits`)."""
+        harness (the runner's `quota.switch`) and raise the board alarms — the desk
+        left the subscription, the operator should know (T-043: the `quota` alarm
+        joins `harness_failover`). Without a ready failover the desk waits on the
+        same harness (the runner's `quota.waits`). Returns True when the switch
+        happened."""
         target = self.cfg.failover
         if not target or target == self._harness_name or not self._adapter_ready(target):
             self._log.event("quota.waits", {"harness": self._harness_name})
-            return
+            return False
         self._log.event("quota.switch", {"from": self._harness_name, "to": target})
         self._post_failover_alarm(self._harness_name, target, "the Z.ai quota ran out")
+        try:
+            self._post_alarm(
+                "quota",
+                "last-order: the Z.ai quota ran out; the desk is on "
+                f"{target} through the gateway until the plan resets",
+            )
+        except OSError as exc:
+            self._log.event("alarm.post_failed", {"error": f"{type(exc).__name__}: {exc}"})
         self._harness_name = target
+        return True
 
     def _post_failover_alarm(self, frm: str, target: str, reason: str) -> None:
         """The board alarm of a harness switch — one per switch, whatever caused it.

@@ -180,6 +180,75 @@ class CommsBook:
                 self._inboxes.pop(serial, None)
 
 
+WAKE_FEED_MAX = 500  # the desk's wake feed cap: the recent wake history is enough
+
+
+class WakeFeed:
+    """The desk's wake log (T-043): an append-only JSONL of the alarm's wake
+    reasons plus the reader's cursor, both surviving a hive restart. A capped
+    tail is kept — the feed is a delivery channel, not a chronicle (that is what
+    the board and the events log are for)."""
+
+    def __init__(self, run_dir: Path, *, log: HiveLog, clock: Callable[[], datetime]):
+        self._events_path = run_dir / "lo_wake.jsonl"
+        self._cursor_path = run_dir / "lo_wake.cursor"
+        self._log = log
+        self._clock = clock
+        self._lock = threading.RLock()
+
+    def _read_events(self) -> list[dict]:
+        try:
+            lines = self._events_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return []
+        out = []
+        for line in lines:
+            try:
+                doc = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(doc, dict) and isinstance(doc.get("seq"), int):
+                out.append(doc)
+        return out
+
+    def append(self, kind: str, detail: str) -> int:
+        with self._lock:
+            events = self._read_events()
+            seq = (events[-1]["seq"] + 1) if events else 1
+            events.append(
+                {"seq": seq, "at": self._clock().isoformat(), "kind": kind, "detail": detail}
+            )
+            if len(events) > WAKE_FEED_MAX:
+                events = events[-WAKE_FEED_MAX:]
+            tmp = self._events_path.with_name(self._events_path.name + ".tmp")
+            tmp.write_text(
+                "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in events),
+                encoding="utf-8",
+            )
+            tmp.replace(self._events_path)
+            self._log.event("lo_wake.append", {"seq": seq, "kind": kind})
+            return seq
+
+    def events(self, since: int) -> list[dict]:
+        with self._lock:
+            return [e for e in self._read_events() if e["seq"] > since]
+
+    def top(self) -> int:
+        with self._lock:
+            events = self._read_events()
+            return events[-1]["seq"] if events else 0
+
+    def cursor(self) -> int:
+        try:
+            return int(self._cursor_path.read_text(encoding="utf-8").strip() or 0)
+        except (OSError, ValueError):
+            return 0
+
+    def ack(self, seq: int) -> None:
+        with self._lock:
+            self._cursor_path.write_text(str(seq), encoding="utf-8")
+
+
 class HiveService:
     """The three ports behind one door; the endpoints and the tests both call this."""
 
@@ -276,6 +345,7 @@ def create_app(
     board = Board(
         run_dir / "board.sqlite", lifecycle=lifecycle, log=log, clock=clock
         )
+    wake_feed = WakeFeed(run_dir, log=log, clock=clock)
     grants = Grants(run_dir / "grants.sqlite", log=log, clock=clock)
     # The approval hook of TASKBOARD.md 5.3 (T-046): the vault opens only through the
     # operator's board approval, never through the board status alone. A failure is
@@ -758,6 +828,53 @@ def create_app(
     @app.post("/board/ack")
     def board_ack(request: Request, body: dict) -> None:
         board.ack(_agent_actor(request), body.get("seq"))
+
+    # --- the desk's wake feed (T-043, ADR-041) ------------------------------------------------
+    # The environment's own wake reasons for the one long Last Order session: the
+    # alarm appends (death/proposals/operator/timer), the session's misaka-link
+    # reads them into the same conversation as `[wake …]` envelopes. Not Misaka-net
+    # (a sisters' channel), not the board (people's and agents' work): a feed of
+    # its own, under the desk key alone — the same at-least-once shape as the board
+    # feed (the ack moves the cursor; a rebuild feed resets it client-side).
+
+    def _require_lo_key(request: Request) -> None:
+        if not last_order_key:
+            raise ApiError(401, "lo_key", "the wake feed needs HIVE_MCP_LO_KEY configured")
+        key = request.headers.get("x-node-key", "").strip()
+        if not secrets.compare_digest(key.encode("utf-8"), last_order_key.encode("utf-8")):
+            raise ApiError(401, "lo_key", "the wake feed opens with the Last Order key alone")
+
+    @app.post("/lo/wake")
+    def lo_wake_post(request: Request, body: dict) -> dict:
+        _require_lo_key(request)
+        kind = body.get("kind")
+        if not isinstance(kind, str) or not kind.strip():
+            raise ApiError(422, "validation", "kind must be a non-empty string")
+        detail = body.get("detail", "")
+        if not isinstance(detail, str):
+            raise ApiError(422, "validation", "detail must be a string")
+        return {"seq": wake_feed.append(kind.strip(), detail.strip())}
+
+    @app.get("/lo/wake")
+    def lo_wake_feed(request: Request, since: int | None = None) -> dict:
+        _require_lo_key(request)
+        cursor = wake_feed.cursor()
+        effective = since if since is not None else cursor
+        return {
+            "events": wake_feed.events(effective),
+            "cursor": effective,
+            # the top seq of the whole log: a reader holding a cursor ABOVE it is
+            # looking at a rebuilt feed and resets to zero
+            "top": wake_feed.top(),
+        }
+
+    @app.post("/lo/wake/ack")
+    def lo_wake_ack(request: Request, body: dict) -> None:
+        _require_lo_key(request)
+        seq = body.get("seq")
+        if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+            raise ApiError(422, "validation", "seq must be a non-negative integer")
+        wake_feed.ack(seq)
 
     # --- the grant vault (ADR-041, TASKBOARD.md 5.3; T-046) ------------------------------
     # The egress proxy and the tool-process executor identify with HIVE_TOOL_KEY

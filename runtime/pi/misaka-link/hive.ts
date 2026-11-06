@@ -32,6 +32,13 @@ export interface InboxMessage {
   text: unknown;
 }
 
+/** One wake reason of the desk's feed: the WakeReason fields alone (ADR-037). */
+export interface WakeEvent {
+  seq: number;
+  kind: string;
+  detail?: unknown;
+}
+
 const TIMEOUT_MS = 10_000;
 
 export class HiveClient {
@@ -124,6 +131,30 @@ export class HiveClient {
     const body: Record<string, unknown> = { type: "delivery_failing", text, slot };
     if (serial !== null) body.serial = serial;
     await this.request("POST", "/board/alarms", body);
+  }
+
+  // --- the desk's wake feed (T-043; the desk key alone) -----------------------------------
+
+  /** GET /lo/wake?since= — the environment's wake reasons for the long session. */
+  async wakeFeed(cursor: number | null): Promise<{ events: WakeEvent[]; cursor: number; top: number }> {
+    const path = cursor === null ? "/lo/wake" : `/lo/wake?since=${cursor}`;
+    const response = await this.request("GET", path);
+    let data: Record<string, unknown>;
+    try {
+      data = (await response.json()) as Record<string, unknown>;
+    } catch (err) {
+      throw new HiveUnavailable(`hive ${path}: unreadable body (${String(err)})`);
+    }
+    return {
+      events: Array.isArray(data.events) ? (data.events as WakeEvent[]) : [],
+      cursor: Number(data.cursor ?? 0) || 0,
+      top: Number(data.top ?? 0) || 0,
+    };
+  }
+
+  /** POST /lo/wake/ack — the wake cursor moves only after Pi took the batch. */
+  async wakeAck(seq: number): Promise<void> {
+    await this.request("POST", "/lo/wake/ack", { seq });
   }
 
   // --- Misaka-net over the sister's stateless MCP mount --------------------------------

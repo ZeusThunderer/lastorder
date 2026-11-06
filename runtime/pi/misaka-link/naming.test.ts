@@ -41,3 +41,11 @@ test("nameOf without a preset passes the raw actor through", () => {
   assert.equal(nameOf(12), "12");
   assert.equal(nameOf("net"), "net");
 });
+
+test("address 0 is the desk — last-order, never a padded serial (T-043 R1-1)", () => {
+  const named = makeNameOf(parseNaming(ANCHOR("Мисака 00007")));
+  assert.equal(named(0), "last-order");
+  assert.equal(named("0"), "last-order");
+  const bare = makeNameOf(parseNaming("no anchor at all"));
+  assert.equal(bare(0), "last-order");
+});

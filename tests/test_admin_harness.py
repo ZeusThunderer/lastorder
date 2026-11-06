@@ -18,6 +18,7 @@ import pytest
 
 from runtime.hive.admin import AdminAlarm, AdminConfig
 from runtime.hive.lifecycle import HiveLog
+from runtime.knowledge.slice import format_serial
 
 from test_admin_wake import FakeClock, FakeProcess, Recorder, add_will, make_cfg
 
@@ -131,9 +132,10 @@ def test_quota_switches_to_opencode_and_alarms(tmp_path: Path) -> None:
     assert recorder.argv[1][0] == "opencode"
     model = recorder.argv[1][recorder.argv[1].index("--model") + 1]
     assert model == "llm-gateway/z-ai/glm-5.3-flash"
-    # and the operator hears about it exactly once
-    assert [kind for kind, _ in alarms] == ["harness_failover"]
+    # and the operator hears about it: the switch alarm plus the quota alarm (T-043)
+    assert [kind for kind, _ in alarms] == ["harness_failover", "quota"]
     assert "opencode" in alarms[0][1]
+    assert "quota ran out" in alarms[1][1]
     assert "quota.switch" in events(tmp_path)
 
 
@@ -246,3 +248,257 @@ def test_from_env_defaults_to_pi(monkeypatch: pytest.MonkeyPatch) -> None:
     assert AdminConfig.from_env().pi_model == "GLM-5.3-Air"
     monkeypatch.setenv("ADMIN_PI_CONTEXT_WINDOW", "80000")
     assert AdminConfig.from_env().pi_context_window == 80_000
+
+
+# --- the one long hapi session (T-043) ---------------------------------------------------------
+
+
+class StopLoop(Exception):
+    """Raised by a scripted sleep to unwind the supervisor loop in a test."""
+
+
+class HapiProcess(FakeProcess):
+    """The `hapi pi` wrapper: reports the hub session id, then lives (hang) or dies."""
+
+    def __init__(self, report: str = "042c109a-6002-4141-8f2d-65ae3de5d55e", quota: bool = False):
+        super().__init__(hang=True)
+        self._report = report
+        self._quota = quota
+
+    def poll(self) -> int | None:
+        return None
+
+    def output(self) -> str:
+        text = f"[pi] Session ID persisted to metadata: {self._report}\n"
+        if self._quota:
+            text += '{"type":"error","message":"HTTP 429: rate limit, code 1302"}\n'
+        return text
+
+
+class DeadHapiProcess(HapiProcess):
+    """Died before reporting anything (a resume target the hub no longer has)."""
+
+    def poll(self) -> int | None:
+        return 1
+
+    def output(self) -> str:
+        return "connect ECONNREFUSED\n"
+
+
+class QuotaHapiProcess(HapiProcess):
+    """Reported its session, then died on the subscription's rate limit."""
+
+    def __init__(self) -> None:
+        super().__init__(quota=True)
+
+    def poll(self) -> int | None:
+        return 1  # already dead: the supervisor reads the quota out of its output
+
+
+def long_cfg_over(tmp_path: Path) -> dict:
+    # the long-session mode: a hub url and a token in the config
+    return {"hapi_url": "http://hapi-hub:3006", "hapi_token": "hub-token",
+            "hapi_boot_timeout_s": 0.2, "hapi_restart_pause_s": 0.0}
+
+
+def test_long_session_is_one_hapi_process_a_wake_spawns_nothing(tmp_path: Path) -> None:
+    """ADMIN_HARNESS=pi with a hub token: ONE `hapi pi` under the alarm; a wake
+    reason is appended to the desk's wake feed (never a second process)."""
+    recorder = Recorder()
+    recorder.factory = HapiProcess  # reports its pi session id, then lives
+    posted: list = []
+    _, clock, recorder, alarm = build(
+        tmp_path, recorder=recorder, **long_cfg_over(tmp_path)
+    )
+    alarm._post_wake = lambda kind, detail: posted.append((kind, detail))
+    # the supervisor spawns the one long session and parks on it; the wake
+    # detection runs INSIDE the supervise loop (a reason lands while it lives)
+    scripted = {"n": 0}
+
+    def sleep(seconds: float) -> None:
+        scripted["n"] += 1
+        if scripted["n"] == 1:
+            add_will(tmp_path / "knowledge", 12)  # a reason lands mid-session
+        if scripted["n"] >= 2:
+            raise StopLoop  # park after one supervise tick
+
+    alarm._sleep = sleep
+    with pytest.raises(StopLoop):
+        alarm._long_pi_loop()
+    assert len(recorder.argv) == 1
+    argv = recorder.argv[0]
+    assert argv[:2] == ("hapi", "pi")  # no resume key on a fresh volume
+    env = recorder.envs[0]
+    assert env["HAPI_API_URL"] == "http://hapi-hub:3006"
+    assert env["CLI_API_TOKEN"] == "hub-token"
+    assert recorder.cwds[0] == tmp_path / "workplace"
+    # the reported pi id is stored: the container restart resumes it
+    assert (tmp_path / "workplace" / ".admin" / "hapi_session_id").read_text(
+        encoding="utf-8"
+    ) == "042c109a-6002-4141-8f2d-65ae3de5d55e"
+    # the reason that landed mid-session rode the supervise loop (posted above);
+    # the baseline was taken at its delivery, so the next poll has nothing left
+    assert alarm.run_once() == []
+    assert len(recorder.argv) == 1
+    assert ("death", format_serial(12)) in posted  # the WakeReason fields alone
+    assert "wake.delivered" in events_of(tmp_path)
+
+
+def test_a_refused_wake_append_is_journalled_not_fatal(tmp_path: Path) -> None:
+    recorder = Recorder()
+    _, clock, recorder, alarm = build(
+        tmp_path, recorder=recorder, **long_cfg_over(tmp_path)
+    )
+
+    def refuse(kind: str, detail: str) -> None:
+        raise OSError("connection refused")
+
+    alarm._post_wake = refuse
+    add_will(tmp_path / "knowledge", 11)
+    assert alarm.run_once() != []  # the poll survived the refused append
+    assert "wake.drop" in events_of(tmp_path)
+    assert "wake.delivered" in events_of(tmp_path)
+
+
+def test_long_session_resumes_the_stored_pi_session_id(tmp_path: Path) -> None:
+    recorder = Recorder()
+    _, clock, recorder, alarm = build(
+        tmp_path, recorder=recorder, **long_cfg_over(tmp_path)
+    )
+    session = tmp_path / "workplace" / ".admin" / "hapi_session_id"
+    session.parent.mkdir(parents=True, exist_ok=True)
+    session.write_text("cdea2a72-a305-43a5-9908-914441023a6d", encoding="utf-8")
+    command = alarm._hapi_command()
+    assert command.argv == (
+        "hapi", "pi", "--session-id", "cdea2a72-a305-43a5-9908-914441023a6d"
+    )
+
+
+def test_lost_resume_target_starts_a_fresh_session(tmp_path: Path) -> None:
+    recorder = Recorder()
+    recorder.factory = lambda: DeadHapiProcess()
+    _, clock, recorder, alarm = build(
+        tmp_path, recorder=recorder, **long_cfg_over(tmp_path)
+    )
+    session = tmp_path / "workplace" / ".admin" / "hapi_session_id"
+    session.parent.mkdir(parents=True, exist_ok=True)
+    session.write_text("gone-id", encoding="utf-8")
+    scripted = {"n": 0}
+
+    def sleep(seconds: float) -> None:
+        scripted["n"] += 1
+        if scripted["n"] >= 3:  # one boot wait + one supervise tick, then stop
+            raise StopLoop
+
+    alarm._sleep = sleep
+    with pytest.raises(StopLoop):
+        alarm._long_pi_loop()
+    # the resume key was dropped (hapi.resume_lost) and the next spawn starts fresh
+    assert session.read_text(encoding="utf-8") == ""
+    assert "hapi.resume_lost" in events_of(tmp_path)
+    assert recorder.argv[0][:3] == ("hapi", "pi", "--session-id")
+    assert recorder.argv[1] == ("hapi", "pi")
+
+
+def test_quota_death_hands_the_desk_to_short_sessions_with_both_alarms(tmp_path: Path) -> None:
+    auth = tmp_path / "auth.json"
+    auth.write_text("{}", encoding="utf-8")
+    recorder = Recorder()
+    recorder.factory = QuotaHapiProcess
+    alarms: list = []
+    _, clock, recorder, alarm = build(
+        tmp_path, recorder=recorder, alarms=alarms,
+        opencode_auth_file=auth, **long_cfg_over(tmp_path),
+    )
+    # the quota-marked death exits the supervisor loop by the failover switch
+    alarm._long_pi_loop()
+    assert [kind for kind, _ in alarms] == ["harness_failover", "quota"]
+    assert "quota ran out" in alarms[1][1]
+    # the next wake is the T-030 short session on the failover
+    clock.advance(seconds=60)
+    add_will(tmp_path / "knowledge", 7)
+    alarm.run_once()
+    assert recorder.argv[-1][0] == "opencode"
+
+
+def test_quota_death_without_a_ready_failover_waits_a_quota_window(tmp_path: Path) -> None:
+    """No rendered opencode auth: the quota death must not hammer the dead
+    subscription with restarts — one spawn, then the long wait."""
+    recorder = Recorder()
+    recorder.factory = QuotaHapiProcess
+    _, clock, recorder, alarm = build(
+        tmp_path, recorder=recorder, **long_cfg_over(tmp_path)
+    )
+    waits: list = []
+    scripted = {"n": 0}
+
+    def bounded_sleep(seconds: float) -> None:
+        scripted["n"] += 1
+        waits.append(seconds)
+        raise StopLoop  # stop the loop inside the quota wait itself
+
+    alarm._sleep = bounded_sleep
+    with pytest.raises(StopLoop):
+        alarm._long_pi_loop()
+    assert len(recorder.argv) == 1  # no restart while the quota waits
+    assert waits == [pytest.approx(10.0 * 60.0)]  # the every_min window, not 15 s
+    assert "quota.waits" in events_of(tmp_path)
+
+
+def test_long_session_render_carries_the_delivery_extension(tmp_path: Path) -> None:
+    """The desk's agent-dir render includes misaka-link (T-048): the one session
+    reads the board feed and its inbox without any runner-side bridge."""
+    recorder = Recorder()
+    _, clock, recorder, alarm = build(
+        tmp_path, recorder=recorder, **long_cfg_over(tmp_path)
+    )
+    adapter = alarm._adapters["pi"]
+    adapter._render()
+    from runtime.node.workplace import MISAKA_LINK_DIR, MISAKA_LINK_FILES
+
+    installed = tmp_path / "pi-agent" / "extensions" / "misaka-link"
+    for name in MISAKA_LINK_FILES:
+        assert (installed / name).read_text(encoding="utf-8") == (
+            MISAKA_LINK_DIR / name
+        ).read_text(encoding="utf-8"), name
+
+
+def events_of(tmp_path: Path) -> str:
+    return (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+
+
+def test_the_session_id_is_the_last_match_of_this_spawns_log(tmp_path: Path) -> None:
+    """One wrapper log can carry an earlier id of the same session (reconnects):
+    the resume key must be the LAST 'Session ID persisted' line, and only from a
+    log written after the spawn (review R1-2)."""
+    import time as _time
+
+    recorder = Recorder()
+    recorder.factory = HapiProcess  # its stdout also carries one id
+    _, clock, recorder, alarm = build(
+        tmp_path, recorder=recorder, hapi_home=tmp_path / "hapi-home",
+        **long_cfg_over(tmp_path),
+    )
+    logs = tmp_path / "hapi-home" / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    spawned_at = _time.time()
+    (logs / "old.log").write_text(
+        "[pi] Session ID persisted to metadata: 11111111-1111-4111-8111-111111111111\n",
+        encoding="utf-8",
+    )
+    import os as _os
+
+    (logs / "new.log").write_text(
+        "[pi] Session ID persisted to metadata: 22222222-2222-4222-8222-222222222222\n"
+        "[pi] Session ID persisted to metadata: 33333333-3333-4333-8333-333333333333\n",
+        encoding="utf-8",
+    )
+    _os.utime(logs / "old.log", (spawned_at - 60, spawned_at - 60))
+    _os.utime(logs / "new.log", (spawned_at + 1, spawned_at + 1))
+    process = recorder.factory()
+    assert alarm._await_session_id(process, spawned_at) == "33333333-3333-4333-8333-333333333333"
+    # a spawn younger than every log reads none of them: only THIS process's own
+    # stdout stays (its single id), never a previous run's log line
+    assert alarm._await_session_id(process, spawned_at + 120) == (
+        "042c109a-6002-4141-8f2d-65ae3de5d55e"
+    )

@@ -5,8 +5,14 @@
 // and raises delivery_failing once it answers again. No board semantics, no
 // behaviour — the rules live in the sister's instructions (section 13, ADR-032).
 
-import { envelopeLines, netEnvelope, type NameOf, type BoardEvent } from "./envelope.ts";
-import { HiveRejected, HiveUnavailable, type FeedResponse, type InboxMessage } from "./hive.ts";
+import { envelopeLines, netEnvelope, wakeEnvelope, type NameOf, type BoardEvent } from "./envelope.ts";
+import {
+  HiveRejected,
+  HiveUnavailable,
+  type FeedResponse,
+  type InboxMessage,
+  type WakeEvent,
+} from "./hive.ts";
 
 export const POLL_S = 10.0; // the healthy feed pace; the section-11 ceiling is 15 s
 export const RETRY_PAUSE_S = 2.0; // the hive is down: 2, 4, 8 ... capped
@@ -20,6 +26,8 @@ export interface HiveLink {
   ack(seq: number): Promise<void>;
   alarmDeliveryFailing(text: string, slot: string, serial: number | null): Promise<void>;
   inbox(): Promise<InboxMessage[]>;
+  wakeFeed(cursor: number | null): Promise<{ events: WakeEvent[]; cursor: number; top: number }>;
+  wakeAck(seq: number): Promise<void>;
 }
 
 export interface Sender {
@@ -43,6 +51,10 @@ export class LinkCore {
   private alarmPending = 0;
   private slot: string;
   private serial: number | null;
+  /** The desk's wake feed rides the SAME loop, desk sessions only (T-043). */
+  private readonly desk: boolean;
+  private wakeCursor: number | null = null;
+  private readonly wakeSeen = new Set<number>();
 
   constructor(opts: {
     hive: HiveLink;
@@ -52,6 +64,7 @@ export class LinkCore {
     pollS?: number;
     slot?: string;
     serial?: number | null;
+    desk?: boolean;
   }) {
     this.hive = opts.hive;
     this.sender = opts.sender;
@@ -60,6 +73,7 @@ export class LinkCore {
     this.pollS = opts.pollS ?? POLL_S;
     this.slot = opts.slot ?? "";
     this.serial = opts.serial ?? null;
+    this.desk = opts.desk ?? false;
   }
 
   private deliver(text: string): void {
@@ -131,6 +145,54 @@ export class LinkCore {
       }
     }
 
+    // the desk's wake feed (T-043): the environment's own wake reasons — the same
+    // at-least-once contract, its own cursor, its own envelope kind
+    if (this.desk) {
+      let wake;
+      try {
+        wake = await this.hive.wakeFeed(this.wakeCursor);
+      } catch (err) {
+        if (err instanceof HiveUnavailable) {
+          this.log("misakalink.wake_failed", { attempt: this.failures + 1, error: String(err) });
+          return this.fail();
+        }
+        if (err instanceof HiveRejected) {
+          this.log("misakalink.wake_refused", { error: String(err) });
+          return this.pollS;
+        }
+        throw err;
+      }
+      await this.alarmIfPending();
+      if (wake.top > 0 && this.wakeCursor !== null && wake.top < this.wakeCursor) {
+        // the feed was rebuilt behind our cursor: start it over
+        this.wakeCursor = null;
+        this.wakeSeen.clear();
+        this.log("misakalink.wake_reset", { cursor: wake.top });
+        wake = await this.hive.wakeFeed(null);
+      }
+      const fresh = wake.events.filter(e => !this.wakeSeen.has(e.seq));
+      if (fresh.length) {
+        const lines = fresh.map(e => wakeEnvelope(e));
+        try {
+          this.deliver(lines.join("\n"));
+          for (const event of fresh) this.rememberWake(event.seq);
+          this.log("misakalink.wake_delivered", { lines: lines.length });
+        } catch (err) {
+          this.log("misakalink.wake_send_failed", { lines: lines.length, error: String(err) });
+          return this.pollS;
+        }
+      }
+      const top = Math.max(...wake.events.map(e => Number(e.seq) || 0), 0);
+      if (top) {
+        try {
+          await this.hive.wakeAck(top); // only after Pi took the batch
+          this.wakeCursor = top;
+        } catch (err) {
+          if (!(err instanceof HiveRejected)) this.log("misakalink.wake_ack_failed", { error: String(err) });
+        }
+      }
+    }
+
     let response;
     try {
       response = await this.hive.feed(this.cursor);
@@ -193,6 +255,15 @@ export class LinkCore {
       const oldest = this.seen.keys().next();
       if (oldest.done) break;
       this.seen.delete(oldest.value);
+    }
+  }
+
+  private rememberWake(seq: number): void {
+    this.wakeSeen.add(seq);
+    while (this.wakeSeen.size > SEEN_MAX) {
+      const oldest = this.wakeSeen.values().next();
+      if (oldest.done) break;
+      this.wakeSeen.delete(oldest.value);
     }
   }
 }

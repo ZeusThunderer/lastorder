@@ -73,10 +73,13 @@ def test_last_order_rides_pi_with_gateway_failover():
 
 def test_last_order_key_surface_is_zai_alone():
     # ADR-033: the subscription token is the conscious exception; the gateway virtual
-    # key and the hive key are the stand's own, no provider key rides anything else
+    # key and the hive key are the stand's own, no provider key rides anything else.
+    # T-043 adds HAPI_CLI_KEY — the hub's chat token of the one long session, the
+    # DESK sandbox's own conscious exception (it opens chat sessions, not providers);
+    # the sisters' sandboxes still get no hub token at all (T-044/T-045)
     env = COMPOSE["services"]["last-order"]["environment"]
     keyish = {k for k in env if ("KEY" in k or "TOKEN" in k) and not k.endswith("_KEY_FILE")}
-    assert keyish == {"HIVE_MCP_LO_KEY", "GATEWAY_NODE_KEY", "ZAI_API_KEY"}
+    assert keyish == {"HIVE_MCP_LO_KEY", "GATEWAY_NODE_KEY", "ZAI_API_KEY", "HAPI_CLI_KEY"}
 
 
 def test_zai_egress_carries_api_zai_into_svc_lo():

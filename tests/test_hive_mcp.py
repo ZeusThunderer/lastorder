@@ -44,6 +44,7 @@ SISTER_TOOLS = {
 }
 LO_TOOLS = {"proposals", "decide", "set_goals", "chronicle",
             "board", "post", "claim", "update", "reply",
+            "send", "inbox",  # T-043: the desk answers the sisters on Misaka-net
             "request_grant", "grants"}  # the grant vault (T-046, TASKBOARD.md 5.3)
 
 
@@ -250,9 +251,10 @@ def test_sister_tool_set(stack: Stack) -> None:
 def test_last_order_tool_set_and_sister_lack(stack: Stack) -> None:
     stack.birth("LastOrder01")
     assert tool_names(stack, stack.lo_url(), KEY_LO) == LO_TOOLS
-    # a sister never even sees the admin tools; the board set (T-042) is shared by design
-    board_tools = {"board", "post", "claim", "update", "reply"}
-    assert not ((SISTER_TOOLS - board_tools) & (LO_TOOLS - board_tools))
+    # a sister never even sees the admin tools; the board set (T-042) and the
+    # Misaka-net pair (T-043) are shared by design
+    shared = {"board", "post", "claim", "update", "reply", "send", "inbox"}
+    assert not ((SISTER_TOOLS - shared) & (LO_TOOLS - shared))
 
 
 def test_cross_key_refusals(stack: Stack) -> None:
@@ -608,3 +610,91 @@ def test_submit_will_session_mark_needs_the_runner_key(tmp_path: Path) -> None:
     finally:
         stack.uvicorn.should_exit = True
         stack.thread.join(timeout=10)
+
+
+# --- the desk's Misaka-net pair (T-043) -------------------------------------------------------
+
+
+def test_last_order_answers_a_sister_from_address_zero(stack: Stack) -> None:
+    serial = stack.birth("LastOrder01")
+    # the desk speaks as `last-order` (address 0), never as a registry serial
+    out = lo_call(stack, "send", {"to": str(serial), "text": "Network note: the lava lake moved."})
+    assert out == {"sent": ["00001"]}
+    messages = node_call(stack, KEY1, "inbox", {})["messages"]
+    assert [m["from_serial"] for m in messages] == [0]
+    assert "lava lake" in messages[0]["text"]
+    # the desk's own inbox drains once and is empty: nothing addresses address 0 yet
+    assert lo_call(stack, "inbox", {}) == {"messages": []}
+    # a sister key does not open the desk's send — each server keeps its own pair
+    assert "Last Order" in lo_error(stack, "send", {"to": "1", "text": "hi"}, key=KEY1)
+
+
+def test_last_order_broadcast_and_limits_mirror_the_sisters(stack: Stack) -> None:
+    stack.birth("LastOrder01")
+    stack.birth("LastOrder02")
+    out = lo_call(stack, "send", {"to": "all", "text": "Chronicle hour."})
+    assert out["sent"]  # both sisters
+    assert "not alive" in lo_error(stack, "send", {"to": "999", "text": "hi"})
+    assert "non-empty" in lo_error(stack, "send", {"to": "1", "text": "  "})
+
+
+# --- the desk's wake feed (T-043) --------------------------------------------------------------
+
+
+def _lo_wake(stack: Stack, method: str, path: str, body: dict | None = None, key: str = KEY_LO):
+    return httpx.request(
+        method, f"http://127.0.0.1:{stack.port}{path}", json=body,
+        headers={"X-Node-Key": key}, timeout=30.0,
+    )
+
+
+def test_wake_feed_appends_reads_and_acks_under_the_desk_key(stack: Stack) -> None:
+    first = _lo_wake(stack, "POST", "/lo/wake", {"kind": "timer", "detail": "10 min since"})
+    assert first.status_code == 200, first.text
+    seq1 = first.json()["seq"]
+    seq2 = _lo_wake(stack, "POST", "/lo/wake", {"kind": "death", "detail": "00002"}).json()["seq"]
+    assert seq2 == seq1 + 1
+    # the feed since 0 carries both, with the top of the whole log
+    feed = _lo_wake(stack, "GET", "/lo/wake?since=0").json()
+    assert [e["seq"] for e in feed["events"]] == [seq1, seq2]
+    assert feed["top"] == seq2
+    assert [e["kind"] for e in feed["events"]] == ["timer", "death"]
+    # the ack moves the cursor, and since= asks only for what follows
+    assert _lo_wake(stack, "POST", "/lo/wake/ack", {"seq": seq1}).status_code == 200
+    tail = _lo_wake(stack, "GET", "/lo/wake").json()  # no since: the acked cursor
+    assert [e["seq"] for e in tail["events"]] == [seq2]
+    # validation
+    assert _lo_wake(stack, "POST", "/lo/wake", {"kind": ""}).status_code == 422
+    assert _lo_wake(stack, "POST", "/lo/wake/ack", {"seq": -1}).status_code == 422
+
+
+def test_wake_feed_opens_with_the_desk_key_alone(stack: Stack) -> None:
+    stack.birth("LastOrder01")
+    # a sister's node key, the runner key, no key at all — all refused
+    for key in (KEY1, ""):
+        response = _lo_wake(stack, "POST", "/lo/wake", {"kind": "timer"}, key=key or "x")
+        assert response.status_code == 401, (key, response.text)
+    response = httpx.request(
+        "POST", f"http://127.0.0.1:{stack.port}/lo/wake",
+        json={"kind": "timer"}, headers={"X-Runner-Key": RKEY1}, timeout=30.0,
+    )
+    assert response.status_code == 401
+
+
+def test_wake_feed_survives_a_hive_restart_and_caps_its_tail(stack: Stack, tmp_path: Path) -> None:
+    seq = _lo_wake(stack, "POST", "/lo/wake", {"kind": "timer", "detail": "one"}).json()["seq"]
+    # a "restart": a fresh app over the same run dir keeps the seq and the cursor
+    stack.close()
+    stack2 = Stack(tmp_path)
+    try:
+        feed = _lo_wake(stack2, "GET", "/lo/wake?since=0").json()
+        assert [e["seq"] for e in feed["events"]] == [seq]
+        # the cap: the tail keeps only the recent history
+        from runtime.hive.app import WAKE_FEED_MAX
+        for i in range(WAKE_FEED_MAX + 5):
+            _lo_wake(stack2, "POST", "/lo/wake", {"kind": "timer", "detail": str(i)})
+        events = _lo_wake(stack2, "GET", "/lo/wake?since=0").json()["events"]
+        assert len(events) == WAKE_FEED_MAX
+        assert events[0]["seq"] > seq  # the oldest were folded away
+    finally:
+        stack2.close()

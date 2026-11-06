@@ -43,7 +43,9 @@ function readLinkConfig(agentDir: string, cwd: string): LinkConfig | null {
     log("misakalink.no_hive_server", { agentDir });
     return null;
   }
-  const base = url.replace(/\/node\/mcp\/?$/, "");
+  // a sister's mount ends /node/mcp, the desk's /last-order/mcp (T-043): the HTTP
+  // base is the url minus whichever MCP mount it rides
+  const base = url.replace(/\/(node|last-order)\/mcp\/?$/, "");
 
   let naming = { prefix: null as string | null, serial: null as number | null };
   try {
@@ -56,6 +58,9 @@ function readLinkConfig(agentDir: string, cwd: string): LinkConfig | null {
     hive: new HiveClient({ base, mcpUrl: url, key }),
     nameOf: makeNameOf(naming),
     serial,
+    // the desk's own MCP mount rides the same agent-dir shape (T-043): its
+    // session also reads the wake feed; a sister's does not
+    desk: /\/last-order\/mcp\/?$/.test(url),
   };
 }
 
@@ -86,8 +91,9 @@ export default function misakaLink(pi: unknown) {
       nameOf: config.nameOf,
       journal: (type, payload) => log(type, payload),
       serial: config.serial,
+      desk: config.desk,
     });
-    log("misakalink.start", { agentDir, serial: config.serial });
+    log("misakalink.start", { agentDir, serial: config.serial, desk: config.desk });
     stopped = false;
     running = (async () => {
       while (!stopped) {
