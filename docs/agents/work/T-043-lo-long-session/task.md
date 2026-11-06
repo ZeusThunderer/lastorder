@@ -2,7 +2,7 @@
 id: T-043
 title: Last Order на Pi — одна долгая сессия, события сети сообщениями, запасной OpenCode с тревогой
 stage: I
-status: review
+status: changes
 criticality: critical
 after: [T-048, T-059]
 branch: z/T-043-lo-long-session
@@ -47,6 +47,7 @@ Last Order живёт в одной долгой сессии Pi на Z.ai Codin
 - тесты admin (`tests/test_hive_admin*.py` или текущие)
 - `runtime/hive/app.py` — только лента поводов Last Order (POST записи, GET ленты, см. «Заметки
   надзора», 2026-11-06) и её хранилище в hive; тесты к ним
+- `runtime/pi/misaka-link/naming.ts` и его тест — только имя адреса 0 (`last-order`), ревью R1-1
 - `runtime/pi/misaka-link/` — чтение ленты поводов для стола, конверт повода, суффикс
   `/last-order/mcp` (уже сделан); тесты расширения
 - файлы задачи
@@ -99,3 +100,5 @@ bash dev/check.sh
   читает её только у стола (`/last-order/mcp`) и доставляет конвертом `[wake · <reason> · …]`.
   В повод — только поля `WakeReason` (вид, номера узлов, счётчики), без сырых id и текста из игры.
   `wake.delivered` в журнале admin остаётся. Подробно — `review.md`, «Ответ 1».
+- 2026-11-06, ревью 1: адрес 0 Мисака-нет (отправитель `send` стола) у сестёр рендерится как
+  `last-order`, не «Мисака 00000» (R1-1).
