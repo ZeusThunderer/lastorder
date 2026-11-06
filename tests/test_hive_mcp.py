@@ -44,6 +44,7 @@ SISTER_TOOLS = {
 }
 LO_TOOLS = {"proposals", "decide", "set_goals", "chronicle",
             "board", "post", "claim", "update", "reply",
+            "send", "inbox",  # T-043: the desk answers the sisters on Misaka-net
             "request_grant", "grants"}  # the grant vault (T-046, TASKBOARD.md 5.3)
 
 
@@ -250,9 +251,10 @@ def test_sister_tool_set(stack: Stack) -> None:
 def test_last_order_tool_set_and_sister_lack(stack: Stack) -> None:
     stack.birth("LastOrder01")
     assert tool_names(stack, stack.lo_url(), KEY_LO) == LO_TOOLS
-    # a sister never even sees the admin tools; the board set (T-042) is shared by design
-    board_tools = {"board", "post", "claim", "update", "reply"}
-    assert not ((SISTER_TOOLS - board_tools) & (LO_TOOLS - board_tools))
+    # a sister never even sees the admin tools; the board set (T-042) and the
+    # Misaka-net pair (T-043) are shared by design
+    shared = {"board", "post", "claim", "update", "reply", "send", "inbox"}
+    assert not ((SISTER_TOOLS - shared) & (LO_TOOLS - shared))
 
 
 def test_cross_key_refusals(stack: Stack) -> None:
@@ -608,3 +610,29 @@ def test_submit_will_session_mark_needs_the_runner_key(tmp_path: Path) -> None:
     finally:
         stack.uvicorn.should_exit = True
         stack.thread.join(timeout=10)
+
+
+# --- the desk's Misaka-net pair (T-043) -------------------------------------------------------
+
+
+def test_last_order_answers_a_sister_from_address_zero(stack: Stack) -> None:
+    serial = stack.birth("LastOrder01")
+    # the desk speaks as `last-order` (address 0), never as a registry serial
+    out = lo_call(stack, "send", {"to": str(serial), "text": "Network note: the lava lake moved."})
+    assert out == {"sent": ["00001"]}
+    messages = node_call(stack, KEY1, "inbox", {})["messages"]
+    assert [m["from_serial"] for m in messages] == [0]
+    assert "lava lake" in messages[0]["text"]
+    # the desk's own inbox drains once and is empty: nothing addresses address 0 yet
+    assert lo_call(stack, "inbox", {}) == {"messages": []}
+    # a sister key does not open the desk's send — each server keeps its own pair
+    assert "Last Order" in lo_error(stack, "send", {"to": "1", "text": "hi"}, key=KEY1)
+
+
+def test_last_order_broadcast_and_limits_mirror_the_sisters(stack: Stack) -> None:
+    stack.birth("LastOrder01")
+    stack.birth("LastOrder02")
+    out = lo_call(stack, "send", {"to": "all", "text": "Chronicle hour."})
+    assert out["sent"]  # both sisters
+    assert "not alive" in lo_error(stack, "send", {"to": "999", "text": "hi"})
+    assert "non-empty" in lo_error(stack, "send", {"to": "1", "text": "  "})

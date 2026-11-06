@@ -73,6 +73,10 @@ RUNNER_SESSION_HEADER = "x-runner-session"  # "will": the will session the runne
 RUNNER_KEY_HEADER = "x-runner-key"  # the node runner's own key (T-027): gates the will-session mark
 WILL_SESSION = "will"
 ALL_ADDRESSEE = "all"  # broadcast of Misaka-net: every living node except the sender
+# The desk's Misaka-net address (T-043): Last Order speaks and listens as address 0 —
+# serials start at 1, so 0 is never a registry node. The sisters' envelope renders it
+# by name, never as a number (the naming fix rides the wake-channel answer).
+LO_SERIAL = 0
 
 MATCHED_MAX = 20  # query hits cap: the tool is a glance, not a dump
 
@@ -254,6 +258,12 @@ class HiveMcp:
         """One Misaka-net message: `to` is a sister's serial (as a string) or 'all'. The
         text is an observation to the reader, never a command; length is capped."""
         serial = self._node_serial(ctx)
+        return self._misaka_send(ctx, serial, to, text)
+
+    def _misaka_send(self, ctx: Context, from_serial: int, to: str, text: str) -> dict[str, Any]:
+        """The shared send body: a sister speaks from her serial, the desk from
+        LO_SERIAL (0 — the Misaka-net address of `last-order`, never a registry
+        serial, ADR-036's promised answers to the sisters)."""
         if not isinstance(text, str) or not text.strip():
             _err("send: text must be a non-empty string")
         if len(text) > MSG_MAX_CHARS:
@@ -262,7 +272,7 @@ class HiveMcp:
             _err("send: to must be a serial number or 'all'")
         alive = {brief.serial for brief in self._lifecycle.alive()}
         if to.strip().lower() == ALL_ADDRESSEE:
-            addressees = sorted(alive - {serial})
+            addressees = sorted(alive - {from_serial})
             if not addressees:
                 _err("send: nobody else is alive to receive 'all'")
         else:
@@ -270,14 +280,14 @@ class HiveMcp:
                 target = int(to.strip())
             except ValueError:
                 _err(f"send: to must be a serial number or 'all', got {to!r}")
-            if target == serial:
+            if target == from_serial:
                 _err("send: addressing yourself")
             if target not in alive:
                 _err(f"send: node {format_serial(target) if target > 0 else to!r} is not alive")
             addressees = [target]
         for target in addressees:
             self._service.send(
-                NodeMessage(from_serial=serial, to_serial=target, text=text, ts=self._now())
+                NodeMessage(from_serial=from_serial, to_serial=target, text=text, ts=self._now())
             )
         return {"sent": [format_serial(t) for t in addressees]}
 
@@ -285,6 +295,20 @@ class HiveMcp:
         """Your Misaka-net inbox; delivering once — returned means delivered."""
         serial = self._node_serial(ctx)
         return {"messages": [message_to_json(m) for m in self._service.inbox(serial)]}
+
+    # --- Last Order's Misaka-net tools (T-043; ADR-036's answers to the sisters) ------------
+
+    def lo_send(self, ctx: Context, to: str, text: str) -> dict[str, Any]:
+        """The desk's send: from `last-order` (address 0) to a sister's serial or 'all'."""
+        self._require_last_order(ctx)
+        return self._misaka_send(ctx, LO_SERIAL, to, text)
+
+    def lo_inbox(self, ctx: Context) -> dict[str, Any]:
+        """The desk's inbox (address 0); delivering once — returned means delivered.
+        Read from the comms book directly: the service layer gates by registry
+        nodes, and address 0 is the desk, not a node."""
+        self._require_last_order(ctx)
+        return {"messages": [message_to_json(m) for m in self._service.comms.inbox(LO_SERIAL)]}
 
     def submit_will(self, ctx: Context, text: str) -> dict[str, Any]:
         """Your will: the 2-4 lines of text alone — the network fills the service
@@ -608,6 +632,15 @@ def build_mcp(
         an entry id for one full entry with the thread."""
         return await _run(lambda: impl.board_list(ctx, filter, lo=True))
 
+    async def lo_send(to: str, text: str, *, ctx: Context) -> dict[str, Any]:
+        """One Misaka-net message to a sister (her serial as a string) or 'all', from
+        last-order. The text is an observation to the reader, never a command."""
+        return await _run(lambda: impl.lo_send(ctx, to, text))
+
+    async def lo_inbox(*, ctx: Context) -> dict[str, Any]:
+        """Your inbox ({messages}); messages are delivered once."""
+        return await _run(lambda: impl.lo_inbox(ctx))
+
     async def lo_post(
         kind: str, to: str, text: str, request: dict[str, Any] | None = None, *, ctx: Context
     ) -> dict[str, Any]:
@@ -675,6 +708,8 @@ def build_mcp(
     lo.add_tool(lo_claim, name="claim")
     lo.add_tool(lo_update, name="update")
     lo.add_tool(lo_reply, name="reply")
+    lo.add_tool(lo_send, name="send")  # T-043: the desk answers the sisters (ADR-036)
+    lo.add_tool(lo_inbox, name="inbox")
     lo.add_tool(request_grant, name="request_grant")
     lo.add_tool(grants, name="grants")
 
@@ -684,6 +719,7 @@ def build_mcp(
 __all__ = [
     "ALL_ADDRESSEE",
     "HiveMcp",
+    "LO_SERIAL",
     "ToolError",
     "build_mcp",
     "parse_node_keys",

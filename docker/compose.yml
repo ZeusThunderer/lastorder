@@ -377,6 +377,10 @@ services:
       GATEWAY_NODE_KEY: "${GATEWAY_KEY_LO:-}"   # the node entrypoint renders it into opencode auth
       ZAI_API_KEY: "${ZCODE_API_KEY:-}"         # ditto: root-only tmpfs copy + the pi zai-key
       ZAI_KEY_FILE: /run/node/secrets/zai_api_key
+      # the one long session (T-043, ADR-042): the hapi CLI's hub token. A conscious
+      # env exception for the DESK sandbox — the hub token opens chat sessions, not
+      # providers (ADR-033); the sisters' sandboxes do not get it (T-044/T-045).
+      HAPI_CLI_KEY: "${HAPI_CLI_KEY:-}"
       SISTER_UID: "1001"
       SISTER_GID: "1001"
     command: ["python", "-m", "runtime.hive.admin"]
