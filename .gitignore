@@ -30,3 +30,6 @@ docker/run/
 /task2.md
 /task3-4.md
 /agent/last_order/skin/src_*.png
+
+# T-067 video renders and footage (local only)
+/dev/video/out/

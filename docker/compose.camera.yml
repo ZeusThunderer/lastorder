@@ -1,0 +1,28 @@
+# Spectator camera overlay (T-067). Not part of the stand: an optional filming client.
+#   docker compose -f docker/compose.yml -f docker/compose.camera.yml --profile camera up -d --no-deps camera
+# It sits on the default network next to mc-server only; it has no agent, no keys and no RCON.
+# Spectate/tp are issued by the operator's script through mc-server (dev/video/cam.sh).
+services:
+  camera:
+    build: ./camera
+    image: lastorder-camera:dev
+    profiles: [camera]
+    restart: "no"
+    init: true   # ffmpeg runs detached from `docker exec`; tini reaps it (java as PID 1 would not)
+    mem_limit: 4g
+    environment:
+      MC_USERNAME: "${CAMERA_USERNAME:-LoCamera}"
+      MC_SERVER: "mc-server:25565"
+      CAM_RENDER_DISTANCE: "${CAM_RENDER_DISTANCE:-10}"
+      CAM_W: "${CAM_W:-1920}"
+      CAM_H: "${CAM_H:-1080}"
+      BODY_XMX: "${CAM_XMX:-2G}"
+      MALLOC_ARENA_MAX: "2"
+    volumes:
+      - camera:/data
+      - camera-footage:/footage
+    networks: [default]
+
+volumes:
+  camera:
+  camera-footage:
