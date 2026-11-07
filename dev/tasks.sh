@@ -3,6 +3,7 @@
 #   bash dev/tasks.sh                  # table: id, status, BOARD status, branch, worktree, open `after:` tasks
 #   bash dev/tasks.sh --next [T-NNN …] # ZCode: next task to work on, "T-NNN <status>", skipping the given ids;
 #                                      # order: in_progress, review, blocked with a question, changes, ready
+#                                      # tasks with `owner: supervisor` are skipped
 #   bash dev/tasks.sh --sync           # Claude: write real statuses into BOARD in main (under the main lock)
 #   bash dev/tasks.sh --prune          # Claude: remove worktrees and branches of done tasks merged into main
 set -uo pipefail
@@ -33,6 +34,8 @@ if [ "$mode" = --next ]; then
     for d in $dirs; do
       id="${d:0:5}"
       case "$skip" in *" $id "*) continue ;; esac
+      # Tasks the supervisor does itself (owner: supervisor) are not ZCode's.
+      [ "$(field main "$d" owner)" = supervisor ] && continue
       [ "$(task_status "$d")" = "$want" ] || continue
       if [ "$want" = blocked ]; then
         # Only a worker's question goes to the supervisor; "нужен оператор" waits for the operator.
