@@ -2,7 +2,7 @@
 id: T-054
 title: Старт слота — нет смерти от устаревшего hp, wait_events не дольше таймаута харнесса
 stage: I
-status: in_progress
+status: review
 criticality: critical
 after: [T-059]
 branch: z/T-054-slot-start-fixes
