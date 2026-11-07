@@ -45,6 +45,10 @@ x-mind: &mind
     MIND_TICK_S: "${MIND_TICK_S:-0.5}"
     MIND_IDLE_S: "${MIND_IDLE_S:-120}"
     MIND_FLEE_HP: "${MIND_FLEE_HP:-6}"
+    # The wait_events cap (T-054): the zcode harness kills a tool call after 30 s —
+    # 7 killed waits on node-2 in the T-052 run — so the default keeps every ask
+    # under it with a margin; a larger ask clamps and the answer names the value.
+    WAIT_EVENTS_MAX_S: "${WAIT_EVENTS_MAX_S:-25}"
     # LLM through the gateway (T-026, ADR-033): no provider key ever enters this
     # container. No health gate on llm-gateway on purpose: a down gateway is a retry
     # case (NETWORK.md section 9), Jev timeouts fall back to the C1 rules.
