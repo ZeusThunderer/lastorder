@@ -11,6 +11,7 @@ keep the chosen configuration from drifting.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -103,3 +104,38 @@ def test_mind_wait_events_cap_stays_under_the_harness_kill():
         raw = COMPOSE["services"][name]["environment"]["WAIT_EVENTS_MAX_S"]
         assert raw == "${WAIT_EVENTS_MAX_S:-25}", name
         assert float(re.search(r":-(\d+(?:\.\d+)?)}", raw).group(1)) < 30.0, name
+
+
+# --- T-055: the bridge-friendly slot lifecycle --------------------------------------------------
+
+
+def test_body_healthcheck_probes_the_py4j_gateway_port():
+    # Ready = uc's gateway is listening (the mod starts it at the title screen);
+    # a mind connecting during body load breaks the bridge (T-052 b).
+    for name in ("body-1", "body-2", "body-3"):
+        hc = COMPOSE["services"][name]["healthcheck"]
+        assert "25333" in hc["test"][-1], name
+        assert hc["start_period"] == "300s", name  # a cold volume downloads assets first
+
+
+def test_mind_waits_for_a_healthy_body_and_stops_gracefully():
+    for name, body in (("mind-1", "body-1"), ("mind-2", "body-2"), ("mind-3", "body-3")):
+        svc = COMPOSE["services"][name]
+        assert svc["depends_on"][body]["condition"] == "service_healthy", name
+        # the SIGTERM teardown (~11 s) must fit inside the grace period
+        assert svc["stop_grace_period"] == "20s", name
+
+
+def test_slot_restart_dry_run_prints_the_sequence():
+    # The acceptance command itself: the dry run prints every step without
+    # touching docker (mind stop → body recreate → health wait → mind start).
+    out = subprocess.run(
+        ["bash", "dev/slot_restart.sh", "1", "--dry-run"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "stop mind-1" in out
+    assert "up -d --force-recreate --no-deps body-1" in out
+    assert "--healthy body-1" in out
+    assert "up -d mind-1" in out

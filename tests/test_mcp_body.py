@@ -17,8 +17,10 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import signal
 import threading
 import time
+import types
 from datetime import datetime
 
 import httpx
@@ -446,6 +448,48 @@ def test_wait_events_tool_description_names_the_cap() -> None:
 def test_wait_events_zero_is_still_rejected(stack: Stack) -> None:
     result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 0}))
     assert "must be > 0" in error_text(result)
+
+
+# --- the SIGTERM path (T-055) ---------------------------------------------------------------
+
+
+class FakeUvi:
+    def __init__(self) -> None:
+        self.should_exit = False
+
+
+class FakeThread:
+    def __init__(self) -> None:
+        self.joined: list[float | None] = []
+
+    def join(self, timeout: float | None = None) -> None:
+        self.joined.append(timeout)
+
+
+def test_teardown_mind_stops_in_order_and_closes_the_bridge() -> None:
+    # SIGTERM: the MCP server first, then C1, then the bridge (close() — the
+    # SIGKILL alternative leaves uc's Java gateway dead, T-052 a). The join is
+    # bounded by TEARDOWN_GRACE_S, under compose's stop_grace_period.
+    from runtime.mind.mcp_body import TEARDOWN_GRACE_S, teardown_mind
+
+    uvi, thread = FakeUvi(), FakeThread()
+    calls: list[str] = []
+    executor = types.SimpleNamespace(stop=lambda: calls.append("stop"))
+    body = types.SimpleNamespace(close=lambda: calls.append("close"))
+
+    teardown_mind(uvi, thread, executor, body)
+
+    assert uvi.should_exit is True
+    assert thread.joined == [TEARDOWN_GRACE_S]
+    assert calls == ["stop", "close"]  # the bridge closes LAST
+
+
+def test_stop_handler_sets_the_event() -> None:
+    from runtime.mind.mcp_body import stop_handler
+
+    stop = threading.Event()
+    stop_handler(stop)(signal.SIGTERM, None)
+    assert stop.is_set()
 
 
 # --- death and the runner endpoints -----------------------------------------------------
