@@ -33,3 +33,11 @@ docker/run/
 
 # T-067 video renders and footage (local only)
 /dev/video/out/
+# T-067 trailer: npm deps, media and HyperFrames artifacts stay local (rebuilt by dev/video/trailer/build.sh)
+/dev/video/trailer/node_modules/
+/dev/video/trailer/assets/
+/dev/video/trailer/film/assets/clips/
+/dev/video/trailer/film/assets/music/
+/dev/video/trailer/film/.hyperframes/
+/dev/video/trailer/film/.media/
+/dev/video/trailer/film/renders/

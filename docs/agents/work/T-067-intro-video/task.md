@@ -95,3 +95,12 @@ ffmpeg -i dev/video/out/intro.mp4 -vf "fps=1/4,scale=480:-1,tile=6x5" -frames:v 
   монтаж → проверка планов и сценария → исправления → чистовой монтаж.
 - Съёмка take1 2026-11-07 17:30–17:50Z: node-1, node-2 (`docker start`, конфиг прошлого прогона:
   старые body без healthcheck не дают `up.sh` поднять node через depends_on). Стенд под `dev/stand.sh lock T-067`.
+- 2026-11-07, оператор: «это презентация, а не видео» — нужен трейлер с настоящими кадрами,
+  переходами, музыкой и сценарием, на HyperFrames. Слайдовый вариант (`dev/video/build_intro.py`,
+  `cut.json`) оставлен как объяснялка, основной — трейлер `dev/video/trailer/` (сюжет A
+  «Передача смены», выбор оператора): STORYLINES.md, SPEC.md, REVIEW.md, storyboard.jpg.
+  Съёмка: камера-наблюдатель + серверный датапак ригов (`dev/video/camrig/lo_cam`, установлен в
+  мир `world/datapacks`, отключается `datapack disable "file/lo_cam"`), `dev/video/shoot.sh`.
+  Сборка одной командой: `bash dev/video/trailer/build.sh`. Рендер: `dev/video/out/trailer.mp4`.
+- Находка (вне задачи, в задачу среды): `act attack` без `allow` бьёт ближайшую сущность, в том
+  числе сестру — 18:06:37 00160 убила 00161 (mind-1 log, chat «LastOrder02 was slain by LastOrder01»).
