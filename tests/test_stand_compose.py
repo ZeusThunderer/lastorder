@@ -10,6 +10,7 @@ keep the chosen configuration from drifting.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -89,3 +90,16 @@ def test_zai_egress_carries_api_zai_into_svc_lo():
     assert nets["svc-lo"]["aliases"] == ["api.z.ai"]
     assert COMPOSE["networks"]["svc-lo"]["internal"] is True
     assert COMPOSE["services"]["last-order"]["networks"] == ["svc-lo"]
+
+
+# --- T-054: wait_events under the harness tool timeout ------------------------------------------
+
+
+def test_mind_wait_events_cap_stays_under_the_harness_kill():
+    # zcode kills a tool call after 30 s (7 killed waits on node-2, T-052); the
+    # compose default keeps every ask under it with a margin, and an operator
+    # override rides the same variable.
+    for name in ("mind-1", "mind-2", "mind-3"):
+        raw = COMPOSE["services"][name]["environment"]["WAIT_EVENTS_MAX_S"]
+        assert raw == "${WAIT_EVENTS_MAX_S:-25}", name
+        assert float(re.search(r":-(\d+(?:\.\d+)?)}", raw).group(1)) < 30.0, name

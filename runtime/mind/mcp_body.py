@@ -49,6 +49,9 @@ log = logging.getLogger("mcp_body")
 
 SAY_MAX_LEN = 256  # vanilla rejects longer chat anyway
 SAY_MIN_INTERVAL_S = 4.0  # one line per 4 s; no chatter director anymore (ADR-035)
+# The absolute ceiling of one wait_events ask. The stand configures the real cap per
+# harness through WAIT_EVENTS_MAX_S (T-054): zcode kills a tool call after 30 s, so
+# compose keeps it below that with a margin; a larger ask clamps, it is not an error.
 WAIT_TIMEOUT_MAX_S = 600.0
 ITEM_RE = re.compile(r"^[a-z0-9_]+$")
 NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,32}$")
@@ -350,6 +353,7 @@ class BodyMcp:
         perception: Perception | None = None,
         clock: Callable[[], float] = time.monotonic,
         deny_commands: tuple[str, ...] = DEFAULT_DENY,
+        wait_max_s: float = WAIT_TIMEOUT_MAX_S,
     ):
         self._x = executor
         self._perception = perception or Perception(descriptions={}, salt="", mode="plain")
@@ -357,6 +361,7 @@ class BodyMcp:
         self._last_say_at = -1e9
         self._last_command_at = -1e9
         self._deny = tuple(deny_commands) or DEFAULT_DENY
+        self._wait_max_s = float(wait_max_s)
 
     @property
     def executor(self) -> Executor:
@@ -472,11 +477,15 @@ class BodyMcp:
         if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)):
             _err("wait_events: timeout_s must be a number")
         timeout_s = float(timeout_s)
-        if not 0.0 < timeout_s <= WAIT_TIMEOUT_MAX_S:
-            _err(f"wait_events: timeout_s must be within 0 < t <= {WAIT_TIMEOUT_MAX_S:.0f}")
-        event = self._x.events.pop(timeout_s, self._clock)
+        if timeout_s <= 0.0:
+            _err(f"wait_events: timeout_s must be > 0 (the cap is {self._wait_max_s:.0f} s)")
+        # A larger ask is not an error (T-054): the harness kills long tool calls
+        # (zcode: 30 s), so the wait clamps to the configured cap and the answer
+        # carries the applied value.
+        applied = min(timeout_s, self._wait_max_s)
+        event = self._x.events.pop(applied, self._clock)
         if event is None:
-            return {"type": "timeout", "timeout_s": timeout_s}
+            return {"type": "timeout", "timeout_s": applied}
         return {"type": event["type"], **{k: v for k, v in event.items() if k != "type"}}
 
     def retire_stuck(self) -> dict[str, Any]:
@@ -549,15 +558,22 @@ def build_server(
         )
 
     async def wait_events(timeout_s: float = 30.0) -> dict[str, Any]:
-        """Sleep until the next event or the timeout — you pick your own rhythm. Events:
-        game.damage, game.death, chat.line, intent.done, intent.failed, task.idle (arms
-        retire_stuck), life.expiring, board (fresh task-board lines). chat.line carries
-        `lines`: {from: speaker, text} entries, the operator's with operator: true.
-        Events of one type collapse (board and chat.line batches accumulate their
-        lines); the queue is capped."""
         return await impl._tool(
             "wait_events", {"timeout_s": timeout_s}, lambda: impl.wait_events(timeout_s)
         )
+
+    # __doc__ is assigned, not an f-string literal: the SDK reads the description off
+    # fn.__doc__, and the cap must name the configured limit (T-054).
+    wait_events.__doc__ = (
+        "Sleep until the next event or the timeout — you pick your own rhythm. Events: "
+        "game.damage, game.death, chat.line, intent.done, intent.failed, task.idle (arms "
+        "retire_stuck), life.expiring, board (fresh task-board lines). chat.line carries "
+        "`lines`: {from: speaker, text} entries, the operator's with operator: true. "
+        "Events of one type collapse (board and chat.line batches accumulate their "
+        "lines); the queue is capped. The timeout is capped at "
+        f"{impl._wait_max_s:.0f} s: a larger ask waits that long, and the answer "
+        "carries the applied value."
+    )
 
     async def retire_stuck() -> dict[str, Any]:
         """Eliminate yourself (request_death "stuck"). Works only right after a task.idle
@@ -653,6 +669,7 @@ def build_mind(
     clock: Callable[[], float] = time.monotonic,
     start_c1: bool = True,
     deny_commands: tuple[str, ...] = DEFAULT_DENY,
+    wait_max_s: float = WAIT_TIMEOUT_MAX_S,
     login: "SessionLogin | None" = None,
     **executor_kwargs: Any,
 ) -> tuple[MCPServer, BodyMcp, Executor]:
@@ -668,7 +685,13 @@ def build_mind(
         login=login,
         **executor_kwargs,
     )
-    impl = BodyMcp(executor, perception=perception, clock=clock, deny_commands=deny_commands)
+    impl = BodyMcp(
+        executor,
+        perception=perception,
+        clock=clock,
+        deny_commands=deny_commands,
+        wait_max_s=wait_max_s,
+    )
     server, impl = build_server(impl, start_c1=start_c1, runner_key=runner_key)
     return server, impl, executor
 
@@ -696,6 +719,15 @@ def main() -> None:
     tick = _env_float("MIND_TICK_S", 0.5)
     if not TICK_MIN_S <= tick <= TICK_MAX_S:
         raise ValueError(f"MIND_TICK_S must keep C1 within 1-4 Hz ({TICK_MIN_S}..{TICK_MAX_S} s), got {tick}")
+
+    # The wait_events cap of this stand (T-054): zcode kills a tool call after 30 s,
+    # so compose pins it below that; a value above the absolute ceiling is a startup
+    # error, not a silent lift.
+    wait_max = _env_float("WAIT_EVENTS_MAX_S", WAIT_TIMEOUT_MAX_S)
+    if not 0.0 < wait_max <= WAIT_TIMEOUT_MAX_S:
+        raise ValueError(
+            f"WAIT_EVENTS_MAX_S must be within 0 < t <= {WAIT_TIMEOUT_MAX_S:.0f} s, got {wait_max}"
+        )
 
     serial_raw = env("NODE_SERIAL", default="")
     birth: BirthRecord | None = None
@@ -763,6 +795,7 @@ def main() -> None:
         runner_key=env("MIND_RUNNER_KEY", default="") or "",
         operator_name=env("OPERATOR_MC_NAME", default="") or "",
         deny_commands=deny,
+        wait_max_s=wait_max,
         login=login,
     )
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the harness

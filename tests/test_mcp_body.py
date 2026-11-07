@@ -142,6 +142,7 @@ class Stack:
         runner_key: str = "",
         operator_name: str = "",
         deny_commands: tuple[str, ...] | None = None,
+        wait_max_s: float | None = None,
         login: "SessionLogin | None" = None,
     ):
         self.body = body or FakeBody()
@@ -150,6 +151,8 @@ class Stack:
         extra: dict = {}
         if deny_commands is not None:
             extra["deny_commands"] = deny_commands
+        if wait_max_s is not None:
+            extra["wait_max_s"] = wait_max_s
         server, self.impl, self.executor = build_mind(
             self.body,
             username="LastOrder01",
@@ -171,6 +174,9 @@ class Stack:
                 break
             time.sleep(0.02)
         self.port = self.uvicorn.servers[0].sockets[0].getsockname()[1]
+        # T-054: the death tests script hp = 0 — wait for C1's first living poll, so
+        # the stale-corpse gate never races the test's own death.
+        self.wait_until(lambda: self.executor._saw_alive)
 
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}/mcp"
@@ -411,6 +417,35 @@ def test_wait_events_serves_accumulated_events_one_by_one(stack: Stack) -> None:
     second = parse(stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0})))
     assert first["lines"] == [{"from": "Steve", "text": "первая"}]
     assert second["type"] == "game.damage"
+
+
+def test_wait_events_clamps_an_oversized_ask_to_the_cap() -> None:
+    # T-054: zcode kills a tool call after 30 s (7 killed waits on node-2 in the
+    # T-052 run); the stand caps wait_events below that. A larger ask is not an
+    # error: it waits the cap and the answer names the applied value.
+    s = Stack(wait_max_s=0.3)
+    try:
+        started = time.monotonic()
+        result = parse(s.call(lambda c: c.call_tool("wait_events", {"timeout_s": 600.0})))
+        assert result == {"type": "timeout", "timeout_s": 0.3}
+        assert time.monotonic() - started < 10.0  # the cap bounded the wait, not the ask
+    finally:
+        s.close()
+
+
+def test_wait_events_tool_description_names_the_cap() -> None:
+    s = Stack(wait_max_s=25.0)
+    try:
+        tools = s.call(lambda c: c.list_tools())
+        (tool,) = [t for t in tools.tools if t.name == "wait_events"]
+        assert "capped at 25 s" in tool.description
+    finally:
+        s.close()
+
+
+def test_wait_events_zero_is_still_rejected(stack: Stack) -> None:
+    result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 0}))
+    assert "must be > 0" in error_text(result)
 
 
 # --- death and the runner endpoints -----------------------------------------------------
@@ -709,8 +744,14 @@ def test_several_chat_lines_reach_one_wait_events_call(stack: Stack) -> None:
     stack.body.push_event("chat.line", "<Steve> раз")
     stack.body.push_event("chat.line", "<Bob> два")
     stack.body.push_event("chat.line", "<Steve> три")
+    # C1's drain may split the three pushes across ticks; the queue merges the
+    # batches either way, so wait for the COMPLETE batch — a partial first batch
+    # is not the accumulation this test asserts (seen flaky under load, T-054).
     stack.wait_until(
-        lambda: any(e["type"] == "chat.line" for e in stack.executor.events.pending())
+        lambda: any(
+            e["type"] == "chat.line" and len(e.get("lines", ())) == 3
+            for e in stack.executor.events.pending()
+        )
     )
     ev = parse(stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 5.0})))
     assert ev["type"] == "chat.line"

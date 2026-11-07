@@ -365,6 +365,11 @@ class Executor:
         self._evading = False  # a flee goto of ours is (or was) running
         self._last_evade: dict[str, int] | None = None
         self._last_strike_at = -1e9
+        # T-054: the death path arms only after this life has seen the body alive
+        # once. A body restored dead (days on the death screen) is a stale corpse,
+        # not this node's death — see _stale_dead.
+        self._saw_alive = False
+        self._stale_dead_marked = False
         self._dead = False
         self._dead_since_mono = 0.0
         self._dead_since_wall: datetime | None = None
@@ -489,6 +494,17 @@ class Executor:
                         error=self._login.mask(f"{type(exc).__name__}: {exc}"),
                     )
 
+            # T-054: a body restored dead (days on the death screen) is not this
+            # node's death. Until this life has seen the body alive once, hp = 0 in
+            # game means a stale corpse: respawn it here — uc's auto-respawn never
+            # fires without a task (CLAUDE.md trap) — with no game.death and no
+            # will. From the first living state on, the death path is unchanged.
+            if not self._saw_alive and bool(getattr(state, "in_game", False)):
+                if hp > 0.0:
+                    self._saw_alive = True
+                else:
+                    self._stale_dead()
+                    return
             death = self._detector.feed(state, list(self._body.recent_chat(10)))
             if death is not None:
                 self._on_death(death.text)
@@ -569,6 +585,21 @@ class Executor:
         return min(hostiles, key=lambda e: float(e.dist_m))
 
     # -- death (review P1-1, P1-2) --------------------------------------------------------
+
+    def _stale_dead(self) -> None:
+        """The stale-corpse branch of the tick (T-054): one `body.stale_dead` record
+        per episode, then a respawn every tick until the body lives — a flaky bridge
+        retries on the next tick, and `_after_respawn` re-arms the episode flag for
+        the next life. No game.death, no will: this node never lived in this body."""
+        if not self._stale_dead_marked:
+            self._stale_dead_marked = True
+            self._log.record("event", event="body.stale_dead", username=self._username)
+        try:
+            self._body.respawn()
+        except Exception as exc:
+            self._log.record(
+                "error", scope="stale_respawn", error=f"{type(exc).__name__}: {exc}"
+            )
 
     def _on_death(self, death_text_raw: str) -> None:
         now = self._clock()
@@ -662,6 +693,10 @@ class Executor:
         self._death_text = ""
         self._respawn_attempts = 0
         self._hp = -1.0  # the first poll after respawn re-baselines hp
+        # T-054: the new life has not seen this body alive yet — a body still dead
+        # right after the respawn is again a stale corpse, not the newborn's death.
+        self._saw_alive = False
+        self._stale_dead_marked = False
         self._idle_flag = False
         self._last_activity_at = self._clock()
         self._threat = None

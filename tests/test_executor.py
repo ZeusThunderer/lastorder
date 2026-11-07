@@ -429,9 +429,45 @@ def test_death_stops_body_and_only_runner_respawns() -> None:
         rig.close()
 
 
+def test_stale_dead_body_respawns_without_node_death(tmp_path) -> None:
+    # T-054: a body that sat dead for days restores with hp = 0 (nodes 108, 111 and
+    # 112/113 of the T-052 run). Until this life has seen the body alive once, that
+    # is a stale corpse, not this node's death: the mind respawns it itself (uc's
+    # auto-respawn never fires without a task), with no game.death and no will.
+    rig, path = rig_file(tmp_path)
+    try:
+        rig.body.set_state(hp=0.0)
+        rig.body.chat = ["LastOrder01 was slain by Zombie"]  # days old
+        rig.body.respawn_fail_times = 1  # the first respawn hits a flaky bridge
+        rig.tick()
+        assert rig.body.respawn_calls == 1
+        assert not rig.x.dead()  # the death path never fired
+        assert rig.events_of("game.death") == []
+        rig.tick()  # the retry lands; the body lives
+        assert rig.body.respawn_calls == 2
+        rig.tick()  # the living state arms the death path (production: C1 ticks nonstop)
+        assert rig.events_of("game.death") == []
+
+        with open(path, encoding="utf-8") as fh:
+            lines = [json.loads(line) for line in fh if line.strip()]
+        stale = [line for line in lines if line.get("event") == "body.stale_dead"]
+        assert len(stale) == 1 and stale[0]["kind"] == "event"  # one record per episode
+        assert not [line for line in lines if line["kind"] == "death"]  # nothing for a will
+
+        # from the first living state on, hp = 0 is the node's own death as before
+        rig.body.set_state(hp=0.0)
+        rig.body.chat = ["LastOrder01 drowned"]
+        rig.tick()
+        assert rig.x.dead()
+        assert "drowned" in rig.events_of("game.death")[0]["text"]
+    finally:
+        rig.close()
+
+
 def test_death_cause_ttl_by_life_clock() -> None:
     rig = Rig(birth=BirthRecord(serial=7, born_at="2026-10-18T11:10:00+00:00", ttl_min=45))
     try:
+        rig.tick()  # T-054: the death path arms after a living state
         rig.body.set_state(hp=0.0)  # wall now is 12:00, the deadline was 11:55
         rig.body.chat = ["LastOrder01 was killed"]
         rig.tick()
@@ -443,6 +479,7 @@ def test_death_cause_ttl_by_life_clock() -> None:
 def test_death_status_shape_and_respawn_refusal() -> None:
     rig = Rig()
     try:
+        rig.tick()  # T-054: the death path arms after a living state
         with pytest.raises(RuntimeError, match="not dead"):
             rig.x.runner_respawn()
         rig.body.set_state(hp=0.0)
@@ -460,6 +497,7 @@ def test_death_status_shape_and_respawn_refusal() -> None:
 def test_respawn_retries_are_bounded() -> None:
     rig = Rig()
     try:
+        rig.tick()  # T-054: the death path arms after a living state
         rig.body.respawn_fail_times = 99
         rig.body.set_state(hp=0.0)
         rig.body.chat = ["LastOrder01 died"]
@@ -478,6 +516,7 @@ def test_respawn_retries_are_bounded() -> None:
 def test_runner_birth_arms_next_life_after_respawn() -> None:
     rig = Rig()
     try:
+        rig.tick()  # T-054: the death path arms after a living state
         rig.body.set_state(hp=0.0)
         rig.body.chat = ["LastOrder01 died"]
         rig.tick()
@@ -493,6 +532,7 @@ def test_runner_birth_arms_next_life_after_respawn() -> None:
 def test_runner_birth_refused_while_dead() -> None:
     rig = Rig()
     try:
+        rig.tick()  # T-054: the death path arms after a living state
         rig.body.set_state(hp=0.0)
         rig.body.chat = ["LastOrder01 died"]
         rig.tick()
@@ -858,6 +898,7 @@ def test_respawn_drops_any_intent_that_survived_the_death() -> None:
     # The check now lives inside the lock; whatever still survived dies at the respawn.
     rig = Rig()
     try:
+        rig.tick()  # T-054: the death path arms after a living state
         rig.body.set_state(hp=0.0)
         rig.body.chat = ["LastOrder01 died"]
         rig.tick()
