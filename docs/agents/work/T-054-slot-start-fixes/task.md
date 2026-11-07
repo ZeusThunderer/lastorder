@@ -2,7 +2,7 @@
 id: T-054
 title: Старт слота — нет смерти от устаревшего hp, wait_events не дольше таймаута харнесса
 stage: I
-status: review
+status: accepted
 criticality: critical
 after: [T-059]
 branch: z/T-054-slot-start-fixes
@@ -59,3 +59,6 @@ uv run pytest tests -k "death or wait_events"
 
 ## Заметки надзора
 2026-10-31: `after` дополнен T-059 — оператор просит перевести Last Order на Z.ai раньше.
+2026-11-07: принято. Известная граница (R1-1): створ stale-dead — в процессе mind-N; смерть тела
+в окне перезапуска mind-N посреди жизни пройдёт без завещания. Учесть в T-055 вместе с потерей
+`_birth` при перезапуске mind-N.
