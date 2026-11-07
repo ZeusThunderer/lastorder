@@ -124,7 +124,9 @@ Fabric-мод: altoclef (`src/main/java/adris/altoclef`) + tungsten (pathfinder,
 - Путь отказа py4j 0.10.9.9 сам зовёт `gateway.shutdown()`: гасит шлюз uc и падает на
   `thread = None` (`AttributeError: 'NoneType' object has no attribute 'join'`, T-052 c). Наша
   фабрика сначала пробует bind callback-порта (25334) и отказывается до py4j; `_drop` дожимает
-  сокет callback-сервера напрямую. Обновления uc: после 0.95.66 (26.10.2026) исправлений
+  сокет callback-сервера напрямую. Остаточный риск принят: если порт заняли между пробой и
+  bind, py4j всё равно шлёт uc SHUTDOWN, и шлюз мёртв до перезапуска тела (`slot_restart.sh`).
+  Обновления uc: после 0.95.66 (26.10.2026) исправлений
   жизненного цикла шлюза в upstream нет [источник: github.com/3ndetz/unionclef, releases и
   main, проверено 2026-11-07].
 - `docker compose restart` изношенного тела не гарантирует переподключения к серверу; свежий
