@@ -2,7 +2,7 @@
 id: T-055
 title: Мост py4j — порядок подъёма тела и mind, мягкая остановка, перезапуск слота одной командой
 stage: I
-status: ready
+status: in_progress
 criticality: normal
 after: [T-059]
 branch: z/T-055-py4j-bridge
