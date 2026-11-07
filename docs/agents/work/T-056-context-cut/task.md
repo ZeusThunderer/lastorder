@@ -2,7 +2,7 @@
 id: T-056
 title: Контекст запроса сестры — рост за жизнь, пробуждения, крупные части
 stage: I
-status: ready
+status: in_progress
 criticality: normal
 owner: supervisor
 after: [T-066]
