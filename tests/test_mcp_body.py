@@ -492,6 +492,31 @@ def test_stop_handler_sets_the_event() -> None:
     assert stop.is_set()
 
 
+def test_serve_mind_exits_nonzero_when_the_server_dies_unsignal() -> None:
+    # R1-1: a failed server start (port taken, lifespan error) sys.exit's
+    # INSIDE the thread — swallowed there. The mind must exit non-zero anyway,
+    # or restart: on-failure never brings it back and the slot silently loses
+    # its mind.
+    from runtime.mind.mcp_body import serve_mind
+
+    class DeadServer:
+        should_exit = False
+
+        def run(self) -> None:
+            return  # dies at once, no signal ever arrives
+
+    executor = types.SimpleNamespace(stop=lambda: None)
+    body = types.SimpleNamespace(close=lambda: None)
+    saved = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
+    try:
+        with pytest.raises(SystemExit) as caught:
+            serve_mind(None, 8700, executor, body, make_server=DeadServer)
+        assert (caught.value.code != 0) is True
+    finally:
+        for sig, handler in saved.items():
+            signal.signal(sig, handler)
+
+
 # --- death and the runner endpoints -----------------------------------------------------
 
 

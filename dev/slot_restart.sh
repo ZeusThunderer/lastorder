@@ -82,7 +82,7 @@ for n in "${SLOTS[@]}"; do
             exit 1
         }
     else
-        echo "bash dev/wait_for.sh $GRACE_S --healthy \$\(docker compose ps -q body-$n\)"
+        echo "bash dev/wait_for.sh $GRACE_S --healthy \$(docker compose ps -q body-$n)"
     fi
     echo "== slot $n: mind start (joins the new netns; the health gate ran above)"
     # --no-deps: the stand is up, only this mind starts — a bare `up` also

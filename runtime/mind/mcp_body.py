@@ -732,14 +732,30 @@ def teardown_mind(
     log.info("mind stopped: server down, C1 stopped, bridge closed")
 
 
-def serve_mind(app: Any, port: int, executor: Executor, body: Any) -> None:
+def serve_mind(
+    app: Any,
+    port: int,
+    executor: Executor,
+    body: Any,
+    *,
+    make_server: Callable[[], Any] | None = None,
+) -> None:
     """Serve the MCP app until SIGTERM/SIGINT, then tear down in order.
 
     uvicorn runs in a thread: it installs its own signal handlers only in the
-    main thread, so ours own SIGTERM here and drive the shutdown."""
+    main thread, so ours own SIGTERM here and drive the shutdown. A server
+    that dies on its own (port taken, lifespan error) sys.exit's INSIDE the
+    thread — swallowed there — so the non-zero exit is raised here, and
+    compose's restart: on-failure brings the mind back (review R1-1)."""
     import uvicorn
 
-    uvi = uvicorn.Server(uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info"))
+    if make_server is None:
+        def make_server() -> Any:
+            return uvicorn.Server(
+                uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
+            )
+
+    uvi = make_server()
     thread = threading.Thread(target=uvi.run, name="mind-mcp", daemon=True)
     thread.start()
     stop = threading.Event()
@@ -751,6 +767,10 @@ def serve_mind(app: Any, port: int, executor: Executor, body: Any) -> None:
                 break
     finally:
         teardown_mind(uvi, thread, executor, body)
+    if not stop.is_set():
+        # the server thread ended without a signal: the mind is down for a
+        # reason, and docker must see a failure (not a clean stop)
+        raise SystemExit(1)
 
 
 def main() -> None:

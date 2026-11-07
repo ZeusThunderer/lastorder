@@ -150,8 +150,14 @@ def _default_gateway_factory(callback: BodyCallback) -> Callable[[], JavaGateway
             )
         try:
             gw.start_callback_server()
-        except Exception as exc:  # the bind race is microsecond-wide; py4j's
-            # cleanup may already have run — ours is quiet and uc is untouched
+        except Exception as exc:
+            # The probe closes the common case (a live squatter); what remains
+            # is the microsecond window where the port is taken between the
+            # probe and this bind. There py4j's own cleanup DOES run and may
+            # send SHUTDOWN to uc (the gateway then dies until a client
+            # restart) — a known, accepted residue: starting the callback
+            # server ourselves would mean driving py4j private API. Ours stays
+            # quiet and reports the bridge failure (review R1-2).
             gw.close()
             raise Py4JNetworkError(f"callback server failed to start: {exc}") from exc
         return gw
