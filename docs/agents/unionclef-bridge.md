@@ -111,6 +111,28 @@ Fabric-мод: altoclef (`src/main/java/adris/altoclef`) + tungsten (pathfinder,
 - Задержки: геттеры 1–130 мс, `getBlocksAround(2)` около 100 мс. `@get log 1` рядом с деревом — 5–10 с.
 - `gotoXYZ(x, y, z)` → `{goal, ok}`. Дальше опрашивать `pathStatus()` → `{arrived, busy, distance, pos}`.
 
+## Жизненный цикл моста (T-055)
+- Подключаться только к поднятым телом: uc поднимает GatewayServer при выходе на титульный
+  экран (`AltoClef.java: onInitializeLoad → initializePythonSender`, шлюз слушает 25333),
+  подключение клиента py4j во время загрузки ломает шлюз (T-052 b). compose держит healthcheck
+  тела по порту 25333 и `depends_on: service_healthy` для mind-N. «Игрок в мире» из контейнера
+  без py4j не видна: состояние живёт в `MinecraftClient` (`AltoClef.java:324-326`, `inGame()`),
+  вход в мир ум узнаёт своим опросом.
+- Python-партнёра нельзя убивать SIGKILL: шлюз Java в uc умирает навсегда (T-052 a). mind-N по
+  SIGTERM останавливает uvicorn, C1 и закрывает мост `close()` (порядок — `teardown_mind`,
+  `runtime/mind/mcp_body.py`); compose даёт `stop_grace_period: 20s` против ~11 с разбора.
+- Путь отказа py4j 0.10.9.9 сам зовёт `gateway.shutdown()`: гасит шлюз uc и падает на
+  `thread = None` (`AttributeError: 'NoneType' object has no attribute 'join'`, T-052 c). Наша
+  фабрика сначала пробует bind callback-порта (25334) и отказывается до py4j; `_drop` дожимает
+  сокет callback-сервера напрямую. Остаточный риск принят: если порт заняли между пробой и
+  bind, py4j всё равно шлёт uc SHUTDOWN, и шлюз мёртв до перезапуска тела (`slot_restart.sh`).
+  Обновления uc: после 0.95.66 (26.10.2026) исправлений
+  жизненного цикла шлюза в upstream нет [источник: github.com/3ndetz/unionclef, releases и
+  main, проверено 2026-11-07].
+- `docker compose restart` изношенного тела не гарантирует переподключения к серверу; свежий
+  контейнер (`up -d --force-recreate`) подключается сразу (T-053). Перезапуск слота —
+  `bash dev/slot_restart.sh N` (mind стоп → body recreate → healthcheck → mind старт).
+
 ## Сырые имена — всё нужно маскировать
 
 | Метод | Поле | Что содержит |

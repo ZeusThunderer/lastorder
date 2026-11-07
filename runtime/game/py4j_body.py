@@ -11,6 +11,7 @@ is_service_line, imported from runtime/perception/chat.py (T-009). Sources: the 
 
 from __future__ import annotations
 
+import socket
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
@@ -19,7 +20,13 @@ from datetime import datetime
 from itertools import count
 from typing import Any
 
-from py4j.java_gateway import CallbackServerParameters, GatewayParameters, JavaGateway
+from py4j.java_gateway import (
+    DEFAULT_ADDRESS,
+    DEFAULT_PYTHON_PROXY_PORT,
+    CallbackServerParameters,
+    GatewayParameters,
+    JavaGateway,
+)
 from py4j.protocol import Py4JNetworkError
 
 from runtime.perception.chat import is_service_line
@@ -105,14 +112,55 @@ class BodyCallback:
         implements = ["adris.altoclef.PythonCallback"]
 
 
+def _callback_port_free(port: int, address: str = DEFAULT_ADDRESS) -> bool:
+    """True when the callback port can be taken. The probe binds with
+    SO_REUSEADDR exactly like py4j's own callback server: TIME_WAIT leftovers
+    of a dropped gateway (uc dials back on InitPythonCallback, python closes
+    first) must not read as a squatter — without it the reconnect loop dead-
+    ends for a minute after the first drop (seen live, T-055). A LIVE
+    listener still blocks the bind."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind((address, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
 def _default_gateway_factory(callback: BodyCallback) -> Callable[[], JavaGateway]:
     def connect() -> JavaGateway:
-        return JavaGateway(
+        gw = JavaGateway(
             gateway_parameters=GatewayParameters(auto_convert=True),
             callback_server_parameters=CallbackServerParameters(),
             python_server_entry_point=callback,
-            start_callback_server=True,
+            start_callback_server=False,  # started below, on our own failure path
         )
+        # Bind-probe the callback port before py4j does (T-055, T-052 c): py4j's
+        # own failed start calls gateway.shutdown(), which sends the SHUTDOWN
+        # command to uc's server — the bridge then dies until a whole client
+        # restart (CLAUDE.md trap) — and its cleanup crashes on the callback
+        # thread being None. A busy port fails HERE, quietly, instead.
+        if not _callback_port_free(DEFAULT_PYTHON_PROXY_PORT):
+            gw.close()  # no callback server exists: closes the client sockets only
+            raise Py4JNetworkError(
+                f"callback port {DEFAULT_PYTHON_PROXY_PORT} is busy (a live listener holds it)"
+            )
+        try:
+            gw.start_callback_server()
+        except Exception as exc:
+            # The probe closes the common case (a live squatter); what remains
+            # is the microsecond window where the port is taken between the
+            # probe and this bind. There py4j's own cleanup DOES run and may
+            # send SHUTDOWN to uc (the gateway then dies until a client
+            # restart) — a known, accepted residue: starting the callback
+            # server ourselves would mean driving py4j private API. Ours stays
+            # quiet and reports the bridge failure (review R1-2).
+            gw.close()
+            raise Py4JNetworkError(f"callback server failed to start: {exc}") from exc
+        return gw
 
     return connect
 
@@ -342,7 +390,18 @@ class Py4jBody:
 
     def _ensure(self) -> Any:
         if self._mc is None:
-            gw = self._connect()  # may raise Py4JNetworkError: same reconnect path
+            try:
+                gw = self._connect()  # may raise Py4JNetworkError: same reconnect path
+            except Py4JNetworkError:
+                raise
+            except Exception as exc:
+                # py4j 0.10.9.9 can surface a failed callback start as an
+                # AttributeError ('NoneType' object has no attribute 'join',
+                # T-052 c): a bridge failure, not a caller bug — route it into
+                # the same reconnect path instead of crashing the tick.
+                raise Py4JNetworkError(
+                    f"gateway factory failed: {type(exc).__name__}: {exc}"
+                ) from exc
             self._gateway = gw
             self._mc = gw.entry_point
             self._init_callbacks(self._mc)
@@ -359,6 +418,20 @@ class Py4jBody:
                 teardown()
             except Exception:
                 pass  # a half-dead gateway must not break teardown
+        # py4j 0.10.9.9: when a callback server never started (or died early),
+        # its shutdown() dies on the thread being None without closing the
+        # listening socket (T-052 c) — close the socket directly; quiet and
+        # repeatable, so a second _drop is a no-op.
+        try:
+            server = gw.get_callback_server()
+        except Exception:
+            server = None
+        sock = getattr(server, "server_socket", None)
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
 
     def _call(self, fn: Callable[[Any], Any]) -> Any:
         """Run one uc call, reconnecting with backoff on Py4JNetworkError.

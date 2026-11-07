@@ -60,3 +60,11 @@
 - Почему не через ZCode: оператор попросил сделать самому ради скорости. Между v0.95.59 и v0.95.66
   исходники py4j/gateway не менялись, только игровые фиксы. [проверено: pytest 856 passed, check.py ok]
   Сборка образа body и смоук на стенде не прогнаны — Docker Desktop не был запущен.
+
+## D-006 · 2026-11-07 · T-056
+- Основание: 6 задача надзора — оператор отдал T-056 надзору (ADR-046, 2026-11-07; раньше — D-004)
+- Файлы: dev/context_report.py, runtime/mind/mcp_body.py, runtime/hive/mcp.py (только сериализация
+  ответов в `_run`), tests/test_mcp_body.py, tests/test_hive_mcp.py, docs/agents/runs/2026-11-07-context.md
+- Коммит: adbfbae (ветка c/T-056-context-cut)
+- Почему не через ZCode: решение оператора ускорить очередь; ZCode занят T-055. [проверено: pytest
+  925 passed, check.py ok в worktree] Живой стенд не прогонялся — T-058.

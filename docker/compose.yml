@@ -20,6 +20,18 @@ x-body: &body
     mc-server:
       condition: service_healthy
   mem_limit: 2g
+  # Ready = uc's py4j gateway is listening (T-055): the mod starts it when the
+  # client reaches the title screen (unionclef AltoClef.java onInitializeLoad →
+  # initializePythonSender), and a mind connecting before that breaks the bridge
+  # (T-052 b). "Player in the world" is NOT observable here without a py4j call —
+  # it lives in MinecraftClient alone (AltoClef.java inGame); the mind's own C1
+  # ticks see the world join. bash /dev/tcp because dash has no /dev/tcp.
+  healthcheck:
+    test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/25333"]
+    interval: 10s
+    timeout: 3s
+    retries: 18   # warm start: ~30-60 s to the title screen
+    start_period: 300s   # cold start: the first boot downloads ~540 MB into /data
   environment: &body-env
     BODY_XMX: "${BODY_XMX:-768M}"   # same default as the body Dockerfile ENV (review R1-2)
     BODY_RENDER_DISTANCE: "${BODY_RENDER_DISTANCE:-2}"
@@ -39,6 +51,11 @@ x-mind: &mind
     dockerfile: docker/mind/Dockerfile
   image: lastorder-mind:dev
   restart: on-failure
+  # SIGTERM (T-055): the mind stops uvicorn, stops C1 and closes the bridge
+  # within ~11 s (TEARDOWN_GRACE_S + the close itself); the grace period is
+  # above that so docker never has to SIGKILL a closing mind (a SIGKILLed
+  # python partner leaves uc's gateway dead, T-052 a).
+  stop_grace_period: 20s
   environment: &mind-env
     MCP_BODY_PORT: "8700"
     MCP_LOG_PATH: /mind-run/log.jsonl
@@ -184,7 +201,11 @@ services:
   mind-1:
     <<: *mind
     network_mode: "service:body-1"
-    depends_on: [body-1]
+    # T-055: never connect while the body still boots (T-052 b) — the gateway
+    # must be listening first; the join of the world is the mind's own polling.
+    depends_on:
+      body-1:
+        condition: service_healthy
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder01
@@ -233,7 +254,9 @@ services:
   mind-2:
     <<: *mind
     network_mode: "service:body-2"
-    depends_on: [body-2]
+    depends_on:   # T-055: the gateway must listen before the mind connects
+      body-2:
+        condition: service_healthy
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder02
@@ -280,7 +303,9 @@ services:
   mind-3:
     <<: *mind
     network_mode: "service:body-3"
-    depends_on: [body-3]
+    depends_on:   # T-055: the gateway must listen before the mind connects
+      body-3:
+        condition: service_healthy
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder03
