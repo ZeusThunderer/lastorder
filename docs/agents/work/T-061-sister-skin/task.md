@@ -4,6 +4,7 @@ title: Скин сестёр — тела LastOrder01..03 в скине sister.p
 stage: I
 status: ready
 criticality: normal
+lane: b
 after: [T-053, T-062]
 branch: z/T-061-sister-skin
 created: 2026-10-31

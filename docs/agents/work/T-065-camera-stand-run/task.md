@@ -4,6 +4,7 @@ title: Прогон камер на стенде — три тела на Xvfb �
 stage: I
 status: ready
 criticality: normal
+lane: b
 after: [T-063, T-064]
 branch: z/T-065-camera-stand-run
 created: 2026-10-31
