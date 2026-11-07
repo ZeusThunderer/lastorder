@@ -22,3 +22,11 @@ docker/run/
 
 # Local skin experiments
 .tmp_skins/
+
+# Kept on the operator's disk only, out of the public history (T-068, 2026-11-07):
+# course material, homework, third-party source skins
+/docs/context/
+/task1.md
+/task2.md
+/task3-4.md
+/agent/last_order/skin/src_*.png

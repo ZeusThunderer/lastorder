@@ -8,7 +8,7 @@
 ## Репозиторий
 - Корень — форк github.com/3ndetz/agent-workplace (remote `upstream`, влит merge-коммитом).
   Обновление: `git fetch upstream && git merge upstream/main`. Ветка — `main`.
-- Свой remote `origin` — github.com/ZeusThunderer/ai-char. В него пушит только надзор и только `main`
+- Свой remote `origin` — github.com/ZeusThunderer/lastorder (история вычищена в T-068). В него пушит только надзор и только `main`
   после merge; ветки `z/T-NNN-*` остаются локальными. ZCode и headless-надзор не пушат.
 - Правки upstream-файлов aw (`agent/AGENTS.md`, `agent/shared`, `agent/scripts`, `tools/`) делаются
   отдельными коммитами `aw-fix:` / `aw-ext:` (ADR-002).
