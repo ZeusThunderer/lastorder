@@ -2,7 +2,7 @@
 id: T-067
 title: Ролик-знакомство с Last Order — персонаж, сеть сестёр, кадры игры
 stage: —
-status: ready
+status: in_progress
 criticality: normal
 owner: supervisor
 after: []
