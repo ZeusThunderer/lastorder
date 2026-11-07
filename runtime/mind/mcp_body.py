@@ -22,6 +22,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import signal
+import threading
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -696,9 +698,82 @@ def build_mind(
     return server, impl, executor
 
 
-def main() -> None:
+# --- serving and the SIGTERM path (T-055) --------------------------------------------------
+
+# The teardown budget inside the mind: compose gives it stop_grace_period on top.
+TEARDOWN_GRACE_S = 10.0
+
+
+def stop_handler(stop: threading.Event) -> Callable[[int, Any], None]:
+    """SIGTERM/SIGINT → one event set; the ordered teardown is `teardown_mind`."""
+
+    def handler(signum: Any, frame: Any) -> None:
+        stop.set()
+
+    return handler
+
+
+def teardown_mind(
+    uvi: Any,
+    thread: threading.Thread,
+    executor: Executor,
+    body: Any,
+    grace_s: float = TEARDOWN_GRACE_S,
+) -> None:
+    """The SIGTERM path (T-055): stop the MCP server, stop C1, then close the
+    bridge (close(), never shutdown() — the E1 trap). docker stop gives the mind
+    its stop_grace_period and then SIGKILLs; a SIGKILLed python partner leaves
+    uc's Java gateway dead forever (T-052 a), so the graceful close is what
+    keeps a slot restart cheap. Idempotent on a second call."""
+    uvi.should_exit = True
+    thread.join(timeout=grace_s)
+    executor.stop()
+    body.close()
+    log.info("mind stopped: server down, C1 stopped, bridge closed")
+
+
+def serve_mind(
+    app: Any,
+    port: int,
+    executor: Executor,
+    body: Any,
+    *,
+    make_server: Callable[[], Any] | None = None,
+) -> None:
+    """Serve the MCP app until SIGTERM/SIGINT, then tear down in order.
+
+    uvicorn runs in a thread: it installs its own signal handlers only in the
+    main thread, so ours own SIGTERM here and drive the shutdown. A server
+    that dies on its own (port taken, lifespan error) sys.exit's INSIDE the
+    thread — swallowed there — so the non-zero exit is raised here, and
+    compose's restart: on-failure brings the mind back (review R1-1)."""
     import uvicorn
 
+    if make_server is None:
+        def make_server() -> Any:
+            return uvicorn.Server(
+                uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
+            )
+
+    uvi = make_server()
+    thread = threading.Thread(target=uvi.run, name="mind-mcp", daemon=True)
+    thread.start()
+    stop = threading.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, stop_handler(stop))
+    try:
+        while thread.is_alive():
+            if stop.wait(0.5):
+                break
+    finally:
+        teardown_mind(uvi, thread, executor, body)
+    if not stop.is_set():
+        # the server thread ended without a signal: the mind is down for a
+        # reason, and docker must see a failure (not a clean stop)
+        raise SystemExit(1)
+
+
+def main() -> None:
     from runtime.config import env
     from runtime.game.py4j_body import Py4jBody
     from runtime.hive.client import HiveClient
@@ -804,7 +879,7 @@ def main() -> None:
     log.info(
         "body MCP for %s on 0.0.0.0:%d/mcp (+/runner/*) log: %s", username, port, log_path or "stderr"
     )
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    serve_mind(app, port, _executor, body)
 
 
 if __name__ == "__main__":

@@ -17,8 +17,10 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import signal
 import threading
 import time
+import types
 from datetime import datetime
 
 import httpx
@@ -446,6 +448,73 @@ def test_wait_events_tool_description_names_the_cap() -> None:
 def test_wait_events_zero_is_still_rejected(stack: Stack) -> None:
     result = stack.call(lambda c: c.call_tool("wait_events", {"timeout_s": 0}))
     assert "must be > 0" in error_text(result)
+
+
+# --- the SIGTERM path (T-055) ---------------------------------------------------------------
+
+
+class FakeUvi:
+    def __init__(self) -> None:
+        self.should_exit = False
+
+
+class FakeThread:
+    def __init__(self) -> None:
+        self.joined: list[float | None] = []
+
+    def join(self, timeout: float | None = None) -> None:
+        self.joined.append(timeout)
+
+
+def test_teardown_mind_stops_in_order_and_closes_the_bridge() -> None:
+    # SIGTERM: the MCP server first, then C1, then the bridge (close() — the
+    # SIGKILL alternative leaves uc's Java gateway dead, T-052 a). The join is
+    # bounded by TEARDOWN_GRACE_S, under compose's stop_grace_period.
+    from runtime.mind.mcp_body import TEARDOWN_GRACE_S, teardown_mind
+
+    uvi, thread = FakeUvi(), FakeThread()
+    calls: list[str] = []
+    executor = types.SimpleNamespace(stop=lambda: calls.append("stop"))
+    body = types.SimpleNamespace(close=lambda: calls.append("close"))
+
+    teardown_mind(uvi, thread, executor, body)
+
+    assert uvi.should_exit is True
+    assert thread.joined == [TEARDOWN_GRACE_S]
+    assert calls == ["stop", "close"]  # the bridge closes LAST
+
+
+def test_stop_handler_sets_the_event() -> None:
+    from runtime.mind.mcp_body import stop_handler
+
+    stop = threading.Event()
+    stop_handler(stop)(signal.SIGTERM, None)
+    assert stop.is_set()
+
+
+def test_serve_mind_exits_nonzero_when_the_server_dies_unsignal() -> None:
+    # R1-1: a failed server start (port taken, lifespan error) sys.exit's
+    # INSIDE the thread — swallowed there. The mind must exit non-zero anyway,
+    # or restart: on-failure never brings it back and the slot silently loses
+    # its mind.
+    from runtime.mind.mcp_body import serve_mind
+
+    class DeadServer:
+        should_exit = False
+
+        def run(self) -> None:
+            return  # dies at once, no signal ever arrives
+
+    executor = types.SimpleNamespace(stop=lambda: None)
+    body = types.SimpleNamespace(close=lambda: None)
+    saved = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)}
+    try:
+        with pytest.raises(SystemExit) as caught:
+            serve_mind(None, 8700, executor, body, make_server=DeadServer)
+        assert (caught.value.code != 0) is True
+    finally:
+        for sig, handler in saved.items():
+            signal.signal(sig, handler)
 
 
 # --- death and the runner endpoints -----------------------------------------------------

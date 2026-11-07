@@ -160,6 +160,17 @@ bash dev/board_chat_run.sh up
   `user.home` из passwd, а не из `$HOME`, поэтому в entrypoint стоят `-Duser.home=/data` и `hmc.mcdir`.
 - Без GL (`-lwjgl`) клиент работает. Ошибки OpenAL, Realms и 401 на ключ профиля при старте — норма.
 
+## Перезапуск слота (T-055)
+`bash dev/slot_restart.sh N` — одной командой, в порядке, который переживает мост: mind-N стоп
+(SIGTERM, `stop_grace_period: 20s`, мост закрывается `close()`), body-N recreate (свежий
+контейнер переподключается к серверу, `restart` изношенного — нет, T-053), ожидание healthcheck
+(шлюз uc слушает 25333, compose `service_healthy`), mind-N старт в новом netns тела. Опции:
+`--dry-run` (печатать команды), `--project NAME` (параллельный стенд), `all` (все слоты).
+При живом `node-N` скрипт откажется без `--force`: перезапуск ума среди жизни теряет
+вооружённый life clock и створ stale-dead из T-054 (заметка надзора в T-055).
+mind-N теперь стартует только после healthcheck тела (`depends_on: service_healthy`), поэтому
+порядок «тело → ум» у compose получается сам.
+
 ## Ключи стенда
 Прогон идёт с ключами: без них `docker/node/up.sh` отказывается подниматься (fail-closed R2-6),
 а приём воли падает в аварийные завещания (T-032). `dev/stand_keys.py` готовит `.env`,

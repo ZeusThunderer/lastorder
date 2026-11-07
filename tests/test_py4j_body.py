@@ -7,12 +7,14 @@ transcript is stored in the repo, so these fixtures are the E1-verified shapes.
 
 from __future__ import annotations
 
+import socket
+
 import pytest
 from py4j.protocol import Py4JNetworkError
 
 from runtime import ports
 from runtime.game import BodyState, BodyUnavailable, Py4jBody, is_service_line
-from runtime.game.py4j_body import parse_game_state
+from runtime.game.py4j_body import _default_gateway_factory, parse_game_state
 
 E1_GAME_STATE = {
     "inGame": True,
@@ -314,6 +316,96 @@ def test_reconnect_recovers_after_a_transient_network_error():
     assert st.hp == pytest.approx(16.0)
     assert len(gws) == 2  # one drop, one reconnect
     assert clock.sleeps == [0.5]
+
+
+# --- T-055: the failed-start teardown -----------------------------------------------------
+
+
+class HalfStartedGateway(FakeGateway):
+    """py4j 0.10.9.9 after a failed callback start (T-052 c): shutdown dies on
+    the callback thread being None, and the listening socket stays open."""
+
+    def __init__(self, entry_point):
+        super().__init__(entry_point)
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server_socket.bind(("127.0.0.1", 0))
+
+    def get_callback_server(self):
+        return self  # the broken server hangs off the gateway
+
+    def shutdown_callback_server(self):
+        self.calls.append("shutdown_callback_server")
+        raise AttributeError("'NoneType' object has no attribute 'join'")
+
+
+def test_teardown_survives_a_half_started_callback_server():
+    # T-052 (c): a gateway whose callback server never started must tear down
+    # without raising, close the listening socket anyway, and a repeated
+    # teardown (close after a drop) stays a quiet no-op.
+    ep = FakeEntryPoint()
+    gw = HalfStartedGateway(ep)
+    clock = FakeClock()
+    body = Py4jBody(lambda: gw, retries=0, clock=clock, sleep=clock.sleep)
+
+    body.state()  # connect: the broken gateway is the live one
+    ep.raise_on_get_state = Py4JNetworkError("socket down")
+    with pytest.raises(BodyUnavailable):
+        body.state()  # the reconnect path drops it — quietly, socket closed
+    assert gw.calls == ["close", "shutdown_callback_server"]
+    assert gw.server_socket.fileno() == -1  # closed despite the broken shutdown
+
+    body.close()  # repeated teardown: nothing left to drop, still quiet
+    assert gw.calls == ["close", "shutdown_callback_server"]
+
+
+def test_factory_failure_lands_in_the_reconnect_path():
+    # The NoneType AttributeError of a broken factory must not crash the tick:
+    # _ensure routes any non-network factory error into Py4JNetworkError, so
+    # _call reconnects and finally reports BodyUnavailable.
+    def broken_factory():
+        raise AttributeError("'NoneType' object has no attribute 'join'")
+
+    clock = FakeClock()
+    body = Py4jBody(broken_factory, retries=1, clock=clock, sleep=clock.sleep)
+    with pytest.raises(BodyUnavailable):
+        body.state()
+    assert clock.sleeps == [0.5]  # the failed start backed off like any network error
+
+
+def test_default_factory_refuses_a_busy_callback_port():
+    # py4j's own failed start would send the SHUTDOWN command to uc (the E1
+    # trap) and die on thread being None: the factory bind-probes the port
+    # first and refuses with Py4JNetworkError, touching nothing on the Java side.
+    from runtime.game.py4j_body import BodyCallback
+
+    squatter = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    squatter.bind(("127.0.0.1", 0))
+    squatter.listen(1)
+    port = squatter.getsockname()[1]
+    import runtime.game.py4j_body as mod
+
+    original = mod.DEFAULT_PYTHON_PROXY_PORT
+    mod.DEFAULT_PYTHON_PROXY_PORT = port
+    try:
+        factory = _default_gateway_factory(BodyCallback(lambda *_: None))
+        with pytest.raises(Py4JNetworkError, match="callback port"):
+            factory()
+    finally:
+        mod.DEFAULT_PYTHON_PROXY_PORT = original
+        squatter.close()
+
+
+def test_callback_port_free_sees_a_live_listener_but_not_a_free_port():
+    # SO_REUSEADDR like py4j's own bind: TIME_WAIT leftovers of a dropped
+    # gateway are not a squatter (the reconnect loop dead-ended on them live),
+    # a live listener is.
+    from runtime.game.py4j_body import _callback_port_free
+
+    assert _callback_port_free(0) is True
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
+        squatter.bind(("127.0.0.1", 0))
+        squatter.listen(1)
+        assert _callback_port_free(squatter.getsockname()[1]) is False
 
 
 # --- state -------------------------------------------------------------------------
