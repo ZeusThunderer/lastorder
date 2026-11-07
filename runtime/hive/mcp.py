@@ -34,6 +34,7 @@ runner key (`X-Runner-Key`): the node's will-session proxy adds it, a sister's b
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
@@ -43,6 +44,7 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.context import Context
 from mcp.server.mcpserver.exceptions import ToolError as SdkToolError
+from mcp.types import CallToolResult, TextContent
 
 from runtime.comms.schema import MSG_MAX_CHARS
 from runtime.hive.board import OPERATOR, Board, BoardError, LAST_ORDER
@@ -506,10 +508,19 @@ def _proposal_json(proposal: ProposalFile) -> dict[str, Any]:
 # --- wiring ---------------------------------------------------------------------------------
 
 
+def _compact(result: Any) -> Any:
+    """A dict answer as compact JSON text plus the same structured content (T-056):
+    the SDK prints indent=2, and every answer stays in the agent's context."""
+    if not isinstance(result, dict):
+        return result
+    text = json.dumps(result, ensure_ascii=False, separators=(",", ":"), default=str)
+    return CallToolResult(content=[TextContent(type="text", text=text)], structured_content=result)
+
+
 async def _run(body: Callable[[], Any]) -> Any:
     """One tool body: sync store/git work in a thread, known refusals as ToolError."""
     try:
-        return await asyncio.to_thread(body)
+        return _compact(await asyncio.to_thread(body))
     except ToolError:
         raise
     except BoardError as exc:

@@ -20,16 +20,19 @@ Run: `python -m runtime.mind` (or `python -m runtime.mind.mcp_body`) — streama
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import math
 import re
 import signal
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError as SdkToolError
+from mcp.types import CallToolResult, TextContent
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -341,6 +344,107 @@ def check_server_command(command: Any, deny: tuple[str, ...] = DEFAULT_DENY) -> 
     return cleaned
 
 
+# --- the size of an answer (T-056) --------------------------------------------------------
+# Every tool answer stays in the sister's context for the rest of the session, so its
+# size is paid on every later request. The SDK prints a dict with indent=2; the answer
+# goes out as compact JSON instead (the structured content is the same dict).
+
+OBSERVE_RADIUS = 4
+OBSERVE_POS_PER_NAME = 8  # nearest positions kept per block name; `count` keeps the total
+OBSERVE_ENTITIES_MAX = 12  # nearest entities kept; `entities_more` counts the rest
+ANSWER_MAX_CHARS = 6000  # an observe answer over this drops positions, then far block groups
+# Fluids do not hide what is behind them: a block next to water is still in view.
+_SEE_THROUGH = ("water", "lava")
+
+
+def compact_json(data: Any) -> str:
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":"), default=str)
+
+
+def compact_answer(result: Any) -> Any:
+    """A dict answer as compact text plus the same structured content."""
+    if not isinstance(result, dict):
+        return result
+    return CallToolResult(
+        content=[TextContent(type="text", text=compact_json(result))], structured_content=result
+    )
+
+
+def _see_through(raw: str) -> bool:
+    low = raw.lower()
+    return any(word in low for word in _SEE_THROUGH)
+
+
+def visible_blocks(
+    blocks: Iterable[Any], center: tuple[int, int, int] | None, radius: int = OBSERVE_RADIUS
+) -> tuple[list[Any], int]:
+    """Blocks with at least one open side inside the scanned cube, and the number of
+    buried ones. The body lists every non-air block of the cube; a side is open when
+    the neighbour inside the cube is not listed (air) or is a fluid. A neighbour
+    outside the cube is unknown and counts as closed; without a center nothing is
+    dropped."""
+    blocks = [b for b in blocks if b.pos]
+    if center is None:
+        return blocks, 0
+    solid = {tuple(b.pos) for b in blocks if not _see_through(b.name)}
+    lo = [c - radius for c in center]
+    hi = [c + radius for c in center]
+    shown, hidden = [], 0
+    for b in blocks:
+        x, y, z = b.pos
+        open_side = False
+        for dx, dy, dz in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)):
+            n = (x + dx, y + dy, z + dz)
+            if all(lo[i] <= n[i] <= hi[i] for i in range(3)) and n not in solid:
+                open_side = True
+                break
+        if open_side:
+            shown.append(b)
+        else:
+            hidden += 1
+    return shown, hidden
+
+
+def _dist2(pos: Iterable[float], origin: tuple[float, float, float] | None) -> float:
+    if origin is None:
+        return 0.0
+    return sum((float(a) - float(b)) ** 2 for a, b in zip(pos, origin))
+
+
+def group_blocks(
+    named: Iterable[tuple[str, tuple[int, int, int]]],
+    origin: tuple[float, float, float] | None,
+    per_name: int = OBSERVE_POS_PER_NAME,
+) -> list[dict[str, Any]]:
+    """(name, pos) pairs as one entry per name: count, nearest positions first; the
+    groups go nearest first."""
+    groups: dict[str, list[tuple[int, int, int]]] = {}
+    for name, pos in named:
+        groups.setdefault(name, []).append(tuple(pos))
+    out = []
+    for name, cells in groups.items():
+        cells.sort(key=lambda p: _dist2(p, origin))
+        out.append({"name": name, "count": len(cells), "pos": [list(p) for p in cells[:per_name]]})
+    out.sort(key=lambda g: _dist2(g["pos"][0], origin))
+    return out
+
+
+def fit_observe(answer: dict[str, Any], limit: int = ANSWER_MAX_CHARS) -> dict[str, Any]:
+    """Keep an observe answer under `limit` chars: one position per block group, then
+    drop the farthest groups (`blocks_more` counts them). self, inventory and chat stay."""
+    if len(compact_json(answer)) <= limit:
+        return answer
+    for group in answer["blocks"]:
+        del group["pos"][1:]
+    dropped = 0
+    while answer["blocks"] and len(compact_json(answer)) > limit:
+        answer["blocks"].pop()
+        dropped += 1
+    if dropped:
+        answer["blocks_more"] = dropped
+    return answer
+
+
 # --- the tools ----------------------------------------------------------------------------
 
 
@@ -391,6 +495,10 @@ class BodyMcp:
         self._x.journal.record("call", **fields, **entry)
         return result
 
+    async def _reply(self, name: str, args: Mapping[str, Any], fn: Callable[[], Any]) -> Any:
+        """A logged call whose dict answer goes out as compact JSON (T-056)."""
+        return compact_answer(await self._tool(name, args, fn))
+
     def _seen(self, raw: str, kind: str) -> str:
         return self._perception.see(raw, kind).render()
 
@@ -401,10 +509,15 @@ class BodyMcp:
         with self._x.body_lock:  # one writer with C1 at a time (review P1-6)
             state = body.state()
             entities = tuple(body.entities(radius=16))
-            blocks = tuple(body.blocks_around(radius=4))
+            blocks = tuple(body.blocks_around(radius=OBSERVE_RADIUS))
             inventory = tuple(body.inventory())
             chat = tuple(body.recent_chat(5))
-        return {
+        raw_pos = [float(c) for c in getattr(state, "pos", ()) or ()]
+        origin = tuple(raw_pos) if len(raw_pos) == 3 else None
+        center = tuple(math.floor(c) for c in raw_pos) if origin else None
+        shown, hidden = visible_blocks(blocks, center)
+        entities = tuple(sorted(entities, key=lambda e: float(e.dist_m)))
+        answer: dict[str, Any] = {
             "self": {
                 "in_game": bool(getattr(state, "in_game", False)),
                 "hp": round(float(getattr(state, "hp", 0.0)), 1),
@@ -424,12 +537,10 @@ class BodyMcp:
                     "dist_m": round(float(e.dist_m), 1),
                     "pos": list(e.pos) if e.pos else None,
                 }
-                for e in entities
+                for e in entities[:OBSERVE_ENTITIES_MAX]
             ],
-            "blocks": [
-                {"name": self._seen(b.name, "block"), "pos": list(b.pos) if b.pos else None}
-                for b in blocks
-            ],
+            "blocks": group_blocks(((self._seen(b.name, "block"), b.pos) for b in shown), origin),
+            "blocks_hidden": hidden,
             "inventory": [
                 {"name": self._seen(i.name, "item"), "count": int(i.count), "slot": int(i.slot)}
                 for i in inventory
@@ -438,6 +549,9 @@ class BodyMcp:
             # server's `<Name>` prefix names (`operator` when configured, T-051)
             "chat": [entry for entry in (self._x.chat_entry(line) for line in chat) if entry],
         }
+        if len(entities) > OBSERVE_ENTITIES_MAX:
+            answer["entities_more"] = len(entities) - OBSERVE_ENTITIES_MAX
+        return fit_observe(answer)
 
     def act(self, intent: str, args: Mapping[str, Any] | None = None) -> dict[str, Any]:
         cleaned = validate_args(intent, args)
@@ -527,9 +641,11 @@ def build_server(
     )
 
     async def observe() -> dict[str, Any]:
-        """See the world through plain names: self (hp, food, pos, held...), entities,
-        blocks, inventory and the last filtered chat lines."""
-        return await impl._tool("observe", {}, impl.observe)
+        """See the world through plain names: self (hp, food, pos, held...), the nearest
+        entities, blocks in view within 4 m (one entry per name: count, nearest
+        positions first; blocks_hidden counts the buried ones), inventory and the last
+        filtered chat lines."""
+        return await impl._reply("observe", {}, impl.observe)
 
     async def act(intent: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         """Give C1 the next intent. `intent` is EXACTLY one lever name: goto, goto_far,
@@ -539,15 +655,15 @@ def build_server(
         {"intent": "get", "args": {"item": "oak log", "count": 8}}. C1 executes it, may
         interrupt it for a threat and returns to it; you learn the outcome from
         intent.done / intent.failed events. Returns the intent id."""
-        return await impl._tool("act", {"intent": intent, "args": dict(args or {})}, lambda: impl.act(intent, args))
+        return await impl._reply("act", {"intent": intent, "args": dict(args or {})}, lambda: impl.act(intent, args))
 
     async def stop() -> dict[str, Any]:
         """Drop the current intent and stop the body."""
-        return await impl._tool("stop", {}, impl.stop)
+        return await impl._reply("stop", {}, impl.stop)
 
     async def say(text: str) -> dict[str, Any]:
         """One line into the player chat (no / or @, limited length and rate)."""
-        return await impl._tool("say", {"text": text}, lambda: impl.say(text))
+        return await impl._reply("say", {"text": text}, lambda: impl.say(text))
 
     async def server_command(command: str) -> dict[str, Any]:
         """One player command to the server, e.g. "/tpa LastOrder02" or "/sethome".
@@ -555,12 +671,12 @@ def build_server(
         login/password commands: the environment logs in itself); the server
         enforces the rights. One command per call, no ';' or line breaks, same
         rate cap as say. The reply, if any, comes back as ordinary chat lines."""
-        return await impl._tool(
+        return await impl._reply(
             "server_command", {"command": command}, lambda: impl.server_command(command)
         )
 
     async def wait_events(timeout_s: float = 30.0) -> dict[str, Any]:
-        return await impl._tool(
+        return await impl._reply(
             "wait_events", {"timeout_s": timeout_s}, lambda: impl.wait_events(timeout_s)
         )
 
@@ -580,7 +696,7 @@ def build_server(
     async def retire_stuck() -> dict[str, Any]:
         """Eliminate yourself (request_death "stuck"). Works only right after a task.idle
         event; any new intent disarms it. Refused otherwise."""
-        return await impl._tool("retire_stuck", {}, impl.retire_stuck)
+        return await impl._reply("retire_stuck", {}, impl.retire_stuck)
 
     server.add_tool(observe, name="observe")
     server.add_tool(act, name="act")

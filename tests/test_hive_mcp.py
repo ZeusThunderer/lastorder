@@ -388,6 +388,23 @@ def test_inheritance_lists_the_dead(stack: Stack) -> None:
     assert "не ходить в горы ночью" in out["inherited_notes"]
 
 
+def test_answers_are_compact_json(stack: Stack) -> None:
+    """T-056: every answer stays in the sister's context, so it goes out without the
+    SDK's indent=2; the structured side is the same dict."""
+    first = stack.birth("LastOrder01")
+    stack.retire(first)
+    stack.birth("LastOrder01")
+
+    async def run(client: Client):
+        return await client.call_tool("inheritance", {})
+
+    result = stack.call(stack.node_url(), {"X-Node-Key": KEY1}, run)
+    text = result.content[0].text
+    assert not result.is_error, text
+    assert "\n" not in text.strip() and '": ' not in text
+    assert json.loads(text) == result.structured_content
+
+
 # --- submit_will ---------------------------------------------------------------------------------
 
 

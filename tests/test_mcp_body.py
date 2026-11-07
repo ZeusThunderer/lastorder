@@ -31,9 +31,13 @@ from mcp.client.streamable_http import streamable_http_client
 
 from runtime.mind.login import SessionLogin
 from runtime.mind.mcp_body import (
+    ANSWER_MAX_CHARS,
     DEFAULT_DENY,
+    OBSERVE_ENTITIES_MAX,
+    OBSERVE_POS_PER_NAME,
     SAY_MAX_LEN,
     ToolError,
+    visible_blocks,
     build_mind,
     check_say,
     check_server_command,
@@ -958,3 +962,94 @@ def test_check_server_command_rejects_a_bare_slash() -> None:
         check_server_command("/")
     with pytest.raises(ToolError, match="empty command name"):
         check_server_command("  /   ")
+
+
+# --- the size of an answer (T-056) ------------------------------------------------------
+
+
+def plains_cube(cx: int = 0, cy: int = 64, cz: int = 0, r: int = 4) -> tuple[BlockInfo, ...]:
+    """What getBlocksAround lists on a plain with a tree and a pond: every non-air
+    block of the cube, the buried ones included."""
+    out = []
+    for x in range(cx - r, cx + r + 1):
+        for z in range(cz - r, cz + r + 1):
+            for y in range(cy - r, cy + r + 1):
+                pond = -3 <= x <= -2 and -3 <= z <= -2
+                if y == 63:
+                    name = "minecraft:water" if pond else "minecraft:grass_block"
+                elif y in (61, 62):
+                    name = "minecraft:sand" if pond else "minecraft:dirt"
+                elif y < 61:
+                    name = "minecraft:stone"
+                elif (x, z) == (2, 2) and y <= 67:
+                    name = "minecraft:oak_log"
+                elif 66 <= y <= 68 and abs(x - 2) <= 1 and abs(z - 2) <= 1:
+                    name = "minecraft:oak_leaves"
+                else:
+                    continue
+                out.append(BlockInfo(name=name, pos=(x, y, z)))
+    return tuple(out)
+
+
+def raw_observe(stack: Stack):
+    async def run(client):
+        return await client.call_tool("observe", {})
+
+    return stack.call(run)
+
+
+def test_observe_is_compact_and_shows_only_blocks_in_view(stack: Stack) -> None:
+    cube = plains_cube()
+    stack.body.blocks_around = lambda radius=4: cube
+    stack.body.entities = lambda radius=16: tuple(
+        EntityInfo(kind="animal", name="minecraft:cow", dist_m=float(i), pos=(i, 64, 0))
+        for i in range(30, 0, -1)
+    )
+    result = raw_observe(stack)
+    text = result.content[0].text
+    obs = json.loads(text)
+    assert "\n" not in text and '": ' not in text  # compact, not the SDK's indent=2
+    assert obs == result.structured_content  # the structured side carries the same answer
+    assert len(text) <= ANSWER_MAX_CHARS
+    groups = {g["name"]: g for g in obs["blocks"]}
+    # the top of the ground is in view, the dirt and stone under it are buried
+    # (81 cells minus 4 of the pond minus the one under the trunk, closed on every side)
+    assert groups["blk:grass_block grass block"]["count"] == 81 - 4 - 1
+    assert obs["blocks_hidden"] > 200  # three buried layers of 81
+    assert "blk:stone stone" not in groups
+    # water does not hide: the sand under the pond is in view
+    assert groups["blk:sand sand"]["count"] == 4
+    # nearest first, the total in count
+    grass = groups["blk:grass_block grass block"]["pos"]
+    assert len(grass) == OBSERVE_POS_PER_NAME and grass[0] == [0, 63, 0]
+    # the nearest entities only, the rest counted
+    assert len(obs["entities"]) == OBSERVE_ENTITIES_MAX and obs["entities"][0]["dist_m"] == 1.0
+    assert obs["entities_more"] == 30 - OBSERVE_ENTITIES_MAX
+    assert obs["self"]["hp"] == 20.0 and obs["inventory"]
+
+
+def test_observe_answer_has_a_ceiling_on_the_worst_cube(stack: Stack) -> None:
+    """Every block of the cube a different name and in view (a lattice): the
+    largest answer the body can produce stays under the ceiling."""
+    cells = [(x, y, z) for x in range(-4, 5) for y in range(60, 69) for z in range(-4, 5)]
+    lattice = tuple(
+        BlockInfo(name=f"minecraft:block_{i}", pos=p)
+        for i, p in enumerate(cells)
+        if sum(p) % 2 == 0  # every neighbour of a listed block is air
+    )
+    stack.body.blocks_around = lambda radius=4: lattice
+    stack.body.inventory = lambda: tuple(
+        ItemStack(name=f"minecraft:item_{i}", count=64, slot=i) for i in range(36)
+    )
+    text = raw_observe(stack).content[0].text
+    obs = json.loads(text)
+    assert len(text) <= ANSWER_MAX_CHARS
+    assert obs["blocks_more"] > 0 and obs["blocks"]
+    assert len(obs["inventory"]) == 36  # self, inventory and chat are never cut
+
+
+def test_visible_blocks_without_a_center_drops_nothing() -> None:
+    cube = plains_cube()
+    shown, hidden = visible_blocks(cube, None)
+    assert len(shown) == len(cube) and hidden == 0
+
