@@ -71,4 +71,4 @@
 | T-065 | Прогон камер на стенде — три тела на Xvfb в media, цена CPU и памяти, влияние на C1 | I | ready | normal | z/T-065-camera-stand-run |
 | T-066 | Сёстры на Pi напрямую — адаптер раннера, MCP без codemode, потолок контекста сжатием | I | done | critical | z/T-066-sisters-pi-direct |
 | T-067 | Ролик-знакомство с Last Order — персонаж, сеть сестёр, кадры игры (надзор) | — | ready | normal | c/T-067-intro-video |
-| T-068 | Репозиторий к публикации — README и обзор архитектуры на английском, схемы, аудит секретов (надзор) | — | ready | normal | c/T-068-github-publication |
+| T-068 | Репозиторий к публикации — README и обзор архитектуры на английском, схемы, аудит секретов (надзор) | — | done | normal | c/T-068-github-publication |

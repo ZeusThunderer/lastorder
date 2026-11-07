@@ -2,7 +2,7 @@
 id: T-068
 title: Репозиторий к публикации — README и обзор архитектуры на английском, схемы, аудит секретов
 stage: —
-status: accepted
+status: done
 criticality: normal
 owner: supervisor
 after: []
