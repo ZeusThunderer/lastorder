@@ -137,5 +137,5 @@ def test_slot_restart_dry_run_prints_the_sequence():
     ).stdout
     assert "stop mind-1" in out
     assert "up -d --force-recreate --no-deps body-1" in out
-    assert "--healthy body-1" in out
-    assert "up -d mind-1" in out
+    assert "--healthy" in out and "ps -q body-1" in out
+    assert "up -d --no-deps mind-1" in out

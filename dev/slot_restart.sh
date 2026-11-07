@@ -72,14 +72,22 @@ for n in "${SLOTS[@]}"; do
     compose up -d --force-recreate --no-deps "body-$n"
     echo "== slot $n: wait for the gateway healthcheck"
     if [ "$DRY_RUN" != 1 ]; then
-        bash dev/wait_for.sh "$GRACE_S" --healthy "body-$n" || {
+        # compose ps -q resolves the real container name in ANY project (the
+        # service is body-N, the container is <project>-body-N-1) — wait_for
+        # wants the object docker inspect can find.
+        cid="$(docker compose "${PROJECT_ARGS[@]}" -f "$COMPOSE_FILE" ps -q "body-$n")"
+        [ -n "$cid" ] || { echo "slot_restart: body-$n not found on the stand" >&2; exit 1; }
+        bash dev/wait_for.sh "$GRACE_S" --healthy "$cid" || {
             echo "slot_restart: body-$n not healthy in ${GRACE_S}s — not starting the mind" >&2
             exit 1
         }
     else
-        echo "bash dev/wait_for.sh $GRACE_S --healthy body-$n"
+        echo "bash dev/wait_for.sh $GRACE_S --healthy \$\(docker compose ps -q body-$n\)"
     fi
-    echo "== slot $n: mind start (joins the new netns; compose gates on body healthy)"
-    compose up -d "mind-$n"
+    echo "== slot $n: mind start (joins the new netns; the health gate ran above)"
+    # --no-deps: the stand is up, only this mind starts — a bare `up` also
+    # reconciles siblings and can stumble on env drift (a parallel stand's
+    # ports, seen live). The body's health was the gate, checked explicitly.
+    compose up -d --no-deps "mind-$n"
 done
 echo "slot_restart: done (${SLOTS[*]})"
