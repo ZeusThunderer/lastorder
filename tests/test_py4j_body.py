@@ -395,6 +395,19 @@ def test_default_factory_refuses_a_busy_callback_port():
         squatter.close()
 
 
+def test_callback_port_free_sees_a_live_listener_but_not_a_free_port():
+    # SO_REUSEADDR like py4j's own bind: TIME_WAIT leftovers of a dropped
+    # gateway are not a squatter (the reconnect loop dead-ended on them live),
+    # a live listener is.
+    from runtime.game.py4j_body import _callback_port_free
+
+    assert _callback_port_free(0) is True
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as squatter:
+        squatter.bind(("127.0.0.1", 0))
+        squatter.listen(1)
+        assert _callback_port_free(squatter.getsockname()[1]) is False
+
+
 # --- state -------------------------------------------------------------------------
 
 

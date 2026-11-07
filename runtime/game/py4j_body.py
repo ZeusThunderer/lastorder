@@ -112,6 +112,24 @@ class BodyCallback:
         implements = ["adris.altoclef.PythonCallback"]
 
 
+def _callback_port_free(port: int, address: str = DEFAULT_ADDRESS) -> bool:
+    """True when the callback port can be taken. The probe binds with
+    SO_REUSEADDR exactly like py4j's own callback server: TIME_WAIT leftovers
+    of a dropped gateway (uc dials back on InitPythonCallback, python closes
+    first) must not read as a squatter — without it the reconnect loop dead-
+    ends for a minute after the first drop (seen live, T-055). A LIVE
+    listener still blocks the bind."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind((address, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
 def _default_gateway_factory(callback: BodyCallback) -> Callable[[], JavaGateway]:
     def connect() -> JavaGateway:
         gw = JavaGateway(
@@ -125,16 +143,11 @@ def _default_gateway_factory(callback: BodyCallback) -> Callable[[], JavaGateway
         # command to uc's server — the bridge then dies until a whole client
         # restart (CLAUDE.md trap) — and its cleanup crashes on the callback
         # thread being None. A busy port fails HERE, quietly, instead.
-        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            probe.bind((DEFAULT_ADDRESS, DEFAULT_PYTHON_PROXY_PORT))
-        except OSError as exc:
+        if not _callback_port_free(DEFAULT_PYTHON_PROXY_PORT):
             gw.close()  # no callback server exists: closes the client sockets only
             raise Py4JNetworkError(
-                f"callback port {DEFAULT_PYTHON_PROXY_PORT} is busy: {exc}"
-            ) from exc
-        finally:
-            probe.close()
+                f"callback port {DEFAULT_PYTHON_PROXY_PORT} is busy (a live listener holds it)"
+            )
         try:
             gw.start_callback_server()
         except Exception as exc:  # the bind race is microsecond-wide; py4j's
