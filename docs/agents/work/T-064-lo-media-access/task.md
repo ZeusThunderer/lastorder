@@ -4,6 +4,7 @@ title: Last Order и видео — доступ к media, ffmpeg, журнал�
 stage: I
 status: ready
 criticality: critical
+lane: b
 after: [T-063]
 branch: z/T-064-lo-media-access
 created: 2026-10-31

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Real task statuses across branches and worktrees (the branch copy of task.md wins while the branch exists).
 #   bash dev/tasks.sh                  # table: id, status, BOARD status, branch, worktree, open `after:` tasks
-#   bash dev/tasks.sh --next [T-NNN …] # ZCode: next task to work on, "T-NNN <status>", skipping the given ids;
-#                                      # order: in_progress, review, blocked with a question, changes, ready
+#   bash dev/tasks.sh --next [--lane L] [T-NNN …]
+#                                      # ZCode: next task to work on, "T-NNN <status>", skipping the given ids;
+#                                      # order: in_progress, review, blocked with a question, changes, ready;
+#                                      # only tasks of lane L (`lane:` in task.md, default a);
+#                                      # tasks with `owner: supervisor` are skipped
 #   bash dev/tasks.sh --sync           # Claude: write real statuses into BOARD in main (under the main lock)
 #   bash dev/tasks.sh --prune          # Claude: remove worktrees and branches of done tasks merged into main
 set -uo pipefail
@@ -16,23 +19,29 @@ board_status() { git show "main:$WORK/BOARD.md" | tr -d '\r' | awk -F'|' -v id="
 dirs="$(git ls-tree -d --name-only main "$WORK/" | sed 's#.*/##' | grep '^T-[0-9]\{3\}-' || true)"
 
 if [ "$mode" = list ]; then
-  printf '%-6s %-12s %-12s %-40s %-40s %s\n' id status board branch worktree after
+  printf '%-6s %-12s %-12s %-4s %-40s %-40s %s\n' id status board lane branch worktree after
   for d in $dirs; do
     id="${d:0:5}"; b="$(field main "$d" branch)"; wt="-"; st="$(task_status "$d")"; after=""
     [ -d "$ROOT/.worktrees/$d" ] && wt=".worktrees/$d"
     branch_exists "$b" || b="($b)"
     [ "$st" = ready ] && after="$(deps_open "$d")"
-    printf '%-6s %-12s %-12s %-40s %-40s %s\n' "$id" "$st" "$(board_status "$id")" "$b" "$wt" "$after"
+    ln="$(field main "$d" lane)"; [ "$(field main "$d" owner)" = supervisor ] && ln=sup
+    printf '%-6s %-12s %-12s %-4s %-40s %-40s %s\n' "$id" "$st" "$(board_status "$id")" "${ln:-a}" "$b" "$wt" "$after"
   done
   exit 0
 fi
 
 if [ "$mode" = --next ]; then
-  shift; skip=" $* "
+  shift; lane=a
+  if [ "${1:-}" = --lane ]; then lane="${2:?--lane needs a value}"; shift 2; fi
+  skip=" $* "
   for want in in_progress review blocked changes ready; do
     for d in $dirs; do
       id="${d:0:5}"
       case "$skip" in *" $id "*) continue ;; esac
+      # Tasks the supervisor does itself (owner: supervisor) are not ZCode's.
+      [ "$(field main "$d" owner)" = supervisor ] && continue
+      tl="$(field main "$d" lane)"; [ "${tl:-a}" = "$lane" ] || continue
       [ "$(task_status "$d")" = "$want" ] || continue
       if [ "$want" = blocked ]; then
         # Only a worker's question goes to the supervisor; "нужен оператор" waits for the operator.

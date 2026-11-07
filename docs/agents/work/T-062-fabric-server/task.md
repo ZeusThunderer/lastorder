@@ -4,6 +4,7 @@ title: mc-server на Fabric — закреплённые версии загр�
 stage: I
 status: ready
 criticality: normal
+lane: b
 after: []
 branch: z/T-062-fabric-server
 created: 2026-10-31

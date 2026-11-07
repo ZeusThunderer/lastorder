@@ -85,7 +85,7 @@
 - Пути bind-mount в compose разрешает демон, а не шелл (см. unionclef/deploy/compose.test.yml).
 - `NetTyan/.env*` содержат секреты — не читать. У nt и uc своя git-политика (без Co-Authored-By).
 
-## Два агента (ADR-019, ADR-040)
+## Два агента (ADR-019, ADR-040, ADR-046)
 Код пишет ZCode (worker), Claude Code — надзор: ставит задачи, проверяет, мержит. Субагентов нет.
 - Протокол — docs/agents/coop-protocol.md, задачи — docs/agents/work/.
 - Корень репозитория всегда на `main`. Каждая задача — свой worktree `.worktrees/T-NNN-<slug>`
@@ -93,7 +93,8 @@
 - Скилы Claude: `lo-plan`, `lo-review`, `lo-direct-edit`.
 - Код Claude правит сам только через `lo-direct-edit` и только по основаниям из протокола.
   Каждая правка — в DIRECT_EDITS.md. Файлы в `docs/agents/work/` и документы — не прямые правки.
-- Основной путь — ZCode в одном чате (`lo-work`) делает задачи по очереди. После сдачи он сам
+- Основной путь — ZCode (`lo-work`) делает задачи по очереди, по чату на очередь `lane:`; очереди
+  идут параллельно и делят стенд через `dev/stand.sh lock` (ADR-046). После сдачи он сам
   вызывает Claude headless (`dev/call_supervisor.sh`, только Opus, effort `medium`; `high` — по
   просьбе оператора) на ревью, merge и ответы на вопросы, критичные задачи тоже. В таком вызове
   действует раздел «Headless» скила `lo-review`. Оператору — только «Эскалация оператору» из протокола.

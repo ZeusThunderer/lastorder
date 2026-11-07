@@ -4,6 +4,7 @@ title: Камера тела и сервис media — экран тела по�
 stage: I
 status: ready
 criticality: critical
+lane: b
 after: [T-062]
 branch: z/T-063-body-camera
 created: 2026-10-31

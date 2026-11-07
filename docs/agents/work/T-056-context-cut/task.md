@@ -4,8 +4,9 @@ title: Контекст запроса сестры — рост за жизнь
 stage: I
 status: ready
 criticality: normal
+owner: supervisor
 after: [T-066]
-branch: z/T-056-context-cut
+branch: c/T-056-context-cut
 created: 2026-10-31
 ---
 

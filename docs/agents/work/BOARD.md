@@ -58,8 +58,8 @@
 | T-052 | Короткий прогон на стенде — задача с доски и реплика оператора в чате у живой сестры | I | done | normal | z/T-052-board-chat-run |
 | T-053 | Команды сервера сестре — команды игрока с запретным списком и вход /login средой | I | done | critical | z/T-053-server-commands |
 | T-054 | Старт слота — нет смерти от устаревшего hp, wait_events не дольше таймаута харнесса | I | done | critical | z/T-054-slot-start-fixes |
-| T-055 | Мост py4j — порядок подъёма тела и mind, мягкая остановка, перезапуск слота одной командой | I | ready | normal | z/T-055-py4j-bridge |
-| T-056 | Контекст запроса сестры — рост за жизнь, пробуждения, крупные части | I | ready | normal | z/T-056-context-cut |
+| T-055 | Мост py4j — порядок подъёма тела и mind, мягкая остановка, перезапуск слота одной командой | I | changes | normal | z/T-055-py4j-bridge |
+| T-056 | Контекст запроса сестры — рост за жизнь, пробуждения, крупные части | I | in_progress | normal | z/T-056-context-cut |
 | T-057 | Мост инфраструктуры — Last Order поднимает и снимает сестёр, хост исполняет без одобрения на каждое действие | I | ready | critical | z/T-057-infra-bridge |
 | T-058 | Прогон стенда после исправлений — команда сервера, старт слота, мост, размер запроса | I | ready | normal | z/T-058-stand-run-fixes |
 | T-059 | Last Order на Z.ai Coding Plan — харнесс Pi, модель GLM-5.3, запасной OpenCode через шлюз | I | done | critical | z/T-059-lo-on-zai |
@@ -70,3 +70,5 @@
 | T-064 | Last Order и видео — доступ к media, ffmpeg, журналы сети на чтение, справка об инструментах | I | ready | critical | z/T-064-lo-media-access |
 | T-065 | Прогон камер на стенде — три тела на Xvfb в media, цена CPU и памяти, влияние на C1 | I | ready | normal | z/T-065-camera-stand-run |
 | T-066 | Сёстры на Pi напрямую — адаптер раннера, MCP без codemode, потолок контекста сжатием | I | done | critical | z/T-066-sisters-pi-direct |
+| T-067 | Ролик-знакомство с Last Order — персонаж, сеть сестёр, кадры игры (надзор) | — | ready | normal | c/T-067-intro-video |
+| T-068 | Репозиторий к публикации — README и обзор архитектуры на английском, схемы, аудит секретов (надзор) | — | ready | normal | c/T-068-github-publication |
