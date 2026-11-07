@@ -68,3 +68,13 @@
 - Коммит: adbfbae (ветка c/T-056-context-cut)
 - Почему не через ZCode: решение оператора ускорить очередь; ZCode занят T-055. [проверено: pytest
   925 passed, check.py ok в worktree] Живой стенд не прогонялся — T-058.
+
+## D-007 · 2026-11-07 · —
+- Основание: исключение по решению оператора (ни одно из 1–6) — «you can set low effort if you think
+  thats better». По отчёту T-056 повторно отправляемый thinking — 19 % входа сестры.
+- Файлы: runtime/node/workplace.py (`PI_SISTER_THINKING_LEVEL`, параметр `thinking_level` у
+  `render_pi_configs`), tests/test_node_runner.py
+- Коммит: bc88043
+- Почему не через ZCode: оператор попросил надзор. Жизнь сестры — `low`, завещание и стол Last Order —
+  умолчание Pi `medium`. Ключ `defaultThinkingLevel` [проверено: docs/settings.md Pi в образе
+  lastorder-node:dev]. [проверено: pytest 935 passed, check.py ok] На стенде не прогонялось — замер в T-058.
