@@ -59,3 +59,27 @@ $ bash dev/slot_restart.sh 1 --dry-run
 
 ### Вопросы
 - нет
+
+## Раунд 2 · 2026-11-07
+Коммиты: 039d0f5 (merge main), 2efb8c2
+
+### Ответ на ревью
+- R1-1 · fixed 2efb8c2 — `serve_mind` поднимает `SystemExit(1)`, когда поток сервера закончился
+  без стоп-сигнала; тест `test_serve_mind_exits_nonzero_when_the_server_dies_unsignal`
+  (stub-сервер через `make_server`, обработчики сигналов восстанавливаются).
+- R1-2 · fixed 2efb8c2 — комментарий переписан честно: в микросекундном окне между пробой и
+  bind py4j сам зовёт `shutdown()` и может погасить шлюз uc; обход обёртки = приватное API
+  py4j, остаточный риск принят явно.
+- R1-3 · fixed 2efb8c2 — dry-run печатает `$(docker compose ps -q body-1)` без слэшей.
+
+### Проверки
+```
+$ bash dev/check.sh
+pytest: ok · 931 passed, 3 skipped, 2 warnings in 121.62s
+check.py: ok · Every workplace is intact: files present, links resolve, boxes parse.
+$ bash dev/slot_restart.sh 1 --dry-run | sed -n 6p
+bash dev/wait_for.sh 420 --healthy $(docker compose ps -q body-1)
+```
+
+### Вопросы
+- нет
