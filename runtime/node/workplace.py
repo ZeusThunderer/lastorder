@@ -449,6 +449,10 @@ MISAKA_LINK_FILES = (
 PI_CONTEXT_WINDOW = 96_000
 PI_RESERVE_TOKENS = 16_384
 PI_KEEP_RECENT_TOKENS = 20_000
+# A sister's life sessions think at `low` (operator, 2026-11-07, D-007): thinking is
+# resent with the history and was 19 % of the input (T-056 report), and it is the
+# output that makes a turn slow. The will session keeps Pi's default (`medium`).
+PI_SISTER_THINKING_LEVEL = "low"
 
 
 def render_pi_configs(
@@ -461,6 +465,7 @@ def render_pi_configs(
     keep_recent_tokens: int = PI_KEEP_RECENT_TOKENS,
     key_file: str = str(PI_AGENT_DIR / PI_KEY_FILE),
     session_dir: str = PI_WORKPLACE_SESSION_DIR,
+    thinking_level: str | None = None,
 ) -> dict[str, dict]:
     """The Pi agent-dir configs: models.json + mcp.json + settings.json, by content.
     No key material in the configs: apiKey is a `!command` reference (Pi resolves a
@@ -521,6 +526,9 @@ def render_pi_configs(
                 "reserveTokens": PI_RESERVE_TOKENS,
                 "keepRecentTokens": keep_recent_tokens,
             },
+            # Pi's startup level (docs/settings.md: off|minimal|low|medium|high…);
+            # absent means Pi's default `medium`
+            **({"defaultThinkingLevel": thinking_level} if thinking_level else {}),
         },
     }
 
@@ -579,6 +587,7 @@ def drop_pi_agent_dir(
         context_window=context_window, keep_recent_tokens=keep_recent_tokens,
         key_file=str(agent_dir / PI_KEY_FILE),
         session_dir=session_dir,
+        thinking_level=None if hive_mcp_override else PI_SISTER_THINKING_LEVEL,
     )
     if hive_mcp_override:
         configs["mcp.json"]["mcpServers"]["hive"]["url"] = hive_mcp_override.rstrip("/")

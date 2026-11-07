@@ -877,6 +877,10 @@ def test_pi_configs_expose_mcp_directly_and_cap_the_context() -> None:
     keep = defaults["settings.json"]["compaction"]["keepRecentTokens"]
     threshold = window - defaults["settings.json"]["compaction"]["reserveTokens"]
     assert threshold - (keep + 25_000) >= 30_000
+    # no thinking level unless asked: Last Order's desk keeps Pi's default
+    assert "defaultThinkingLevel" not in defaults["settings.json"]
+    low = workplace.render_pi_configs("GLM-5.3-Flash", "http://b", "http://h", "k", thinking_level="low")
+    assert low["settings.json"]["defaultThinkingLevel"] == "low"
 
 
 def test_pi_will_mode_re_renders_with_hive_at_the_proxy(tmp_path: Path, monkeypatch) -> None:
@@ -888,6 +892,9 @@ def test_pi_will_mode_re_renders_with_hive_at_the_proxy(tmp_path: Path, monkeypa
     monkeypatch.setattr(workplace, "_PI_RENDER", {})
     adapter = _pi_adapter(agent_dir)
     adapter.life_turn("p", None)
+    settings_path = agent_dir / "settings.json"
+    # life sessions think at low (D-007), the will keeps Pi's default
+    assert json.loads(settings_path.read_text(encoding="utf-8"))["defaultThinkingLevel"] == "low"
     # her substitution: an extra server in the file
     mcp_path = agent_dir / "mcp.json"
     os.chmod(mcp_path, 0o644)
@@ -899,6 +906,7 @@ def test_pi_will_mode_re_renders_with_hive_at_the_proxy(tmp_path: Path, monkeypa
     assert mcp["mcpServers"]["body"]["url"] == "http://body-1:8700/mcp"
     # the will render carries the key too: the will session must be able to call out
     assert (agent_dir / "zai-key").read_text(encoding="utf-8") == "zai-token"
+    assert "defaultThinkingLevel" not in json.loads(settings_path.read_text(encoding="utf-8"))
     adapter.life_turn("p", "0193-abcd")
     mcp = json.loads(mcp_path.read_text(encoding="utf-8"))
     assert mcp["mcpServers"]["hive"]["url"] == "http://hive:8000/node/mcp"
