@@ -994,7 +994,8 @@ class Board:
         if not isinstance(ok, bool):
             raise BoardError(422, "validation", "ok must be true or false")
         text = "" if text is None else text if isinstance(text, str) else str(text)
-        text = text.strip()[:RESULT_MAX]
+        # raw game ids never enter the board (log tails carry them): masked, not refused
+        text = NAMESPACED.sub("[raw id]", text).strip()[:RESULT_MAX]
         to_status = "done" if ok else "failed"
         with self._lock, self._tx() as cur:
             row = self._entry_row(cur, entry_id)

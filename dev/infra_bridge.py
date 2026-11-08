@@ -289,6 +289,9 @@ def main_with(
                 echo(f"cannot read the queue — {status}")
                 return 1
             for request in body.get("requests", []):
+                # the operator may switch off mid-batch: re-read before each take
+                if not dry_run and not hive.call("GET", "/board/infra/switch")[1].get("on"):
+                    break
                 process(hive, request, project=project, dry=dry_run, runner=runner)
         if dry_run or once:
             return 0

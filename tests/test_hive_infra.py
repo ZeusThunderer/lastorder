@@ -211,6 +211,13 @@ def test_the_output_is_truncated_never_refused(stack: Stack) -> None:
     assert len(done["thread"][-1]["text"]) == 800
 
 
+def test_raw_ids_in_the_output_are_masked(stack: Stack) -> None:
+    entry = stack.lo_infra("logs", {"service": "body-1"})
+    stack.board.infra_take("infra", entry["id"])
+    done = stack.board.infra_result("infra", entry["id"], True, "picked minecraft:oak_log")
+    assert "minecraft:" not in done["thread"][-1]["text"]
+
+
 def test_the_board_does_not_answer_an_infra_request(stack: Stack, sister: int) -> None:
     entry = stack.lo_infra("mc_restart")
     with pytest.raises(BoardError) as raised:  # the operator's approve has no move
@@ -501,6 +508,17 @@ def test_main_off_switch_runs_nothing_and_leaves_the_queue() -> None:
     code = bridge.main_with(hive, once=True)  # one cycle against the fake board
     assert code == 0
     assert hive.posts == [] and hive.pending == pending  # nothing taken, nothing run
+
+
+def test_main_switch_off_mid_batch_stops_the_next_take() -> None:
+    hive = FakeHive(pending=[request_of(5, "status", {}), request_of(6, "status", {})])
+
+    def run(argv, **kwargs):  # the operator flips the switch while #5 runs
+        hive.switch = {"on": False, "reason": "пауза"}
+        return subprocess.CompletedProcess(argv, 0, stdout="ps", stderr="")
+
+    assert bridge.main_with(hive, once=True, runner=run) == 0
+    assert not any(p[0] == "/board/infra/6/take" for p in hive.posts)
 
 
 def test_main_closes_the_leftovers_of_a_crashed_run() -> None:
