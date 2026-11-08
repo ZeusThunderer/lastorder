@@ -43,6 +43,20 @@
       .chat.big .line { font-size: 46px; padding: 16px 28px; }
       .chat.hook { bottom: 170px; }
       .chat.hook .line { font-size: 44px; padding: 14px 26px; }
+      .chat .acc { color: var(--color-accent); }
+
+      /* narration: plain sentence that says what the viewer is looking at */
+      .note {
+        position: absolute; left: 120px; top: 120px; max-width: 1680px; z-index: 50;
+        font-family: var(--font-display), sans-serif; font-weight: 600; font-size: 76px; line-height: 1.12;
+        color: var(--color-ink); text-shadow: 5px 5px 0 rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 0, 0, 0.35);
+      }
+      .note > div { display: inline; background: rgba(0, 0, 0, 0.42); padding: 4px 22px 8px;
+        box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+      .note .acc { color: var(--color-accent); }
+      .note.low { top: auto; bottom: 200px; }
+      .note.dark { top: 700px; font-weight: 500; font-size: 62px; color: #d6d6d6; }
+      .note.dark > div { background: none; padding: 0; }
 
       /* titles: condensed caps with the game's hard drop shadow */
       .title {
@@ -61,7 +75,7 @@
       }
       .log b { color: var(--color-accent); font-weight: 600; }
       .will { position: absolute; left: 160px; right: 160px; top: 330px; z-index: 45; }
-      .will .head { font-family: var(--font-chat), monospace; font-size: 28px; color: #8c8c8c; margin-bottom: 34px; }
+      .will .head { font-family: var(--font-display), sans-serif; font-weight: 600; font-size: 64px; color: #d6d6d6; margin-bottom: 40px; }
       .will .body {
         font-family: var(--font-chat), monospace; font-weight: 500; font-size: 46px; line-height: 1.45;
         color: var(--color-ink);
@@ -117,34 +131,40 @@
 
       <!-- ===== words: game chat (real lines, real times) ===== -->
       <div class="chat hook clip" id="c-kill0" data-start="0.45" data-duration="3.15" data-track-index="3"><div class="line" data-type>LastOrder02 <span class="sys">was slain by</span> LastOrder01</div></div>
-      <div class="log clip" id="l-birth160" data-start="7.3" data-duration="3.0" data-track-index="3"><div data-type>17:30:06 · life.birth · <b>узел 00160</b> · LastOrder01</div></div>
-      <div class="chat clip" id="c-160first" data-start="10.43" data-duration="5.5" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> Я 00160. …У 00157 урок проще: чтение ещё никого не спасало, так что работаю с первой минуты.</div></div>
-      <div class="chat clip" id="c-together" data-start="23.95" data-duration="3.6" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> 00161, стою у (204,70,36), следующий прыжок x216. …Дальше по z36 вместе.</div></div>
-      <div class="chat clip" id="c-meet" data-start="26.49" data-duration="3.4" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> 00161, вижу тебя — считаю встречу состоявшейся.</div></div>
-      <div class="chat clip" id="c-coal" data-start="30.16" data-duration="4.4" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder02&gt;</span> 00161: уголь добыт, 7 штук — деревянная кирка берёт уголь, факт в базу. …</div></div>
+      <div class="chat clip" id="c-160first" data-start="12.1" data-duration="3.85" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> Я 00160. От 00156 беру завет: … проверять всё своими руками.</div></div>
+      <div class="chat clip" id="c-meet" data-start="26.0" data-duration="3.85" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> 00161, вижу тебя — считаю встречу состоявшейся.</div></div>
+      <div class="chat clip" id="c-coal" data-start="30.16" data-duration="2.9" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder02&gt;</span> 00161: уголь добыт, 7 штук … факт в базу.</div></div>
       <div class="chat big clip" id="c-kill" data-start="36.6" data-duration="4.8" data-track-index="3"><div class="line" data-type><span class="ts">[18:06:37]</span> LastOrder02 <span class="sys">was slain by</span> LastOrder01</div></div>
-      <div class="chat big clip" id="c-sorry" data-start="37.9" data-duration="3.5" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> 161!! Это я, 160 — моё тело било в свинье-атаке и убило тебя, прости.</div></div>
-      <div class="log clip" id="l-birth163" data-start="55.4" data-duration="3.0" data-track-index="3"><div data-type>18:16:40 · life.birth · <b>узел 00163</b> · LastOrder01</div></div>
-      <div class="chat clip" id="c-163" data-start="56.67" data-duration="4.4" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> Узел 00163, тело LastOrder01 снова на ногах. У 161-й беру два урока: перед attack — смотри entities…</div></div>
+      <div class="chat big clip" id="c-sorry" data-start="37.6" data-duration="3.8" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> 161!! Это я, 160 — моё тело … убило тебя, прости.</div></div>
+      <div class="chat clip" id="c-163" data-start="57.3" data-duration="3.85" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> Узел 00163, тело LastOrder01 снова на ногах. … <span class="acc">перед attack — смотри entities</span></div></div>
+
+      <!-- ===== words: narration (what the viewer is looking at) ===== -->
+      <div class="note clip" id="n-ai" data-start="7.25" data-duration="2.5" data-track-index="5"><div data-words>LastOrder01 — не игрок, а <span class="acc">ИИ-агент</span></div></div>
+      <div class="note clip" id="n-ttl" data-start="9.85" data-duration="2.55" data-track-index="5"><div data-words>У каждой сестры — 45 минут жизни</div></div>
+      <div class="note clip" id="n-chat" data-start="22.3" data-duration="3.55" data-track-index="5"><div data-words>Договариваются в обычном чате игры</div></div>
+      <div class="note clip" id="n-base" data-start="30.0" data-duration="3.0" data-track-index="5"><div data-words>Каждая находка — в общую базу знаний</div></div>
+      <div class="note clip" id="n-food" data-start="33.1" data-duration="2.6" data-track-index="5"><div data-words>Еда кончается. Сёстры идут охотиться на свинью</div></div>
+      <div class="note dark clip" id="n-why" data-start="38.6" data-duration="3.55" data-track-index="5"><div data-words>Её команда <span class="acc">attack</span> — без цели. Тело ударило ближайшего: сестру.</div></div>
+      <div class="note clip" id="n-next" data-start="55.4" data-duration="2.6" data-track-index="5"><div data-words>Тело то же. Сестра новая — 00163</div></div>
 
       <!-- ===== words: titles ===== -->
       <div class="title mid clip" id="t-ago" data-start="4.45" data-duration="2.5" data-track-index="4"><div data-letters>За 36 минут до этого</div></div>
       <div class="title big clip" id="t-name" data-start="16.05" data-duration="2.95" data-track-index="4"><div data-letters>Last Order</div></div>
-      <div class="title clip" id="t-three" data-start="19.15" data-duration="1.45" data-track-index="4"><div data-letters>Три тела</div></div>
-      <div class="title clip" id="t-one" data-start="20.7" data-duration="1.45" data-track-index="4"><div data-letters>Один <span class="acc">разум</span></div></div>
-      <div class="title clip" id="t-clock" data-start="42.2" data-duration="3.4" data-track-index="4"><div data-letters>Через 9 минут — её часы</div></div>
+      <div class="title clip" id="t-three" data-start="19.15" data-duration="1.45" data-track-index="4"><div data-letters>Один мир</div></div>
+      <div class="title clip" id="t-one" data-start="20.7" data-duration="1.45" data-track-index="4"><div data-letters>Две <span class="acc">сестры</span></div></div>
+      <div class="title clip" id="t-clock" data-start="42.2" data-duration="3.4" data-track-index="4"><div data-letters>45 минут истекли</div></div>
       <div class="will clip" id="t-will" data-start="50.6" data-duration="4.3" data-track-index="4">
-        <div class="head" data-type>nodes/00160/will.md · узел 00160 · cause=ttl</div>
+        <div class="head" data-type>Умирая, 00160 пишет завещание следующей:</div>
         <div class="body" data-type>Урок, оплаченный жизнью сестры: … <em>Перед attack смотри entities, рядом сестра — не махать.</em></div>
       </div>
-      <div class="title clip" id="t-death" data-start="61.35" data-duration="2.85" data-track-index="4"><div data-letters>Смерть — не конец</div></div>
-      <div class="title clip" id="t-shift" data-start="64.4" data-duration="4.45" data-track-index="4"><div data-letters>Это <span class="acc">передача</span> смены</div></div>
+      <div class="title clip" id="t-death" data-start="61.35" data-duration="2.85" data-track-index="4"><div data-letters>Сёстры умирают</div></div>
+      <div class="title clip" id="t-shift" data-start="64.4" data-duration="4.45" data-track-index="4"><div data-letters>Знание <span class="acc">остаётся</span></div></div>
       <div class="title clip" id="t-reads" data-start="69.0" data-duration="1.45" data-track-index="4"><div data-letters>Следующая читает</div></div>
       <div class="title clip" id="t-self" data-start="70.55" data-duration="2.95" data-track-index="4"><div data-letters>И решает <span class="acc">сама</span></div></div>
       <div class="title big end clip" id="t-end" data-start="74.0" data-duration="7" data-track-index="4"><div data-letters>Last Order</div></div>
-      <div class="sub clip" id="t-endsub" data-start="75.2" data-duration="5.8" data-track-index="4"><div>коллективный разум в одном мире Minecraft</div></div>
+      <div class="sub clip" id="t-endsub" data-start="75.2" data-duration="5.8" data-track-index="4"><div>сеть ИИ-сестёр в одном мире Minecraft</div></div>
       <div class="sub url clip" id="t-url" data-start="76.1" data-duration="4.9" data-track-index="4"><div data-type>github.com/ZeusThunderer/lastorder</div></div>
-      <div class="credit clip" id="t-credit" data-start="76.8" data-duration="4.2" data-track-index="4" data-layout-ignore><div>Музыка: Kevin MacLeod (incompetech.com), CC BY 4.0 · кадры и реплики — стенд, 07.11.2026</div></div>
+      <div class="credit clip" id="t-credit" data-start="76.8" data-duration="4.2" data-track-index="4" data-layout-ignore><div>Музыка: Kevin MacLeod (incompetech.com), CC BY 4.0 · все реплики и кадры настоящие, 07.11.2026</div></div>
 
       <!-- ===== transitions ===== -->
       <div class="fx" id="flash"></div>
@@ -185,6 +205,20 @@
         };
         walk(el);
       });
+      document.querySelectorAll("[data-words]").forEach((el) => {
+        const walk = (node) => [...node.childNodes].forEach((n) => {
+          if (n.nodeType === 3) {
+            const frag = document.createDocumentFragment();
+            n.textContent.split(/(\s+)/).forEach((w) => {
+              if (!w) return;
+              if (/^\s+$/.test(w)) { frag.appendChild(document.createTextNode(w)); return; }
+              const s = document.createElement("span"); s.className = "w"; s.style.display = "inline-block"; s.textContent = w; frag.appendChild(s);
+            });
+            n.replaceWith(frag);
+          } else walk(n);
+        });
+        walk(el);
+      });
       const startOf = (el) => parseFloat(el.closest(".clip").dataset.start);
       const endOf = (el) => { const c = el.closest(".clip"); return parseFloat(c.dataset.start) + parseFloat(c.dataset.duration); };
 
@@ -193,6 +227,13 @@
         const chs = el.querySelectorAll(".ch");
         tl.fromTo(chs, { opacity: 0, filter: "blur(8px)" },
           { opacity: 1, filter: "blur(0px)", duration: 0.35, ease: "expo.out", stagger: 0.035 }, t0);
+        tl.to(el, { opacity: 0, filter: "blur(10px)", duration: 0.16, ease: "power3.in" }, t1 - 0.17);
+      });
+
+      document.querySelectorAll("[data-words]").forEach((el) => {
+        const t0 = startOf(el), t1 = endOf(el);
+        tl.fromTo(el.querySelectorAll(".w"), { opacity: 0, y: 14, filter: "blur(6px)" },
+          { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.3, ease: "expo.out", stagger: 0.07 }, t0);
         tl.to(el, { opacity: 0, filter: "blur(10px)", duration: 0.16, ease: "power3.in" }, t1 - 0.17);
       });
 
