@@ -44,7 +44,8 @@ CONTINUE_MESSAGE = "Continue your shift session: observe, act, speak, wait_event
 # the gateway: the virtual-key ceiling answers 429. Text marks cover the harnesses'
 # phrasings.
 _QUOTA_MARKS = (
-    re.compile(r"\b429\b"),
+    # not after "." or ":": the hapi wrapper stamps every log line "[21:16:00.429]"
+    re.compile(r"(?<![.:])\b429\b"),
     re.compile(r"\b1302\b"),
     re.compile(r"\b1308\b"),
     re.compile(r"rate.?limit", re.IGNORECASE),

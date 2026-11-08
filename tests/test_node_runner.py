@@ -969,6 +969,14 @@ def test_quota_marks_are_narrow() -> None:
     assert not quota_exhausted("exit status 1")
 
 
+def test_quota_marks_ignore_hapi_log_timestamps() -> None:
+    """2026-11-08 stand: the live probe killed healthy sessions on a hapi log line stamped
+    "[21:16:00.429]" (session.quota_live without any provider error)."""
+    tail = "[21:16:00.429] [pi][event] message_update \n[21:16:00.431] [pi][event] message_update \n"
+    assert not quota_exhausted(tail)
+    assert quota_exhausted(tail + "[21:16:01.002] [pi] HTTP 429 Too Many Requests\n")
+
+
 def test_quota_marks_ignore_chat_and_coordinates_deep_in_the_stream() -> None:
     """R2-7: the harness dump is tens of thousands of events — a 429 coordinate or the
     word "quota" in a replica must not switch the adapter."""
