@@ -2,7 +2,7 @@
 id: T-057
 title: Мост инфраструктуры — Last Order поднимает и снимает сестёр, хост исполняет без одобрения на каждое действие
 stage: I
-status: in_progress
+status: review
 criticality: critical
 after: [T-055]
 branch: z/T-057-infra-bridge
