@@ -34,6 +34,16 @@
     <button type="submit">отправить</button>
   </form>
   <button id="logout" class="logout" hidden>выйти</button>
+  <div id="infra-switch" class="infra-switch" title="исполнитель инфраструктуры (T-057)" hidden>
+    <span id="infra-state" class="infra-state"></span>
+    <button id="infra-toggle" type="button"></button>
+    <form id="infra-off-form" class="inline-form" hidden>
+      <input type="text" id="infra-reason" maxlength="400"
+             placeholder="почему выключен (увидит Last Order)">
+      <button type="submit" class="danger">выключить</button>
+      <button type="button" class="cancel-inline">скрыть</button>
+    </form>
+  </div>
 </header>
 <main class="columns">
   <section class="column" id="col-task">

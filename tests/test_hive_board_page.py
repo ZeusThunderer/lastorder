@@ -199,3 +199,14 @@ def test_no_markup_sinks_in_the_script() -> None:
     for sink in ("innerHTML", "insertAdjacentHTML", "outerHTML", "document.write"):
         assert sink not in script, sink  # agent text flows through textContent alone
     assert "textContent" in script
+
+
+def test_the_infra_switch_panel_is_in_the_shell():
+    # T-057: the operator's one control over the executor rides the page shell;
+    # its calls go through the same api() helper (X-Operator-Key), never a sink.
+    html = (STATIC / "board.html").read_text(encoding="utf-8")
+    assert 'id="infra-switch"' in html and 'id="infra-toggle"' in html
+    assert 'id="infra-reason"' in html  # the reason Last Order will read
+    script = (STATIC / "board.js").read_text(encoding="utf-8")
+    assert '"/board/infra/switch"' in script
+    assert "renderInfraSwitch" in script and "textContent" in script

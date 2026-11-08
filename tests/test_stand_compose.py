@@ -139,3 +139,31 @@ def test_slot_restart_dry_run_prints_the_sequence():
     assert "up -d --force-recreate --no-deps body-1" in out
     assert "--healthy" in out and "ps -q body-1" in out
     assert "up -d --no-deps mind-1" in out
+
+
+# --- the infra bridge surface (T-057) --------------------------------------------------------
+
+
+def test_infra_key_reaches_the_hive_alone():
+    # ADR-044: the executor's key opens the board's infra routes and nothing else,
+    # so it must not leak into any sandbox or the LO desk. The page reads the
+    # switch with the operator key; the bridge polls from the host.
+    for name, svc in COMPOSE["services"].items():
+        env = svc.get("environment") or {}
+        values = list(env.values()) if isinstance(env, dict) else env
+        has = any("HIVE_INFRA_KEY" in v for v in values if isinstance(v, str))
+        assert (name == "hive") == has, f"HIVE_INFRA_KEY leaked into {name}"
+
+
+def test_every_slot_points_at_a_configurable_server():
+    # T-052 ran the slot-1 override by hand; T-057 makes the same shape uniform —
+    # the bridge's slot_server action rides MC_SERVER_N the same way .env does.
+    for n in (1, 2, 3):
+        env = COMPOSE["services"][f"body-{n}"]["environment"]
+        assert env["MC_SERVER"] == f"${{MC_SERVER_{n}:-mc-server:25565}}", f"body-{n}"
+
+
+def test_env_example_names_the_bridge_key():
+    text = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "HIVE_INFRA_KEY=" in text
+    assert "MC_SERVER_1=" in text and "MC_SERVER_2=" in text and "MC_SERVER_3=" in text

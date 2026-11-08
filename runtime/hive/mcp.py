@@ -454,6 +454,28 @@ class HiveMcp:
             ]
         }
 
+    # --- the infrastructure bridge (T-057, TASKBOARD.md 5.4; ADR-044) ------------------------
+
+    def infra_state(self, ctx: Context) -> dict[str, Any]:
+        """The executor's state: on/off, the operator's reason, the waiting queue.
+
+        An off executor runs nothing — pending infra requests wait until the operator
+        switches it back on; the reason is what the operator left with the switch.
+        """
+        self._require_last_order(ctx)
+        if self._board is None:
+            _err("infra_state: the board is not configured")
+        switch = self._board.infra_switch_get()
+        pending = self._board.infra_pending()
+        return {
+            "on": switch["on"],
+            "reason": switch["reason"],
+            "pending": [
+                f"#{r['id']} {r['request']['action']} {r['request']['args']} ({r['status']})"
+                for r in pending
+            ],
+        }
+
     # --- Last Order's tools (ADR-036) ---------------------------------------------------------
 
     def proposals(self, ctx: Context) -> dict[str, Any]:
@@ -689,6 +711,11 @@ def build_mcp(
         """The grant records ({grants}): kind, what, status — never secret values."""
         return await _run(lambda: impl.grant_list(ctx))
 
+    async def infra_state(*, ctx: Context) -> dict[str, Any]:
+        """The infrastructure executor: {on, reason, pending}. An off executor runs
+        nothing — infra requests wait, and `reason` is the operator's explanation."""
+        return await _run(lambda: impl.infra_state(ctx))
+
     async def proposals(*, ctx: Context) -> dict[str, Any]:
         """The open proposal queue ({proposals}), oldest first."""
         return await _run(lambda: impl.proposals(ctx))
@@ -723,6 +750,7 @@ def build_mcp(
     lo.add_tool(lo_inbox, name="inbox")
     lo.add_tool(request_grant, name="request_grant")
     lo.add_tool(grants, name="grants")
+    lo.add_tool(infra_state, name="infra_state")
 
     return sister, lo
 

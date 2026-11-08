@@ -331,6 +331,7 @@ def create_app(
     operator_key: str | None = None,
     stream_poll_s: float | None = None,
     tool_key: str | None = None,
+    infra_key: str | None = None,
 ) -> FastAPI:
     clock = clock or (lambda: datetime.now(timezone.utc))
     run_dir = Path(run_dir if run_dir is not None else (env("RUN_DIR") or "run"))
@@ -382,6 +383,15 @@ def create_app(
     last_order_key = lo_key if lo_key is not None else (env("HIVE_MCP_LO_KEY") or "")
     operator_secret = operator_key if operator_key is not None else (env("HIVE_OPERATOR_KEY") or "")
     tool_secret = tool_key if tool_key is not None else (env("HIVE_TOOL_KEY") or "")
+    infra_secret = infra_key if infra_key is not None else (env("HIVE_INFRA_KEY") or "")
+    # fail-closed (T-057): the executor's key must open nothing else and be opened by
+    # nobody else — a shared key would put docker verbs behind a sister's header
+    if infra_secret and (
+        infra_secret in keys
+        or infra_secret in runner_keys
+        or infra_secret in (last_order_key, operator_secret, tool_secret)
+    ):
+        raise ValueError("HIVE_INFRA_KEY must differ from every other stand key")
     stream_poll = float(stream_poll_s if stream_poll_s is not None else (env("BOARD_STREAM_POLL_S") or 1.0))
     now = lambda: clock().isoformat()  # noqa: E731 - one clock for every layer write
     proposals = ProposalBook(store, now=now)
@@ -828,6 +838,55 @@ def create_app(
     @app.post("/board/ack")
     def board_ack(request: Request, body: dict) -> None:
         board.ack(_agent_actor(request), body.get("seq"))
+
+    # --- the infrastructure bridge (T-057, ADR-044, TASKBOARD.md 5.4) ----------------------
+    # The host-side executor (`dev/infra_bridge.py`) identifies with HIVE_INFRA_KEY
+    # (X-Infra-Key) — a key unlike every other on the stand, checked above at startup.
+    # It polls the queue, takes one request at a time and reports the outcome; the
+    # switch is the operator's page control over whether it works at all.
+
+    def _require_infra_key(request: Request) -> None:
+        if not infra_secret:
+            raise ApiError(401, "infra_key", "the infra bridge needs HIVE_INFRA_KEY configured")
+        sent = request.headers.get("x-infra-key", "").strip()
+        if not sent or not secrets.compare_digest(
+            sent.encode("utf-8"), infra_secret.encode("utf-8")
+        ):
+            raise ApiError(401, "infra_key", "X-Infra-Key does not open the infra bridge")
+
+    @app.get("/board/infra/pending")
+    def infra_pending(request: Request) -> dict:
+        _require_infra_key(request)
+        return {"requests": board.infra_pending()}
+
+    @app.get("/board/infra/taken")
+    def infra_taken(request: Request) -> dict:
+        _require_infra_key(request)
+        return {"requests": board.infra_pending(taken=True)}
+
+    @app.post("/board/infra/{entry_id}/take")
+    def infra_take(request: Request, entry_id: int) -> dict:
+        _require_infra_key(request)
+        return board.infra_take("infra", entry_id)
+
+    @app.post("/board/infra/{entry_id}/result")
+    def infra_result(request: Request, entry_id: int, body: dict) -> dict:
+        _require_infra_key(request)
+        return board.infra_result("infra", entry_id, body.get("ok"), body.get("text", ""))
+
+    @app.get("/board/infra/switch")
+    def infra_switch_get(request: Request) -> dict:
+        # the executor and the operator's page both read it; each with its own key
+        if request.headers.get("x-infra-key", "").strip():
+            _require_infra_key(request)
+        else:
+            _require_operator(request)
+        return board.infra_switch_get()
+
+    @app.post("/board/infra/switch")
+    def infra_switch_set(request: Request, body: dict) -> dict:
+        _require_operator(request)
+        return board.infra_switch_set(OPERATOR, body.get("on"), body.get("reason", ""))
 
     # --- the desk's wake feed (T-043, ADR-041) ------------------------------------------------
     # The environment's own wake reasons for the one long Last Order session: the
