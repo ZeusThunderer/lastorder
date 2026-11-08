@@ -104,3 +104,19 @@ ffmpeg -i dev/video/out/intro.mp4 -vf "fps=1/4,scale=480:-1,tile=6x5" -frames:v 
   Сборка одной командой: `bash dev/video/trailer/build.sh`. Рендер: `dev/video/out/trailer.mp4`.
 - Находка (вне задачи, в задачу среды): `act attack` без `allow` бьёт ближайшую сущность, в том
   числе сестру — 18:06:37 00160 убила 00161 (mind-1 log, chat «LastOrder02 was slain by LastOrder01»).
+- 2026-11-08, оператор: ещё пара роликов на новых кадрах; эстетика — авангард начала XX века,
+  монтаж и режиссура — по грамматике *Monogatari*; рендер и запись — на GPU. Сюжеты —
+  `dev/video/films/STORYLINES.md`; выбор оператора «i APPROVE» = рекомендация B «45 минут.
+  Интертитры» + A «Кино-глаз» и съёмка. Планы: `dev/video/films/{b45,kinoglaz}/SPEC.md`.
+- Съёмка film1 2026-11-08 21:02–21:57Z: стенд под `dev/stand.sh lock T-067` (снят просроченный
+  замок T-058, 423 мин). `docker run --gpus all` вешает VM Docker Desktop (дважды), поэтому камера —
+  на хосте: `dev/video/hostcam.sh` (клиент Fabric на Java 21 из Prism Launcher, запуск без
+  HeadlessMC — `hostcam_launch.py`, захват монитора 2 ddagrab + h264_nvenc, звук через VB-Cable),
+  режиссёр `dev/video/films/direct.sh`. Docker завис и при авто-старте двух стендов разом
+  (lastorder + t048): поднимать стенд по контейнерам. Без `hapi-hub` харнесс сестры падает за 1 с
+  (heroine 00183 проснулась только в 21:10:38 после запуска hub).
+- D-010 · ce0c099 (main) · живой зонд квоты принимал метку времени hapi «[..:..:..429]» за HTTP 429 и
+  убивал здоровые сессии сестёр (00183, 00184 простаивали 21:12–21:31). Образ node пересобран,
+  node-1/node-2 пересозданы; голый `docker compose up` дал узлы без ключей (`harness.waits: no key`,
+  21:31–21:38) — пересоздавать только через `bash docker/node/up.sh --no-deps --force-recreate node-N`
+  (21:38:11); жизни 00183 и 00184 продолжились по state.json.
