@@ -31,7 +31,9 @@ lift() { # lift <var> [file key]: env wins, then the root .env
 lift ZCODE_API_KEY ZAI_API_KEY
 # the operator's game name (T-051) rides the same lift: a stand config value, not a key
 lift OPERATOR_MC_NAME
-lift MC_SERVER_1  # slot 1 on another server: an address, not a secret
+lift MC_SERVER_1  # a slot on another server: an address, not a secret (all slots, T-057)
+lift MC_SERVER_2
+lift MC_SERVER_3
 # player commands (ADR-043, T-053): the common deny list, per-slot extras and the
 # per-slot server login passwords — a password reaches that slot's mind ONLY
 # (compose wires MC_LOGIN_PASSWORD_N into mind-N alone; node-N never sees it)
@@ -46,7 +48,7 @@ for key in GATEWAY_KEY_NODE_1 GATEWAY_KEY_NODE_2 GATEWAY_KEY_NODE_3 \
            GATEWAY_MASTER_KEY OPENROUTER_API_KEY GATEWAY_DB_PASSWORD \
            GATEWAY_KEY_MIND_1 GATEWAY_KEY_MIND_2 GATEWAY_KEY_MIND_3 GATEWAY_KEY_HIVE \
            HIVE_OPERATOR_KEY RCON_PASSWORD \
-           HIVE_MCP_LO_KEY GATEWAY_KEY_LO HAPI_CLI_KEY; do  # the LO sandbox (T-043, T-039)
+           HIVE_MCP_LO_KEY GATEWAY_KEY_LO HAPI_CLI_KEY HIVE_INFRA_KEY; do  # the LO sandbox (T-043, T-039); HIVE_INFRA_KEY -> hive alone (T-057)
   lift "$key"
 done
 

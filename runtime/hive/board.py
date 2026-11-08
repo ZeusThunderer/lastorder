@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from runtime.config import env
+from runtime.hive.infra import RESULT_MAX, InfraError, check as check_infra, is_infra
 from runtime.hive.lifecycle import HiveLog, Lifecycle
 from runtime.knowledge.slice import parse_utc
 from runtime.lastorder.naming import node_name, preset as naming_preset
@@ -141,6 +142,7 @@ OPERATOR = "operator"
 LAST_ORDER = "last-order"
 SYSTEM = "system"
 NET = "net"
+INFRA = "infra"  # the host-side bridge executor (T-057), never a session identity
 
 
 class BoardError(Exception):
@@ -154,8 +156,8 @@ class BoardError(Exception):
 
 
 def actor_role(actor: str) -> str:
-    """`operator` | `last-order` | `admin` | `runner` | `node` | `system`."""
-    if actor in (OPERATOR, LAST_ORDER, SYSTEM, "admin"):
+    """`operator` | `last-order` | `admin` | `runner` | `node` | `system` | `infra`."""
+    if actor in (OPERATOR, LAST_ORDER, SYSTEM, "admin", INFRA):
         return actor
     if actor.startswith("runner:"):
         return "runner"
@@ -266,6 +268,14 @@ class Board:
                     who TEXT PRIMARY KEY,
                     seq INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS infra_switch (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    on_ INTEGER NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    at TEXT NOT NULL DEFAULT '',
+                    by_ TEXT NOT NULL DEFAULT 'board'
+                );
+                INSERT OR IGNORE INTO infra_switch (id, on_) VALUES (1, 1);
                 """
             )
 
@@ -546,11 +556,32 @@ class Board:
         self._refuse_raw_ids(why, "request.why")
         for key, value in args.items():
             self._refuse_raw_ids(value, f"request.args[{key!r}]")
-        allowed = request.get("allowed", list(_REQUEST_ANSWERS))
-        if not isinstance(allowed, list) or not allowed or any(a not in _REQUEST_ANSWERS for a in allowed):
-            raise BoardError(
-                422, "validation", f"request.allowed must be a subset of {list(_REQUEST_ANSWERS)}"
-            )
+        # the closed infra set (T-057, ADR-044): Last Order alone, validated here and
+        # once more in the executor — and answered by the executor, never on the board
+        infra = is_infra(action)
+        if infra:
+            if actor != LAST_ORDER:
+                raise BoardError(403, "forbidden", "infra requests belong to Last Order alone")
+            if request.get("allowed") not in (None, []):
+                raise BoardError(
+                    422, "validation",
+                    "an infra request takes no board answers: the executor answers it",
+                )
+            if request.get("grant") is not None:
+                raise BoardError(422, "validation", "an infra request carries no grant")
+            try:
+                check_infra(action, args)
+            except InfraError as exc:
+                raise BoardError(422, "validation", f"infra {action}: {exc}") from exc
+            allowed: list[str] = []
+        else:
+            allowed = request.get("allowed", list(_REQUEST_ANSWERS))
+            if not isinstance(allowed, list) or not allowed or any(
+                a not in _REQUEST_ANSWERS for a in allowed
+            ):
+                raise BoardError(
+                    422, "validation", f"request.allowed must be a subset of {list(_REQUEST_ANSWERS)}"
+                )
         grant = request.get("grant")
         if grant is not None:
             if actor != LAST_ORDER:
@@ -636,6 +667,11 @@ class Board:
                     {("open", "acked"): "operator"} if kind == "alarm" else {}
                 )
             )
+            if kind == "request" and self._row_is_infra(row):
+                # T-057: an infra request is answered by the executor alone
+                # (infra_take / infra_result); on the board itself only the author's
+                # cancel while it is open survives — approve/deny/respond are refusals
+                moves = {("open", "canceled"): "author"}
             who = moves.get((status, to_status))
             if who is None:
                 if status in _TERMINAL:
@@ -883,6 +919,144 @@ class Board:
             return (self._clock() - parse_utc(alarm_at)).total_seconds() <= ALARM_REPEAT_WINDOW_S
         except ValueError:
             return False
+
+    # --- infra requests (T-057, TASKBOARD.md 5.4; ADR-044) ----------------------------------
+
+    def _row_is_infra(self, row: sqlite3.Row) -> bool:
+        if row["kind"] != "request" or not row["request_json"]:
+            return False
+        try:
+            return is_infra(json.loads(row["request_json"]).get("action"))
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _require_infra(actor: str) -> None:
+        if actor_role(actor) != INFRA:
+            raise BoardError(403, "forbidden", f"{actor} is not the infra executor")
+
+    def infra_pending(self, *, taken: bool = False) -> list[dict]:
+        """The executor's queue: open infra requests (or the ones it took), oldest first."""
+        status = "taken" if taken else "open"
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM board_entry WHERE kind='request' AND status=? ORDER BY id"
+                " LIMIT ?",
+                (status, FEED_LIMIT),
+            ).fetchall()
+            return [
+                self._to_json(self._conn, r, with_thread=False)
+                for r in rows
+                if self._row_is_infra(r)
+            ]
+
+    def infra_take(self, actor: str, entry_id: int) -> dict:
+        """The bridge claims an open infra request: `open -> taken`, exactly once.
+
+        The conditional UPDATE settles the race of a second executor instance the
+        same way `claim` settles ten sisters (section 4.1).
+        """
+        self._require_infra(actor)
+        with self._lock, self._tx() as cur:
+            row = self._entry_row(cur, entry_id)
+            if row is None:
+                raise BoardError(404, "unknown_entry", f"no board entry #{entry_id}")
+            if row["kind"] != "request" or not self._row_is_infra(row):
+                raise BoardError(422, "validation", f"#{entry_id} is not an infra request")
+            if row["status"] != "open":
+                raise BoardError(
+                    409,
+                    "already_taken" if row["status"] == "taken" else "bad_transition",
+                    f"#{entry_id} is {row['status']}",
+                )
+            changed = cur.execute(
+                "UPDATE board_entry SET status='taken', claimed_by=?, updated_at=?"
+                " WHERE id=? AND status='open'",
+                (INFRA, self._now(), entry_id),
+            ).rowcount
+            if changed != 1:
+                raise BoardError(409, "already_taken", f"#{entry_id} was taken")
+            self._log_row(
+                cur, actor, entry_id, "claim",
+                {"status": "open", "claimed_by": row["claimed_by"]},
+                {"status": "taken", "claimed_by": INFRA},
+            )
+            return self._entry(cur, entry_id)
+
+    def infra_result(self, actor: str, entry_id: int, ok: bool, text: Any) -> dict:
+        """The bridge reports the outcome: `taken -> done | failed` with the output.
+
+        Unlike agent text the output is TRUNCATED to RESULT_MAX, never refused: the
+        action has already run, and a refused result would leave the board lying
+        about a slot that may be down.
+        """
+        self._require_infra(actor)
+        if not isinstance(ok, bool):
+            raise BoardError(422, "validation", "ok must be true or false")
+        text = "" if text is None else text if isinstance(text, str) else str(text)
+        text = text.strip()[:RESULT_MAX]
+        to_status = "done" if ok else "failed"
+        with self._lock, self._tx() as cur:
+            row = self._entry_row(cur, entry_id)
+            if row is None:
+                raise BoardError(404, "unknown_entry", f"no board entry #{entry_id}")
+            if row["kind"] != "request" or not self._row_is_infra(row):
+                raise BoardError(422, "validation", f"#{entry_id} is not an infra request")
+            if row["status"] != "taken" or row["claimed_by"] != INFRA:
+                if row["status"] in _TERMINAL:
+                    raise BoardError(
+                        409, "bad_transition",
+                        f"#{entry_id} is {row['status']}, a final status; repeat work is a new entry",
+                    )
+                raise BoardError(
+                    409, "bad_transition", f"#{entry_id} is {row['status']}, not taken by the executor"
+                )
+            cur.execute(
+                "UPDATE board_entry SET status=?, updated_at=?"
+                " WHERE id=? AND status='taken' AND claimed_by=?",
+                (to_status, self._now(), entry_id, INFRA),
+            )
+            if text:
+                self._add_reply_locked(cur, entry_id, actor, text, ("taken", to_status))
+            self._log_row(
+                cur, actor, entry_id, "transition",
+                {"status": "taken", "claimed_by": INFRA},
+                {"status": to_status, "claimed_by": INFRA},
+                text_len=len(text) or None,
+            )
+            return self._entry(cur, entry_id)
+
+    def infra_switch_get(self) -> dict:
+        """The operator's executor switch (TASKBOARD.md 5.4): on, reason, since when."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT on_, reason, at, by_ FROM infra_switch WHERE id=1"
+            ).fetchone()
+        return {
+            "on": bool(row["on_"]),
+            "reason": row["reason"],
+            "at": row["at"],
+            "by": row["by_"],
+        }
+
+    def infra_switch_set(self, actor: str, on: bool, reason: Any = "") -> dict:
+        """The operator alone flips the executor off (with the reason Last Order
+        will see) and back on; the state survives a hive restart."""
+        if actor_role(actor) != OPERATOR:
+            raise BoardError(403, "forbidden", f"{actor} does not switch the executor")
+        if not isinstance(on, bool):
+            raise BoardError(422, "validation", "on must be true or false")
+        reason = "" if reason is None else reason if isinstance(reason, str) else str(reason)
+        reason = reason.strip()[:WHY_MAX]
+        if on and not reason:
+            reason = ""  # a reason belongs to the off state alone
+        with self._lock, self._tx() as cur:
+            cur.execute(
+                "UPDATE infra_switch SET on_=?, reason=?, at=?, by_=? WHERE id=1",
+                (1 if on else 0, reason, self._now(), actor),
+            )
+        self._log.event("infra.switch", {"on": on, "by": actor})
+        return self.infra_switch_get()
 
     # --- reads --------------------------------------------------------------------------------------
 
@@ -1165,6 +1339,7 @@ __all__ = [
     "AGENT_MUTATIONS_PER_LIFE",
     "Board",
     "BoardError",
+    "INFRA",
     "LAST_ORDER",
     "LIST_LIMIT",
     "LIST_TEXT",

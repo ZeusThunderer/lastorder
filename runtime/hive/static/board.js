@@ -34,6 +34,7 @@ function whoTag(who) {
   if (who === "last-order") return { label: "Last Order", dead: false };
   if (who === "net") return { label: "net", dead: false };
   if (who === "system") return { label: "system", dead: false };
+  if (who === "infra") return { label: "инфра-исполнитель", dead: false };
   if (typeof who === "string" && who.startsWith("runner:")) {
     return { label: who, dead: false };
   }
@@ -123,6 +124,12 @@ async function refresh() {
   } catch (error) {
     toast(String(error.message || error));
   }
+  // the infra executor switch (T-057): its own catch — a stand without the bridge
+  // key keeps the rest of the page working, the panel just stays hidden
+  api("/board/infra/switch", "GET")
+    .then((sw) => { state.infra = sw; })
+    .catch(() => { state.infra = null; })
+    .finally(renderInfraSwitch);
 }
 
 // TASKBOARD.md section 9: the listing carries no threads — only the one-entry call
@@ -470,6 +477,55 @@ function replyForm(entry) {
   return form;
 }
 
+// --- the infra executor switch (T-057, TASKBOARD.md 5.4) ---------------------------------
+// Off — the executor takes nothing: infra requests wait, and the reason rides the
+// switch for Last Order (her `infra_state`). On — it polls and runs again.
+
+function renderInfraSwitch() {
+  const panel = document.getElementById("infra-switch");
+  const sw = state.infra;
+  if (!sw) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const label = document.getElementById("infra-state");
+  const button = document.getElementById("infra-toggle");
+  if (sw.on) {
+    label.textContent = "исполнитель инфраструктуры: работает";
+    label.classList.remove("off");
+    button.textContent = "выключить";
+    button.className = "";
+  } else {
+    label.textContent = "исполнитель выключен" + (sw.reason ? " — " + sw.reason : "");
+    label.classList.add("off");
+    button.textContent = "включить";
+    button.className = "primary";
+  }
+}
+
+function wireInfraSwitch() {
+  document.getElementById("infra-toggle").addEventListener("click", () => {
+    if (state.infra && state.infra.on) {
+      document.getElementById("infra-off-form").hidden = false;
+      document.getElementById("infra-reason").focus();
+    } else {
+      doAction("/board/infra/switch", { on: true });
+    }
+  });
+  document.getElementById("infra-off-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const reason = document.getElementById("infra-reason").value;
+    if (await doAction("/board/infra/switch", { on: false, reason })) {
+      document.getElementById("infra-off-form").hidden = true;
+      document.getElementById("infra-reason").value = "";
+    }
+  });
+  document.querySelector("#infra-off-form .cancel-inline").addEventListener("click", () => {
+    document.getElementById("infra-off-form").hidden = true;
+  });
+}
+
 // --- the top bar: filter and the new entry form -----------------------------------------
 
 function buildFilter() {
@@ -546,6 +602,7 @@ async function tryLogin(password) {
 }
 
 function init() {
+  wireInfraSwitch();
   document.getElementById("filter").addEventListener("change", (event) => {
     state.filter = event.target.value;
     render();

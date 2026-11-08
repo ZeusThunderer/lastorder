@@ -45,7 +45,8 @@ SISTER_TOOLS = {
 LO_TOOLS = {"proposals", "decide", "set_goals", "chronicle",
             "board", "post", "claim", "update", "reply",
             "send", "inbox",  # T-043: the desk answers the sisters on Misaka-net
-            "request_grant", "grants"}  # the grant vault (T-046, TASKBOARD.md 5.3)
+            "request_grant", "grants",  # the grant vault (T-046, TASKBOARD.md 5.3)
+            "infra_state"}  # the infra executor's state (T-057, TASKBOARD.md 5.4)
 
 
 class FakeClock:

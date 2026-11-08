@@ -246,7 +246,9 @@ services:
     environment:
       <<: *body-env
       MC_USERNAME: LastOrder02
-      MC_SERVER: mc-server:25565
+      # MC_SERVER_N moves this body to another server (T-057, the infra bridge's
+      # slot_server): same override shape as slot 1, all slots alike
+      MC_SERVER: "${MC_SERVER_2:-mc-server:25565}"
     volumes:
       - body-2:/data
     networks: [default, slot-2]
@@ -295,7 +297,7 @@ services:
     environment:
       <<: *body-env
       MC_USERNAME: LastOrder03
-      MC_SERVER: mc-server:25565
+      MC_SERVER: "${MC_SERVER_3:-mc-server:25565}"
     volumes:
       - body-3:/data
     networks: [default, slot-3]
@@ -367,6 +369,7 @@ services:
       HIVE_MCP_LO_KEY: "${HIVE_MCP_LO_KEY:-}"
       HIVE_OPERATOR_KEY: "${HIVE_OPERATOR_KEY:-}"
       HIVE_TOOL_KEY: "${HIVE_TOOL_KEY:-}"
+      HIVE_INFRA_KEY: "${HIVE_INFRA_KEY:-}"
       NODE_DEV_OPEN: "${NODE_DEV_OPEN:-}"
     command:
       - sh
