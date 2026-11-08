@@ -60,7 +60,7 @@
 | T-054 | Старт слота — нет смерти от устаревшего hp, wait_events не дольше таймаута харнесса | I | done | critical | z/T-054-slot-start-fixes |
 | T-055 | Мост py4j — порядок подъёма тела и mind, мягкая остановка, перезапуск слота одной командой | I | done | normal | z/T-055-py4j-bridge |
 | T-056 | Контекст запроса сестры — рост за жизнь, пробуждения, крупные части | I | done | normal | z/T-056-context-cut |
-| T-057 | Мост инфраструктуры — Last Order поднимает и снимает сестёр, хост исполняет без одобрения на каждое действие | I | ready | critical | z/T-057-infra-bridge |
+| T-057 | Мост инфраструктуры — Last Order поднимает и снимает сестёр, хост исполняет без одобрения на каждое действие | I | done | critical | z/T-057-infra-bridge |
 | T-058 | Прогон стенда после исправлений — команда сервера, старт слота, мост, размер запроса | I | ready | normal | z/T-058-stand-run-fixes |
 | T-059 | Last Order на Z.ai Coding Plan — харнесс Pi, модель GLM-5.3, запасной OpenCode через шлюз | I | done | critical | z/T-059-lo-on-zai |
 | T-060 | Классификатор безопасности — второе мнение о запросах infra Last Order на локальной модели | I | ready | normal | z/T-060-safety-classifier |
