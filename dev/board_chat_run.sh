@@ -8,10 +8,14 @@
 #
 #   bash dev/board_chat_run.sh up            # stop stale slot-2/3 bodies, raise slot 1
 #   bash dev/board_chat_run.sh serial        # the living sister's serial (from node-1 logs)
+#   bash dev/board_chat_run.sh serial2       # the same for slot 2 (node-2 logs)
 #   bash dev/board_chat_run.sh post <to> <text>   # a board task (to: net | <serial>)
 #   bash dev/board_chat_run.sh say <text…>   # the operator's chat line via RCON tellraw
 #   bash dev/board_chat_run.sh entry <id>    # the board entry with its thread
 #   bash dev/board_chat_run.sh mind <grep>   # mind-1 log.jsonl excerpts (mind MCP + events)
+#   bash dev/board_chat_run.sh mind2 <grep>  # the same for slot 2
+#   bash dev/board_chat_run.sh node2 <grep>  # node-2 log excerpts (boardlink, life events)
+#   bash dev/board_chat_run.sh kill <player> # end a life cleanly (RCON kill; the will path)
 #   bash dev/board_chat_run.sh bridge <grep> # the runner's boardlink lines (node-1 logs)
 #   bash dev/board_chat_run.sh run           # up → net task → wait claim → addressed task
 #                                           #   → operator line → wait answer → excerpts
@@ -58,6 +62,15 @@ case "$cmd" in
     docker logs --tail 500 lastorder-node-1-1 2>&1 \
       | grep -oE '"type": ?"life\.birth", ?"serial": ?[0-9]+' | grep -oE '[0-9]+$' | tail -1
     ;;
+  serial2)
+    docker logs --tail 500 lastorder-node-2-1 2>&1 \
+      | grep -oE '"type": ?"life\.birth", ?"serial": ?[0-9]+' | grep -oE '[0-9]+$' | tail -1
+    ;;
+  kill)
+    need_key RCON_PASSWORD
+    player="${1:?usage: kill <player>}"
+    docker exec -e RCON_PASSWORD="$RCON_PASSWORD" lastorder-mc-server-1 rcon-cli kill "$player"
+    ;;
   post)
     need_key HIVE_OPERATOR_KEY
     to="${1:?usage: post <to: net | serial> <text>}"; text="${2:?usage: post <to> <text>}"
@@ -91,6 +104,14 @@ case "$cmd" in
     grep -E "${1:-board|chat\.line}" < <(docker exec lastorder-mind-1-1 cat /mind-run/log.jsonl 2>/dev/null) \
       | tail -"${MIND_TAIL:-40}"
     ;;
+  mind2)
+    grep -E "${1:-board|chat\.line}" < <(docker exec lastorder-mind-2-1 cat /mind-run/log.jsonl 2>/dev/null) \
+      | tail -"${MIND_TAIL:-40}"
+    ;;
+  node2)
+    docker logs --tail "${NODE_TAIL:-300}" lastorder-node-2-1 2>&1 \
+      | grep -E "${1:-boardlink|life\.}" | tail -40
+    ;;
   bridge)
     docker logs --tail "${NODE_TAIL:-300}" lastorder-node-1-1 2>&1 \
       | grep -E "${1:-boardlink}" | tail -40
@@ -112,7 +133,7 @@ case "$cmd" in
     bash "$0" bridge || true
     ;;
   *)
-    echo "usage: board_chat_run.sh up | serial | post <to> <text> | say <text…> | entry <id> | mind [ere] | bridge [ere] | run" >&2
+    echo "usage: board_chat_run.sh up | serial | serial2 | post <to> <text> | say <text…> | entry <id> | mind [ere] | mind2 [ere] | node2 [ere] | kill <player> | bridge [ere] | run" >&2
     exit 2
     ;;
 esac
