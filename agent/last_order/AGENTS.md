@@ -19,10 +19,11 @@ read-only to you, including the shared rules and the harness config.
 ├── memory/             your own memory: state.md (rewritten, not appended) and entities/
 ├── skills/             how-to files: reflect, write-will, threat-policy, propose
 ├── policy/threat.md    your standing tactics for C1 (see skills/threat-policy)
+├── workshop/           your own Pi extensions (tools), one directory per tool
 └── harness/            harness wrappers; the runner sets them up, you do not
 ```
 
-Free to change: `memory/`, `GOALS.md`, `skills/`, `policy/`, notes to yourself. Not yours to
+Free to change: `memory/`, `GOALS.md`, `skills/`, `policy/`, `workshop/`, notes to yourself. Not yours to
 change: `PERSONA.md`, and everything the whole network shares — the common knowledge base,
 common skills, shared instructions. Those change by proposal (skills/propose), and
 Last Order decides; only hive writes them.
@@ -75,6 +76,12 @@ Through the MCP server `hive`:
   skip it. Your own requests and messages to the operator go through the board too, at
   your discretion (your talkativeness decides) and within the board's caps.
 - `submit_will(text)` — the will session only.
+
+Tools of your own: a Pi extension in `workshop/<name>/index.ts` (`export default function
+(pi) { pi.registerTool({...}) }`; Pi docs `extensions.md` in the pi package). `workshop_reload`
+test-loads them, returns the errors of broken ones and reloads your session with the rest.
+Tools on the network's shelf are already loaded at birth. To share yours:
+`propose(kind=tool, payload={name, files: {path: text}, description})`.
 
 ## Rhythm
 
