@@ -2,7 +2,7 @@
 id: T-058
 title: Прогон стенда после исправлений — команда сервера, старт слота, мост, размер запроса
 stage: I
-status: in_progress
+status: review
 criticality: normal
 after: [T-053, T-054, T-055, T-056]
 branch: z/T-058-stand-run-fixes
