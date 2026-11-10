@@ -71,8 +71,11 @@ from runtime.node.workplace import (
     _own,
     _write_file_no_links,
     _write_readonly,
+    drop_env_extensions,
+    render_agent_workshop,
     render_pi_configs,
 )
+from runtime.node import workshop as workshop_mod
 
 # --- the knowledge layout this module reads (P1-5: one place, read-only) --------------------
 
@@ -91,7 +94,7 @@ OPENCODE_CONFIG = "opencode.json"
 CORE_FILES = ("PERSONA.md", "AGENTS.md", "SESSION_PROMPT.md")  # rewritten every start (P1-3)
 CORE_DIRS = ("skills",)
 OPERATOR_FILES = ("INBOX.md", "GOALS.md")  # created once, then root's alone (P1-2)
-AGENT_DIRS = ("memory",)  # the agent's writable zone
+AGENT_DIRS = ("memory", "workshop")  # the agent's writable zone (workshop: T-047)
 WORKPLACE_TEMPLATE = REPO_ROOT / "agent" / "network"
 
 PROMPT_PREFIX = "Last Order session."
@@ -285,6 +288,9 @@ class LastOrderPiAdapter(PiAdapter):
             context_window=self._context_window,
             keep_recent_tokens=self._keep_recent_tokens,
             key_file=str(agent_dir / PI_KEY_FILE),
+            workshop_active=(
+                str(agent_dir / workshop_mod.ACTIVE_DIR) if self.workshop_root else None
+            ),
         )
         configs["mcp.json"] = {
             "autoEnableCodemode": False,
@@ -316,19 +322,19 @@ class LastOrderPiAdapter(PiAdapter):
                 mode=READ_ONLY_FILE, uid=0, gid=0,
             )
         # the delivery extension (T-048) rides the long session too: the desk reads
-        # the board feed and its inbox as `last-order` (the lo key in mcp.json)
-        extensions = agent_dir / "extensions" / "misaka-link"
-        extensions.mkdir(parents=True, exist_ok=True)
-        for name in MISAKA_LINK_FILES:
-            _write_file_no_links(
-                extensions / name,
-                (MISAKA_LINK_DIR / name).read_text(encoding="utf-8"),
-                mode=READ_ONLY_FILE,
-                uid=0,
-                gid=0,
+        # the board feed and its inbox as `last-order` (the lo key in mcp.json);
+        # the workshop loader (T-047): her workshop/ and the shelf, checked first
+        drop_env_extensions(agent_dir)
+        if self.workshop_root:
+            render_agent_workshop(
+                agent_dir, own=self.workshop_root, net=self.shelf_dir,
+                uid=self._uid, gid=self._gid,
             )
         _own(agent_dir, self._uid, self._gid)
         _chmod(agent_dir, 0o700)
+
+    workshop_root: Path | None = None  # set by the alarm: <workplace>/workshop
+    shelf_dir: Path | None = None  # set by the alarm: <knowledge>/base/tools (read-only)
 
     def session(self, prompt: str) -> Command:
         self._render()  # every session starts from the desk's own render
@@ -500,6 +506,10 @@ class AdminAlarm:
                 "opencode": LastOrderAdapter(f"llm-gateway/{cfg.model}"),
             }
         )
+        pi_adapter = self._adapters.get("pi")
+        if isinstance(pi_adapter, LastOrderPiAdapter):  # T-047: her workshop + the shelf
+            pi_adapter.workshop_root = cfg.workplace / workshop_mod.WORKSHOP_DIR
+            pi_adapter.shelf_dir = cfg.knowledge / "base" / "tools"
         # The runner's rule (runner.py `_life`): a life starts on the primary harness;
         # quota marks switch to the failover for the sessions that follow, and the
         # next life is back on the primary. The desk's "life" is this process — the

@@ -481,6 +481,8 @@ class NodeRunner:
         adapter_name = self.cfg.harness
         adapter = self._adapters[adapter_name]
         root = self.cfg.workplaces / "agent" / workplace.serial_dir(state.serial)
+        if hasattr(adapter, "workshop_root"):
+            adapter.workshop_root = root / "workshop"  # T-047: her own Pi extensions
         prompt = self._session_prompt(LIFE_PREFIX)
         pause = self.cfg.restart_pause_s
         boardlink = self._boardlink_factory(state)

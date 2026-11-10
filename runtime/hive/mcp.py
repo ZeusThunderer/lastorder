@@ -55,6 +55,7 @@ from runtime.hive.client import (
     slice_to_json,
 )
 from runtime.hive import grants as grants_module
+from runtime.hive import tools as tools_module
 from runtime.hive.grants import GrantError
 from runtime.hive.lifecycle import HiveLog, Lifecycle, LifecycleError
 from runtime.hive.proposals import (
@@ -138,6 +139,7 @@ class HiveMcp:
         board: Board | None = None,
         grants: Any = None,
         relay: Any = None,
+        lo_workplace: Path | None = None,
     ):
         self._store = store
         self._lifecycle = lifecycle
@@ -154,6 +156,8 @@ class HiveMcp:
         self._board = board
         self._grants = grants
         self._relay = relay
+        # Last Order's workplace, read-only (her workshop/ is what publish_tool reads)
+        self._lo_workplace = Path(lo_workplace) if lo_workplace else None
         self._wills_dir = Path(run_dir) / "pending_wills"
         self._log = log
         self._now = now or (lambda: datetime.now(timezone.utc).isoformat())
@@ -465,6 +469,26 @@ class HiveMcp:
             _err("http_request: the relay is not configured")
         return self._relay.fetch(LAST_ORDER, method, url, headers, body)
 
+    # --- the tool shelf (T-047, runtime/hive/tools.py) --------------------------------------
+
+    def publish_tool(self, ctx: Context, name: Any, why: Any) -> dict[str, Any]:
+        """Last Order publishes `workshop/<name>/` of her workplace to the shelf."""
+        self._require_last_order(ctx)
+        if self._lo_workplace is None:
+            _err("publish_tool: hive does not see the Last Order workplace")
+        try:
+            name = tools_module.check_name(name)
+            files = tools_module.read_dir(self._lo_workplace / "workshop" / name)
+            return self._proposals.shelf.publish(
+                name, files, author=LAST_ORDER, by=LAST_ORDER, why=why if isinstance(why, str) else "",
+            )
+        except tools_module.ToolError as exc:
+            _err(f"publish_tool: {exc}")
+
+    def tool_list(self, ctx: Context) -> dict[str, Any]:
+        self._require_last_order(ctx)
+        return {"tools": self._proposals.shelf.names()}
+
     # --- the infrastructure bridge (T-057, TASKBOARD.md 5.4; ADR-044) ------------------------
 
     def infra_state(self, ctx: Context) -> dict[str, Any]:
@@ -610,7 +634,9 @@ def build_mcp(
         recipe|term, claim, about, evidence_event_ids} — a duplicate of a live record adds
         evidence to it instead of a new record. kind='skill': payload {description,
         script}. kind='instructions': payload {diff} — a unified diff against the common
-        instructions. Returns the proposal id queued for Last Order."""
+        instructions. kind='tool': payload {name, files: {path: text}, description} — a
+        Pi extension of yours (index.ts + helpers) for the network's tool shelf. Returns
+        the proposal id queued for Last Order."""
         return await _run(lambda: impl.propose(ctx, kind, payload))
 
     async def vote(entry_id: str, accept: bool, why: str = "", *, ctx: Context) -> dict[str, Any]:
@@ -737,6 +763,16 @@ def build_mcp(
         content_type, body}."""
         return await _run(lambda: impl.http_request(ctx, method, url, headers, body))
 
+    async def publish_tool(name: str, why: str, *, ctx: Context) -> dict[str, Any]:
+        """Publish your extension `workshop/<name>/` (index.ts or index.js plus helper
+        files) to the network's tool shelf under git with this reason. Every sister born
+        after this loads it; republishing replaces the previous version."""
+        return await _run(lambda: impl.publish_tool(ctx, name, why))
+
+    async def shelf(*, ctx: Context) -> dict[str, Any]:
+        """The names of the tools on the network's shelf."""
+        return await _run(lambda: impl.tool_list(ctx))
+
     async def infra_state(*, ctx: Context) -> dict[str, Any]:
         """The infrastructure executor: {on, reason, pending}. An off executor runs
         nothing — infra requests wait, and `reason` is the operator's explanation."""
@@ -777,6 +813,8 @@ def build_mcp(
     lo.add_tool(request_grant, name="request_grant")
     lo.add_tool(grants, name="grants")
     lo.add_tool(http_request, name="http_request")
+    lo.add_tool(publish_tool, name="publish_tool")
+    lo.add_tool(shelf, name="shelf")
     lo.add_tool(infra_state, name="infra_state")
 
     return sister, lo

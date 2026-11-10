@@ -257,6 +257,9 @@ class PiAdapter:
         self._hapi_token = hapi_token
         self._hapi_home = Path(hapi_home) if hapi_home is not None else HAPI_HOME
         self._boot_timeout_s = boot_timeout_s
+        # T-047: the life's own `workshop/` (the runner sets it at life start); None
+        # leaves Pi without the workshop loader's active dir (tests, old callers)
+        self.workshop_root: Path | None = None
         self._http = transport if transport is not None else httpx.Client(
             base_url=hapi_url, timeout=15.0
         )
@@ -286,6 +289,7 @@ class PiAdapter:
             keep_recent_tokens=self._keep_recent_tokens,
             uid=self._uid,
             gid=self._gid,
+            workshop_root=self.workshop_root,
         )
 
     def _command(self, prompt: str, resume: str | None) -> Command:

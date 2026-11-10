@@ -415,6 +415,7 @@ def create_app(
             board=board,
             grants=grants,
             relay=relay,
+            lo_workplace=Path(env("HIVE_LO_WORKPLACE") or "/lo-workplace"),
         )
     )
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the
@@ -963,6 +964,11 @@ def create_app(
     def grants_secret(request: Request, name: str) -> dict:
         _require_tool_key(request)
         return {"name": name, "secret": grants.secret_of(name)}
+
+    @app.get("/tools/bundle")
+    def tools_bundle() -> dict:
+        """The network's tool shelf for the runners (read-only common, like /registry/alive)."""
+        return {"tools": proposals.shelf.bundle()}
 
     @app.post("/lo/fetch")
     def lo_fetch(request: Request, body: dict) -> dict:

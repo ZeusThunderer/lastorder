@@ -42,10 +42,11 @@ import yaml
 
 from runtime.knowledge.schema import CLAIM_MAX_CHARS
 from runtime.knowledge.slice import format_serial
+from runtime.hive.tools import ToolError, ToolShelf, check_files, check_name
 from runtime.knowledge.store import KnowledgeStore, StoreError
 from runtime.perception.translate import NAMESPACED
 
-PROPOSAL_KINDS = ("knowledge", "skill", "instructions")
+PROPOSAL_KINDS = ("knowledge", "skill", "instructions", "tool")
 PROPOSAL_STATUSES = ("pending", "accepted", "rejected")
 KNOWLEDGE_KINDS = ("danger", "fact", "recipe", "term")
 
@@ -315,6 +316,7 @@ class ProposalBook:
         self._dir = store.root / "base" / "proposals"
         self._now = now or (lambda: datetime.now(timezone.utc).isoformat())
         self._lock = threading.RLock()
+        self.shelf = ToolShelf(store)
 
     # -- reading ---------------------------------------------------------------------------
 
@@ -376,6 +378,8 @@ class ProposalBook:
                 record_id = record.id
             elif kind == "skill":
                 cleaned = self._skill_payload(payload)
+            elif kind == "tool":
+                cleaned = self._tool_payload(payload)
             else:
                 cleaned = self._instructions_payload(payload)
             proposal = ProposalFile(
@@ -448,6 +452,18 @@ class ProposalBook:
                     updated = replace(updated, record_id=record.id)
                 else:
                     self._store.commit_layer(message, extra)
+            elif proposal.kind == "tool":
+                if accept:
+                    try:
+                        self.shelf.publish(
+                            proposal.payload["name"], proposal.payload["files"],
+                            author=format_serial(proposal.author), by=by, why=why.strip(),
+                            extra_files=extra, message=message,
+                        )
+                    except ToolError as exc:
+                        raise ProposalError(str(exc)) from None
+                else:
+                    self._store.commit_layer(message, extra)
             else:  # instructions
                 if accept:
                     current = self._instructions_text()
@@ -511,6 +527,23 @@ class ProposalBook:
         _no_raw_ids(description, "skill.description")
         _no_raw_ids(script, "skill.script")
         return {"description": description.strip(), "script": script}
+
+    def _tool_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """A sister's Pi extension for the common shelf: {name, files, description}."""
+        if not isinstance(payload, Mapping):
+            raise ProposalError("propose payload: expected an object")
+        unknown = sorted(set(payload) - {"name", "files", "description"})
+        if unknown:
+            raise ProposalError(f"tool payload: unknown fields {unknown}")
+        description = payload.get("description", "")
+        if not isinstance(description, str):
+            raise ProposalError("tool payload.description: expected a string")
+        try:
+            name = check_name(payload.get("name"))
+            files = check_files(payload.get("files"))
+        except ToolError as exc:
+            raise ProposalError(f"tool payload: {exc}") from None
+        return {"name": name, "files": files, "description": description.strip()[:CLAIM_MAX_CHARS]}
 
     def _instructions_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, Mapping):

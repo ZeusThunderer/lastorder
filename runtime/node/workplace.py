@@ -26,6 +26,7 @@ from pathlib import Path
 from runtime.knowledge.slice import format_serial
 from runtime.lastorder.persona import Node, PersonaProvider
 from runtime.lastorder.traits import Traits
+from runtime.node import workshop as workshop_mod
 
 # Mode plan of the boundary (P1-2); the sticky bit is what keeps runner-owned files
 # undeletable inside the sister-writable workplace directory.
@@ -35,7 +36,7 @@ READ_ONLY_DIR = 0o555
 SISTER_FILE = 0o666
 SISTER_DIR = 0o777
 CORE_FILES = ("PERSONA.md", "AGENTS.md", "SESSION_PROMPT.md")
-SISTER_WRITABLE_DIRS = ("memory", "skills", "policy")
+SISTER_WRITABLE_DIRS = ("memory", "skills", "policy", "workshop")  # workshop: T-047
 RUNNER_DIR = ".runner"
 
 
@@ -172,6 +173,7 @@ def _force_rmtree(path: Path) -> None:
 
 
 def _make_sister_writable(root: Path, uid: int | None, gid: int | None) -> None:
+    (root / workshop_mod.WORKSHOP_DIR).mkdir(exist_ok=True)  # her own Pi extensions (T-047)
     for name in SISTER_WRITABLE_DIRS:
         path = root / name
         if not path.exists():
@@ -440,6 +442,55 @@ MISAKA_LINK_FILES = (
     "hive.ts",
     "link.ts",
 )
+# workshop (T-047): the environment's loader of the agent's own and the network's
+# Pi extensions (runtime/node/workshop.py has the why). Dropped like misaka-link.
+WORKSHOP_EXT_DIR = Path(__file__).resolve().parents[1] / "pi" / "workshop"
+WORKSHOP_EXT_FILES = ("index.ts", "workshop.ts")
+
+
+def drop_env_extensions(agent_dir: Path) -> None:
+    """The environment's own Pi extensions into `<agent_dir>/extensions/`, root-owned."""
+    for name, src_dir, files in (
+        ("misaka-link", MISAKA_LINK_DIR, MISAKA_LINK_FILES),
+        ("workshop", WORKSHOP_EXT_DIR, WORKSHOP_EXT_FILES),
+    ):
+        target = agent_dir / "extensions" / name
+        target.mkdir(parents=True, exist_ok=True)
+        for file in files:
+            _write_file_no_links(
+                target / file, (src_dir / file).read_text(encoding="utf-8"),
+                mode=READ_ONLY_FILE, uid=0, gid=0,
+            )
+
+
+def fetch_shelf(hive_url: str, timeout_s: float = 5.0) -> dict | None:
+    """The network's tool shelf from hive; None when hive does not answer."""
+    import httpx
+
+    try:
+        response = httpx.get(f"{hive_url.rstrip('/')}/tools/bundle", timeout=timeout_s)
+        response.raise_for_status()
+        tools = response.json().get("tools")
+        return tools if isinstance(tools, dict) else None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def render_agent_workshop(
+    agent_dir: Path,
+    *,
+    own: Path | None,
+    net: Path | None,
+    uid: int | None,
+    gid: int | None,
+    check: "workshop_mod.Checker | None" = None,
+) -> list[dict]:
+    return workshop_mod.render_workshop(
+        agent_dir, own=own, net=net, uid=uid, gid=gid,
+        check=check or workshop_mod.cached(workshop_mod.pi_checker(uid, gid)),
+    )
+
+
 # The context cap (T-066). Pi compacts when the context passes
 # contextWindow - reserveTokens and keeps the last keepRecentTokens verbatim; the
 # window here is a budget, not the model's real one. On zcode one life grew to
@@ -466,6 +517,7 @@ def render_pi_configs(
     key_file: str = str(PI_AGENT_DIR / PI_KEY_FILE),
     session_dir: str = PI_WORKPLACE_SESSION_DIR,
     thinking_level: str | None = None,
+    workshop_active: str | None = None,
 ) -> dict[str, dict]:
     """The Pi agent-dir configs: models.json + mcp.json + settings.json, by content.
     No key material in the configs: apiKey is a `!command` reference (Pi resolves a
@@ -529,6 +581,8 @@ def render_pi_configs(
             # Pi's startup level (docs/settings.md: off|minimal|low|medium|high…);
             # absent means Pi's default `medium`
             **({"defaultThinkingLevel": thinking_level} if thinking_level else {}),
+            # T-047: Pi loads the agent's extensions ONLY from the checked active dir
+            **({"extensions": [workshop_active]} if workshop_active else {}),
         },
     }
 
@@ -553,6 +607,7 @@ def drop_pi_agent_dir(
     uid: int | None = None,
     gid: int | None = None,
     hive_mcp_override: str | None = None,
+    workshop_root: Path | None = None,
 ) -> None:
     """(Re)render PI_AGENT_DIR: the three configs root-owned 0444 (the runner's files,
     the same boundary as HERMES_HOME/config.yaml, R1-2), written link-safe (the dir is
@@ -573,6 +628,7 @@ def drop_pi_agent_dir(
         model=model, body_base=body_base, hive_url=hive_url, node_key=node_key,
         zai_key=zai_key, slot=slot, session_dir=session_dir,
         context_window=context_window, keep_recent_tokens=keep_recent_tokens,
+        workshop_root=workshop_root,
     )
     if hive_mcp_override is None:
         _PI_RENDER[agent_dir] = {**params, "uid": uid, "gid": gid}
@@ -588,6 +644,9 @@ def drop_pi_agent_dir(
         key_file=str(agent_dir / PI_KEY_FILE),
         session_dir=session_dir,
         thinking_level=None if hive_mcp_override else PI_SISTER_THINKING_LEVEL,
+        workshop_active=(
+            str(agent_dir / workshop_mod.ACTIVE_DIR) if workshop_root is not None else None
+        ),
     )
     if hive_mcp_override:
         configs["mcp.json"]["mcpServers"]["hive"]["url"] = hive_mcp_override.rstrip("/")
@@ -595,15 +654,16 @@ def drop_pi_agent_dir(
         _write_file_no_links(
             agent_dir / name, json.dumps(config, indent=2), mode=READ_ONLY_FILE, uid=0, gid=0
         )
-    extensions = agent_dir / "extensions" / "misaka-link"
-    extensions.mkdir(parents=True, exist_ok=True)
-    for name in MISAKA_LINK_FILES:
-        _write_file_no_links(
-            extensions / name,
-            (MISAKA_LINK_DIR / name).read_text(encoding="utf-8"),
-            mode=READ_ONLY_FILE,
-            uid=0,
-            gid=0,
+    drop_env_extensions(agent_dir)
+    if workshop_root is not None:
+        # T-047: the shelf at every life render (a sister born after a publication
+        # gets it); the will session keeps the last copy — hive is behind the proxy
+        if hive_mcp_override is None:
+            bundle = fetch_shelf(hive_url)
+            if bundle is not None:
+                workshop_mod.write_net_tools(agent_dir, bundle)
+        render_agent_workshop(
+            agent_dir, own=workshop_root, net=agent_dir / workshop_mod.NET_DIR, uid=uid, gid=gid,
         )
     _own(agent_dir, uid, gid)
     _chmod(agent_dir, 0o700)

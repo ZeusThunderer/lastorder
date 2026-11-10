@@ -1,0 +1,7 @@
+{
+  "name": "workshop",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi extension: checks the agent's own and the network's extensions in a throwaway pi and reloads the session with the ones that load (T-047; no runtime dependencies)."
+}
