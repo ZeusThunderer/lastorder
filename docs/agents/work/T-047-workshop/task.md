@@ -2,7 +2,7 @@
 id: T-047
 title: Мастерская Last Order — свои расширения Pi, перезагрузка, публикация инструментов сёстрам
 stage: I
-status: draft
+status: done
 criticality: critical
 after: [T-045, T-046]
 branch: z/T-047-workshop
