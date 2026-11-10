@@ -74,10 +74,13 @@ case "$cmd" in
   post)
     need_key HIVE_OPERATOR_KEY
     to="${1:?usage: post <to: net | serial> <text>}"; text="${2:?usage: post <to> <text>}"
+    # JSON goes through a file: curl -d mangles non-ASCII argv on Windows (T-058)
+    body="$(mktemp)"
+    printf '{"kind": "task", "to": "%s", "text": "%s"}' "$to" "$text" > "$body"
     curl -sS -X POST "$BOARD/board/entries" -H "X-Operator-Key: $HIVE_OPERATOR_KEY" \
-      -H 'Content-Type: application/json' \
-      -d "{\"kind\": \"task\", \"to\": \"$to\", \"text\": \"$text\"}"
+      -H 'Content-Type: application/json; charset=utf-8' --data-binary "@$body"
     echo
+    rm -f "$body"
     ;;
   say)
     need_key RCON_PASSWORD
