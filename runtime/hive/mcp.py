@@ -137,6 +137,7 @@ class HiveMcp:
         runner_keys: Mapping[str, str] | None = None,
         board: Board | None = None,
         grants: Any = None,
+        relay: Any = None,
     ):
         self._store = store
         self._lifecycle = lifecycle
@@ -152,6 +153,7 @@ class HiveMcp:
         self._runner_keys = dict(runner_keys) if runner_keys else {}
         self._board = board
         self._grants = grants
+        self._relay = relay
         self._wills_dir = Path(run_dir) / "pending_wills"
         self._log = log
         self._now = now or (lambda: datetime.now(timezone.utc).isoformat())
@@ -454,6 +456,15 @@ class HiveMcp:
             ]
         }
 
+    def http_request(
+        self, ctx: Context, method: Any, url: Any, headers: Any, body: Any
+    ) -> dict[str, Any]:
+        """Last Order's HTTPS call through the grant relay (runtime/hive/relay.py)."""
+        self._require_last_order(ctx)
+        if self._relay is None:
+            _err("http_request: the relay is not configured")
+        return self._relay.fetch(LAST_ORDER, method, url, headers, body)
+
     # --- the infrastructure bridge (T-057, TASKBOARD.md 5.4; ADR-044) ------------------------
 
     def infra_state(self, ctx: Context) -> dict[str, Any]:
@@ -711,6 +722,21 @@ def build_mcp(
         """The grant records ({grants}): kind, what, status — never secret values."""
         return await _run(lambda: impl.grant_list(ctx))
 
+    async def http_request(
+        method: str,
+        url: str,
+        headers: dict[str, str] | None = None,
+        body: Any = None,
+        *,
+        ctx: Context,
+    ) -> dict[str, Any]:
+        """One HTTPS request out of the network, to a domain with an active egress
+        grant. Write `{{secret:NAME}}` where an approved secret goes (url, header
+        values, body) — hive fills it in and redacts it from the answer, you never see
+        the value. `body`: a string, or an object sent as JSON. Returns {status,
+        content_type, body}."""
+        return await _run(lambda: impl.http_request(ctx, method, url, headers, body))
+
     async def infra_state(*, ctx: Context) -> dict[str, Any]:
         """The infrastructure executor: {on, reason, pending}. An off executor runs
         nothing — infra requests wait, and `reason` is the operator's explanation."""
@@ -750,6 +776,7 @@ def build_mcp(
     lo.add_tool(lo_inbox, name="inbox")
     lo.add_tool(request_grant, name="request_grant")
     lo.add_tool(grants, name="grants")
+    lo.add_tool(http_request, name="http_request")
     lo.add_tool(infra_state, name="infra_state")
 
     return sister, lo

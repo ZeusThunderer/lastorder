@@ -71,6 +71,7 @@ from runtime.hive.lifecycle import HiveLog, Lifecycle, LifecycleError, TTL_SCAN_
 from runtime.hive.mcp import HiveMcp, build_mcp, parse_node_keys
 from runtime.hive.proposals import CommonLayers, ProposalBook
 from runtime.hive.rcon import RconClient, RconError
+from runtime.hive.relay import Relay
 from runtime.knowledge.store import (
     AlreadyRetiredError,
     InvalidCandidateError,
@@ -348,6 +349,8 @@ def create_app(
         )
     wake_feed = WakeFeed(run_dir, log=log, clock=clock)
     grants = Grants(run_dir / "grants.sqlite", log=log, clock=clock)
+    # the grant relay (runtime/hive/relay.py): secrets filled here, out via egress
+    relay = Relay(grants, log=log, proxy=env("HIVE_EGRESS_PROXY") or None)
     # The approval hook of TASKBOARD.md 5.3 (T-046): the vault opens only through the
     # operator's board approval, never through the board status alone. A failure is
     # the board's `grants.hook_failed` event — the entry stays approved, access closed.
@@ -411,6 +414,7 @@ def create_app(
             runner_keys=runner_keys,
             board=board,
             grants=grants,
+            relay=relay,
         )
     )
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the
@@ -959,6 +963,15 @@ def create_app(
     def grants_secret(request: Request, name: str) -> dict:
         _require_tool_key(request)
         return {"name": name, "secret": grants.secret_of(name)}
+
+    @app.post("/lo/fetch")
+    def lo_fetch(request: Request, body: dict) -> dict:
+        """The relay for Last Order's workshop tools (same call as MCP http_request)."""
+        _require_lo_key(request)
+        return relay.fetch(
+            "last-order", body.get("method"), body.get("url"),
+            body.get("headers"), body.get("body"),
+        )
 
     @app.post("/grants/revoke")
     def grants_revoke(request: Request, body: dict) -> dict:
