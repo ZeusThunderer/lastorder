@@ -85,22 +85,11 @@
 - Пути bind-mount в compose разрешает демон, а не шелл (см. unionclef/deploy/compose.test.yml).
 - `NetTyan/.env*` содержат секреты — не читать. У nt и uc своя git-политика (без Co-Authored-By).
 
-## Два агента (ADR-019, ADR-040, ADR-046)
-Код пишет ZCode (worker), Claude Code — надзор: ставит задачи, проверяет, мержит. Субагентов нет.
-- Протокол — docs/agents/coop-protocol.md, задачи — docs/agents/work/.
-- Корень репозитория всегда на `main`. Каждая задача — свой worktree `.worktrees/T-NNN-<slug>`
-  (`dev/task_worktree.sh`). Merge — только `dev/merge_task.sh`, статусы — `dev/tasks.sh`.
-- Скилы Claude: `lo-plan`, `lo-review`, `lo-direct-edit`.
-- Код Claude правит сам только через `lo-direct-edit` и только по основаниям из протокола.
-  Каждая правка — в DIRECT_EDITS.md. Файлы в `docs/agents/work/` и документы — не прямые правки.
-- Основной путь — ZCode (`lo-work`) делает задачи по очереди, по чату на очередь `lane:`; очереди
-  идут параллельно и делят стенд через `dev/stand.sh lock` (ADR-046). После сдачи он сам
-  вызывает Claude headless (`dev/call_supervisor.sh`, только Opus, effort `medium`; `high` — по
-  просьбе оператора) на ревью, merge и ответы на вопросы, критичные задачи тоже. В таком вызове
-  действует раздел «Headless» скила `lo-review`. Оператору — только «Эскалация оператору» из протокола.
-- Скрипты протокола `dev/{_common,tasks,task_worktree,merge_task,on_main,call_supervisor}.sh`
-  ведёт надзор как часть протокола, это не прямые правки.
-- ZCode читает корневой AGENTS.md, а тот отсылает сюда: правила в этом файле общие для обоих агентов.
+## Как идёт работа (ADR-047)
+Протокол двух агентов снят (2026-11-10): Claude Code пишет код сам, прямо в `main`, коммитами по
+шагам. ZCode, worktree, ревью-раунды, DIRECT_EDITS и `dev/call_supervisor.sh` не используются.
+Файлы `docs/agents/work/T-NNN-*/` — заметки: короткий `report.md` (что сделано, что прогнано),
+статус `done`. Приоритет — видимый результат на стенде.
 
 ## Практики aw (для обоих агентов)
 Перенесены из upstream aw (README, docs/ARCHITECTURE.md, docs/MEMORY.md, agent/shared/rules.md).
