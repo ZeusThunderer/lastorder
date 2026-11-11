@@ -217,6 +217,28 @@ compose-файла, не корневой `.env`); `up.sh` эти перемен
   `Launching version fabric-loader-0.20.1-1.21.11`, тело вошло в мир]. Без переменной
   остаётся старое поведение `fabric:<mc>` — HMC берёт свежей загрузчик сам.
 
+## Камера и media (T-063, ADR-045 §9)
+Камера — переключатель слота: `BODY_CAMERA_N=1` (в `.env` или окружением compose). Тело со
+включённой камерой рендерит мир на фиксированном Xvfb-дисплее `:99` и ffmpeg'ом (в образе тела)
+стримит экран в `media` — `rtsp://media:8554/<LastOrderNN>`; ffmpeg в цикле перезапускается,
+поэтому рестарт `media` не роняет тело и поток возвращается сам
+[проверено: рестарт media, тело healthy, «camera: ffmpeg exited (rc=224), restarting»). Без
+`BODY_CAMERA_N` тело стартует как раньше (`headless`), `media` не обязателен. Параметры потока —
+`BODY_CAMERA_FPS` (10), `BODY_CAMERA_SIZE` (854x480), `BODY_CAMERA_BITRATE` (1M); дистанцию
+прорисовки для съёмки поднимают обычными `BODY_RENDER_DISTANCE`/`BODY_XMX` слота.
+
+`media` — MediaMTX `bluenviron/mediamtx:1.21.3` (конфиг `docker/media/mediamtx.yml`, только
+RTSP+запись+playback, остальное выключено). Пишет все потоки в кольцевой буфер: volume `footage`,
+сегменты по 1ч, глубина кольца `MEDIA_RETENTION` (по умолчанию `1d` = 24ч; для проверки удаления
+на стенде задают короткие `MEDIA_SEGMENT`/`MEDIA_RETENTION`). Выдача:
+- список записей: `GET http://media:9996/list?path=LastOrder01`
+- вырезка mp4: `GET http://media:9996/get?path=LastOrder01&start=<RFC3339>&duration=<сек>&format=mp4`
+  [проверено: 8-секундная вырезка, валидный `ftyp isom`]
+
+Сеть: `media-net` — внутренняя, в ней тела (все три, независимо от камеры) и `media`; наружу из
+`media` пути нет, портов на хосте нет. Сёстры (`node-N`) в `media-net` не входят — из `slot-N`
+имя `media` даже не резолвится [проверено на стенде]. Last Order получает доступ в T-064.
+
 ## Ключи стенда
 Прогон идёт с ключами: без них `docker/node/up.sh` отказывается подниматься (fail-closed R2-6),
 а приём воли падает в аварийные завещания (T-032). `dev/stand_keys.py` готовит `.env`,

@@ -2,7 +2,7 @@
 id: T-063
 title: Камера тела и сервис media — экран тела потоком в MediaMTX, кольцевой буфер, вырезка по времени
 stage: I
-status: in_progress
+status: done
 criticality: critical
 lane: b
 after: [T-062]

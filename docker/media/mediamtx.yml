@@ -1,0 +1,32 @@
+# MediaMTX for the body cameras (T-063, ADR-045 §9). Bodies with BODY_CAMERA=1 publish
+# their Xvfb screen over RTSP to :8554; every stream is recorded into /recordings (the
+# `footage` volume) as a ring buffer — recordDeleteAfter is overridden by the compose
+# env MTX_PATHDEFAULTS_RECORDDELETEAFTER (MEDIA_RETENTION, default 1d = 24h) — and
+# served back on :9996: /list?path=<name> and /get?path=<name>&start=…&duration=…&format=mp4.
+# Everything a camera sink does not need is off (rtmp/hls/webrtc/srt/api/metrics/pprof);
+# the box sits on the internal media-net only, nothing is published to the host.
+playback: true
+playbackAddress: :9996
+
+rtsp: true
+rtspAddress: :8554
+rtspTransports: [tcp]
+
+rtmp: false
+hls: false
+webrtc: false
+srt: false
+moq: false
+api: false
+metrics: false
+pprof: false
+
+pathDefaults:
+  record: true
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f_%z
+  recordFormat: fmp4
+  recordSegmentDuration: 1h   # overridden by the compose env MEDIA_SEGMENT
+  recordDeleteAfter: 1d
+
+paths:
+  all_others:
