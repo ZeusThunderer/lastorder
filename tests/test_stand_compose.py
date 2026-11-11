@@ -44,17 +44,33 @@ def test_nodes_depend_on_zai_egress():
         assert "zai-egress" in svc["depends_on"], name
 
 
-def test_quota_spenders_never_auto_restart():
-    # Measured in T-037: after a hard engine kill, containers that were running come back
-    # under on-failure/unless-stopped, only restart:"no" stays down.
-    for name in QUOTA_SPENDERS:
-        assert COMPOSE["services"][name]["restart"] == "no", name
+CORE = {"hive", "last-order", "hapi-hub", "llm-gateway", "gateway-db", "zai-egress",
+        "egress", "media", "infra"}
 
 
-def test_infrastructure_restarts_on_failure():
-    # Everything else keeps daemon crash-restart (the body-N row of the section 9 table)
-    for name in set(COMPOSE["services"]) - set(QUOTA_SPENDERS):
-        assert COMPOSE["services"][name]["restart"] == "on-failure", name
+def test_only_the_core_autostarts():
+    # ADR-050. Measured in T-037: after a hard engine kill, running containers come back
+    # under on-failure AND unless-stopped; only restart:"no" stays down. So the core is
+    # unless-stopped (it is what raises the rest after a reboot) and has no profile;
+    # every slot, body and the world is "no" and sits behind a profile, started on demand.
+    for name, svc in COMPOSE["services"].items():
+        if name in CORE:
+            assert svc["restart"] == "unless-stopped", name
+            assert "profiles" not in svc, name
+        elif name != "jev":
+            assert svc["restart"] == "no", name
+            assert svc.get("profiles"), name
+    profile = {n: COMPOSE["services"][n]["profiles"] for n in COMPOSE["services"] if n not in CORE}
+    for n in (1, 2, 3):
+        assert profile[f"node-{n}"] == ["slots"] and profile[f"mind-{n}"] == ["slots"]
+        assert profile[f"body-{n}"] == ["bodies"]
+    assert profile["mc-server"] == ["world"]
+
+
+def test_every_service_rotates_its_logs():
+    for name, svc in COMPOSE["services"].items():
+        logging = svc.get("logging") or {}
+        assert logging.get("driver") == "json-file" and logging["options"]["max-size"], name
 
 
 # --- T-059: Last Order on the Z.ai Coding Plan -------------------------------------------------
@@ -119,12 +135,44 @@ def test_body_healthcheck_probes_the_py4j_gateway_port():
         assert hc["start_period"] == "300s", name  # a cold volume downloads assets first
 
 
-def test_mind_waits_for_a_healthy_body_and_stops_gracefully():
-    for name, body in (("mind-1", "body-1"), ("mind-2", "body-2"), ("mind-3", "body-3")):
-        svc = COMPOSE["services"][name]
-        assert svc["depends_on"][body]["condition"] == "service_healthy", name
+def test_the_mind_and_its_body_are_peers_on_a_private_link():
+    # ADR-050: the mind no longer lives in the body's namespace (it starts and swaps its
+    # body itself); the py4j bridge rides link-N, which only body-N and mind-N share
+    services = COMPOSE["services"]
+    for n in (1, 2, 3):
+        mind, body, node = services[f"mind-{n}"], services[f"body-{n}"], services[f"node-{n}"]
+        assert "network_mode" not in mind and "depends_on" not in mind
+        assert mind["networks"][f"link-{n}"]["ipv4_address"] == f"10.250.{n}.3"
+        assert f"link-{n}" in body["networks"] and f"slot-{n}" not in body["networks"]
+        assert f"link-{n}" not in node["networks"]          # a raw uc bridge never reaches a sandbox
+        assert body["environment"]["MIND_LINK_IP"] == f"10.250.{n}.3"   # the relay admits the mind alone
+        assert mind["environment"]["BODY_HOST"] == f"body-{n}"
+        assert mind["environment"]["CALLBACK_ADDRESS"] == f"10.250.{n}.3"
+        assert node["environment"]["BODY_BASE"].startswith(f"http://mind-{n}:8700")
+        assert node["depends_on"][f"mind-{n}"]["condition"] == "service_healthy"
         # the SIGTERM teardown (~11 s) must fit inside the grace period
-        assert svc["stop_grace_period"] == "20s", name
+        assert mind["stop_grace_period"] == "20s"
+        assert mind["healthcheck"]["test"][0] == "CMD"
+    for name, svc in services.items():
+        nets = svc.get("networks") or []
+        for n in (1, 2, 3):
+            if f"link-{n}" in nets:
+                assert name in (f"body-{n}", f"mind-{n}"), name
+    assert COMPOSE["networks"]["link-1"]["internal"] is True
+
+
+def test_the_executor_container_is_the_only_socket_holder():
+    services = COMPOSE["services"]
+    for name, svc in services.items():
+        vols = [v if isinstance(v, str) else v.get("source", "") for v in svc.get("volumes", [])]
+        holds = any("docker.sock" in v for v in vols)
+        assert holds == (name == "infra"), name
+    infra = services["infra"]
+    assert infra["read_only"] is True and infra["cap_drop"] == ["ALL"]
+    assert infra["networks"] == ["infra-net"] and COMPOSE["networks"]["infra-net"]["internal"] is True
+    repo = [v for v in infra["volumes"] if isinstance(v, dict) and v.get("target") == "${STAND_DAEMON_ROOT:-/stand}"]
+    assert repo and repo[0]["read_only"] is True            # the repo (and its .env) read-only
+    assert "infra-net" in services["hive"]["networks"]
 
 
 def test_slot_restart_dry_run_prints_the_sequence():
@@ -159,7 +207,7 @@ def test_infra_key_reaches_the_hive_alone():
         env = svc.get("environment") or {}
         values = list(env.values()) if isinstance(env, dict) else env
         has = any("HIVE_INFRA_KEY" in v for v in values if isinstance(v, str))
-        assert (name == "hive") == has, f"HIVE_INFRA_KEY leaked into {name}"
+        assert (name in ("hive", "infra")) == has, f"HIVE_INFRA_KEY leaked into {name}"
 
 
 def test_every_slot_points_at_a_configurable_server():

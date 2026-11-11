@@ -117,3 +117,11 @@ class HiveApi(BaseApi):
         self._request(
             "post", "/registry/retire", {"serial": serial, "cause": cause, "will_text": will_text}
         )
+
+    def infra_slot(self, action: str, args: dict[str, str], text: str) -> dict[str, Any]:
+        """Ask the executor for this slot's own mind or body (ADR-050) — the board
+        keeps it to the slot and caps the restarts."""
+        return self._request(
+            "post", "/board/infra/slot",
+            {"text": text, "request": {"action": action, "args": args, "why": text}},
+        ).json()

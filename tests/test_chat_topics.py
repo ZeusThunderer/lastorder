@@ -225,7 +225,7 @@ def test_without_a_filter_nothing_changes(tmp_path) -> None:
 
 
 def test_the_list_is_mounted_read_only_into_the_minds_alone() -> None:
-    mount = "./mind/chat-topics:/etc/lastorder/chat-topics:ro"
+    mount = "${STAND_DAEMON_ROOT:-..}/docker/mind/chat-topics:/etc/lastorder/chat-topics:ro"
     services = COMPOSE["services"]
     for n in (1, 2, 3):
         assert mount in services[f"mind-{n}"]["volumes"], f"mind-{n}"

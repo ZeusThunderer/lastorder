@@ -473,6 +473,7 @@ class AdminAlarm:
         post_alarm: Callable[[str, str], Any] | None = None,
     ):
         self.cfg = cfg
+        self._start_woken = False  # the one `start` wake of this desk process (ADR-050)
         self._layout = layout or HiveLayout(cfg.knowledge)
         # Both harnesses are built up front: pi on the subscription is the primary
         # (T-059), opencode on the gateway is the failover. The failover's `--model`
@@ -741,6 +742,14 @@ class AdminAlarm:
                 "hapi.session",
                 {"session": session_id or "", "resumed": bool(resume and session_id)},
             )
+            if session_id and not self._start_woken:
+                # ADR-050: the desk is the core and the slots are not — after a reboot
+                # nothing but her raises them; one wake per desk process says so
+                self._start_woken = True
+                self._deliver_wake(
+                    [WakeReason("start", "the desk (re)started: slots may be down — check status")],
+                    [],
+                )
             while process.poll() is None:
                 self._sleep(self.cfg.poll_s)
                 try:

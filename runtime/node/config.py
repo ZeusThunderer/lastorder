@@ -84,6 +84,10 @@ class NodeConfig:
     # a will session whose file stopped growing this long gave up (T-071): end it,
     # her draft or the template speaks — instead of the whole will_timeout_s
     will_quiet_s: float = 180.0
+    # the runner's mind watch (ADR-050): a mind silent this long is asked back with
+    # `slot_restart`; the next ask waits a mind's boot
+    mind_dead_s: float = 90.0
+    mind_boot_s: float = 300.0
 
     @classmethod
     def from_env(cls) -> "NodeConfig":
@@ -127,7 +131,7 @@ class NodeConfig:
         zcode_model = env("ZCODE_MODEL", default="GLM-5.3-Flash") or "GLM-5.3-Flash"
         return cls(
             slot=slot,
-            body_base=env("BODY_BASE", default="http://body-1:8700") or "http://body-1:8700",
+            body_base=env("BODY_BASE", default="http://mind-1:8700") or "http://mind-1:8700",
             hive_url=env("HIVE_URL", default="http://hive:8000") or "http://hive:8000",
             workplaces=Path(env("WORKPLACES_DIR", default="workplaces") or "workplaces"),
             template_dir=Path(env("TEMPLATE_DIR", default=str(CHARACTER_DIR)) or str(CHARACTER_DIR)),
@@ -171,4 +175,6 @@ class NodeConfig:
             sister_gid=gid if uid is not None else None,
             dev_open=(env("NODE_DEV_OPEN", default="") or "") == "1",
             will_quiet_s=_float("WILL_QUIET_S", 180.0),
+            mind_dead_s=_float("MIND_DEAD_S", 90.0),
+            mind_boot_s=_float("MIND_BOOT_S", 300.0),
         )

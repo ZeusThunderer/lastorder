@@ -600,6 +600,17 @@ class HiveClient:
             payload["serial"] = serial
         self._call("post", "/board/alarms", payload, buffered=True)
 
+    def infra_slot(self, action: str, args: Mapping[str, str], text: str, why: str = "") -> dict:
+        """Ask the executor for this slot's own body or mind (ADR-050) as the slot's
+        runner (X-Runner-Key). Direct: a stale queued restart is worse than none."""
+        payload = {
+            "text": text,
+            "request": {"action": action, "args": dict(args), "why": why or text},
+        }
+        return self._call(
+            "post", "/board/infra/slot", payload, direct=True, decode=lambda r: r.json()
+        )
+
     def board_alarm_admin(
         self, alarm_type: str, text: str, *, slot: str = "", serial: int | None = None
     ) -> None:

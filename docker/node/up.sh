@@ -31,15 +31,30 @@ lift() { # lift <var> [file key]: env wins, then the root .env
 lift ZCODE_API_KEY ZAI_API_KEY
 # the operator's game name (T-051) rides the same lift: a stand config value, not a key
 lift OPERATOR_MC_NAME
+# The repo as the Docker daemon sees it (ADR-050): compose's bind sources ride it, so
+# the host CLI and compose inside the infra container hand the daemon the same paths
+# (and never recreate each other's containers). Git Bash on Docker Desktop: /c/x ->
+# the VM's host mount /run/desktop/mnt/host/c/x; Linux: the path itself.
+if [ -z "${STAND_DAEMON_ROOT:-}" ]; then
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      p="$(cd "$ROOT" && pwd)"
+      STAND_DAEMON_ROOT="/run/desktop/mnt/host/$(printf '%s' "${p:1:1}" | tr 'A-Z' 'a-z')${p:2}" ;;
+    *) STAND_DAEMON_ROOT="$ROOT" ;;
+  esac
+fi
+export STAND_DAEMON_ROOT
+mkdir -p "$ROOT/.stand" 2>/dev/null || true   # the infra container's writable corner
+
 # A slot on another server: an address, not a secret (all slots, T-057). Last Order's
-# own moves (infra `slot_server`, T-072) live in $ROOT/.stand-servers.env, written by
-# the host executor; they win over .env so a later restart keeps her choice. Env wins
+# own moves (infra `slot_server`, T-072) live in $ROOT/.stand/servers.env, written by
+# the executor; they win over .env so a later restart keeps her choice. Env wins
 # over both. A slot sent home (mc-server:25565) leaves the file.
-if [ -f "$ROOT/.stand-servers.env" ]; then
+if [ -f "$ROOT/.stand/servers.env" ]; then
   for n in 1 2 3; do
     eval "cur=\"\${MC_SERVER_${n}:-}\""
     if [ -z "$cur" ]; then
-      val="$(sed -n "s/^MC_SERVER_${n}=//p" "$ROOT/.stand-servers.env" | head -1 | tr -d '\r')"
+      val="$(sed -n "s/^MC_SERVER_${n}=//p" "$ROOT/.stand/servers.env" | head -1 | tr -d '\r')"
       [ -n "$val" ] && export "MC_SERVER_${n}=$val"
     fi
   done
@@ -124,4 +139,12 @@ if [ -z "${ZCODE_API_KEY:-}" ]; then
   echo "up.sh: no ZCODE_API_KEY in env or $ROOT/.env: node-N starts, the zcode harness waits" >&2
 fi
 
-exec docker compose -f "$HERE/docker/compose.yml" up -d "$@"
+COMPOSE=(docker compose -f "$HERE/docker/compose.yml")
+if [ $# -gt 0 ]; then
+  exec "${COMPOSE[@]}" up -d "$@"   # services as asked (the executor, slot_restart.sh)
+fi
+# The stand's bring-up (ADR-050): the core up — the only tier that autostarts — and
+# every slot, body and the home world CREATED but stopped, keys baked in; the executor
+# starts them when Last Order, the operator or a mind asks.
+"${COMPOSE[@]}" up -d
+exec "${COMPOSE[@]}" --profile slots --profile bodies --profile world create

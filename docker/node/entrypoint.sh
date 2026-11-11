@@ -73,7 +73,7 @@ chown -R "${SISTER_UID}:${SISTER_GID}" "$SISTER_HOME"
 HERMES_KEY="${ZAI_API_KEY:-}" \
 HERMES_MODEL="${HERMES_MODEL:-${ZCODE_MODEL:-GLM-5.3-Flash}}" \
 HERMES_NODE_MCP_KEY="$(cat "$SECRET_DIR/node_mcp_key" 2>/dev/null || printf '%s' "${HIVE_NODE_KEY:-}")" \
-BODY_BASE="${BODY_BASE:-http://body-1:8700}" HIVE_URL="${HIVE_URL:-http://hive:8000}" \
+BODY_BASE="${BODY_BASE:-http://mind-1:8700}" HIVE_URL="${HIVE_URL:-http://hive:8000}" \
 SISTER_UID="$SISTER_UID" SISTER_GID="$SISTER_GID" \
   /app/.venv/bin/python -c '
 import os

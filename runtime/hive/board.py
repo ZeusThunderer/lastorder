@@ -41,7 +41,15 @@ from pathlib import Path
 from typing import Any
 
 from runtime.config import env
-from runtime.hive.infra import RESULT_MAX, InfraError, check as check_infra, is_infra
+from runtime.hive.infra import (
+    RESULT_MAX,
+    RUNNER_ACTIONS,
+    RUNNER_RESTARTS_MAX,
+    RUNNER_RESTARTS_WINDOW_S,
+    InfraError,
+    check as check_infra,
+    is_infra,
+)
 from runtime.hive.lifecycle import HiveLog, Lifecycle
 from runtime.knowledge.slice import parse_utc
 from runtime.lastorder.naming import node_name, preset as naming_preset
@@ -113,6 +121,10 @@ _POST_RIGHTS = {
     ("operator", "task", "net"),
     ("operator", "task", "last-order"),
     ("operator", "message", "net"),
+    # infra requests only (ADR-050), checked in _check_request_payload: the operator's
+    # board buttons, and a slot's own environment asking for its body or its mind
+    ("operator", "request", "operator"),
+    ("runner", "request", "operator"),
     ("last-order", "task", "node"),
     ("last-order", "task", "net"),
     ("last-order", "request", "operator"),
@@ -172,6 +184,13 @@ def actor_serial(actor: str) -> int | None:
         return int(actor)
     except ValueError:
         return None
+
+
+def _slot_number(actor: str) -> str:
+    """`runner:LastOrder02` -> "2" (the infra slot numbering); "" when there is none."""
+    name = actor.split(":", 1)[1] if ":" in actor else actor
+    digits = "".join(ch for ch in name[-2:] if ch.isdigit())
+    return str(int(digits)) if digits else ""
 
 
 def _target_class(to: str) -> str | None:
@@ -400,6 +419,30 @@ class Board:
 
     # --- caps (section 6) -----------------------------------------------------------------
 
+    def _cap_runner_restarts(self, cur: sqlite3.Cursor, actor: str, action: Any) -> None:
+        """A slot's own body_up / body_restart / slot_restart: at most
+        RUNNER_RESTARTS_MAX in the window (ADR-050) — a body that dies at boot
+        must not loop the executor; beyond it the slot raises `stuck` instead."""
+        if action not in ("body_up", "body_restart", "slot_restart"):
+            return
+        cutoff = (self._clock() - timedelta(seconds=RUNNER_RESTARTS_WINDOW_S)).isoformat()
+        rows = cur.execute(
+            "SELECT request_json FROM board_entry WHERE from_=? AND kind='request' AND created_at>=?",
+            (actor, cutoff),
+        ).fetchall()
+        used = 0
+        for (raw,) in rows:
+            try:
+                if json.loads(raw or "{}").get("action") in ("body_up", "body_restart", "slot_restart"):
+                    used += 1
+            except ValueError:
+                continue
+        if used >= RUNNER_RESTARTS_MAX:
+            raise BoardError(
+                429, "rate_limited",
+                f"{actor}: {used} body/mind restarts in {RUNNER_RESTARTS_WINDOW_S // 60} min — raise `stuck` instead",
+            )
+
     def _cap_write(self, cur: sqlite3.Cursor, actor: str) -> None:
         """The mutation cap of an agent (posts, replies, moves, claims).
 
@@ -514,6 +557,8 @@ class Board:
             self._cap_write(cur, actor)
             if kind == "message" and to == OPERATOR:
                 self._cap_operator_message(cur, actor)
+            if role == "runner" and request_json is not None:
+                self._cap_runner_restarts(cur, actor, json.loads(request_json).get("action"))
             cur.execute(
                 "INSERT INTO board_entry (kind, from_, to_, text, status, request_json,"
                 " grant_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -556,12 +601,24 @@ class Board:
         self._refuse_raw_ids(why, "request.why")
         for key, value in args.items():
             self._refuse_raw_ids(value, f"request.args[{key!r}]")
-        # the closed infra set (T-057, ADR-044): Last Order alone, validated here and
-        # once more in the executor — and answered by the executor, never on the board
+        # the closed infra set (T-057, ADR-044, ADR-050): Last Order and the operator
+        # for the whole set, a slot's environment for its own body and mind; validated
+        # here and once more in the executor — and answered by the executor alone
         infra = is_infra(action)
+        role = actor_role(actor)
+        if role in (OPERATOR, "runner") and not infra:
+            raise BoardError(403, "forbidden", f"{actor} posts infra requests only")
         if infra:
-            if actor != LAST_ORDER:
-                raise BoardError(403, "forbidden", "infra requests belong to Last Order alone")
+            if role == "runner":
+                if action not in RUNNER_ACTIONS:
+                    raise BoardError(
+                        403, "forbidden",
+                        f"a slot asks only {sorted(RUNNER_ACTIONS)} for itself, not {action}",
+                    )
+                if _slot_number(actor) != str(args.get("slot", "")).strip():
+                    raise BoardError(403, "forbidden", "a slot asks for its own body and mind alone")
+            elif actor not in (LAST_ORDER, OPERATOR):
+                raise BoardError(403, "forbidden", "infra requests belong to Last Order and the operator")
             if request.get("allowed") not in (None, []):
                 raise BoardError(
                     422, "validation",

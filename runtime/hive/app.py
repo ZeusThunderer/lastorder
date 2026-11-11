@@ -817,6 +817,22 @@ def create_app(
             slot=str(body.get("slot", "") or ""), serial=serial,
         )
 
+    @app.post("/board/infra/slot")
+    def board_infra_slot(request: Request, body: dict) -> dict:
+        """A slot's own environment asks the executor for its body or its mind
+        (ADR-050): the mind for `body_up`/`body_down`/`body_restart`, the runner for
+        `slot_restart` — X-Runner-Key names the slot, the board keeps it to its own
+        number and caps the restarts. The entry is on the board like any infra one."""
+        _no_from_in(body)
+        runner_key = request.headers.get("x-runner-key", "").strip()
+        slot = runner_keys.get(runner_key) if (runner_key and runner_keys) else None
+        if slot is None:
+            raise ApiError(401, "runner_key", "X-Runner-Key does not open any slot")
+        return board.post(
+            f"runner:{slot}", kind="request", to=OPERATOR,
+            text=body.get("text"), request=body.get("request"),
+        )
+
     @app.get("/board/feed")
     def board_feed(request: Request, since: int | None = None) -> dict:
         who = _board_actor(request)

@@ -125,13 +125,56 @@ def test_a_sister_cannot_create_infra_requests(stack: Stack, sister: int) -> Non
     assert raised.value.status == 403
 
 
-def test_the_operator_cannot_create_infra_requests(stack: Stack) -> None:
-    with pytest.raises(BoardError) as raised:  # the matrix: no operator requests at all
+def test_the_operator_posts_infra_requests_and_nothing_else(stack: Stack) -> None:
+    # ADR-050: the board page's slot buttons are operator infra requests
+    entry = stack.board.post(
+        OPERATOR, kind="request", to=OPERATOR, text="up slot 2",
+        request={"action": "slot_up", "args": {"slot": "2"}, "why": "the operator's button"},
+    )
+    assert entry["status"] == "open"
+    with pytest.raises(BoardError) as raised:  # an ordinary request has nobody to answer it
         stack.board.post(
-            OPERATOR, kind="request", to=OPERATOR, text="infra",
-            request={"action": "mc_restart", "args": {}, "why": ""},
+            OPERATOR, kind="request", to=OPERATOR, text="plain",
+            request={"action": "ask_something", "args": {}, "why": ""},
         )
     assert raised.value.status == 403
+
+
+def test_a_slot_asks_for_its_own_body_and_mind_only(stack: Stack) -> None:
+    def ask(actor: str, action: str, args: dict) -> dict:
+        return stack.board.post(
+            actor, kind="request", to=OPERATOR, text=f"{actor}: {action}",
+            request={"action": action, "args": args, "why": "the body does not answer"},
+        )
+
+    assert ask("runner:LastOrder02", "body_up", {"slot": "2", "kind": "minecraft"})["status"] == "open"
+    for actor, action, args in (
+        ("runner:LastOrder02", "body_up", {"slot": "1"}),       # another slot's body
+        ("runner:LastOrder02", "slot_up", {"slot": "2"}),       # not a slot's own verb
+        ("runner:LastOrder02", "mc_restart", {}),
+    ):
+        with pytest.raises(BoardError) as raised:
+            ask(actor, action, args)
+        assert raised.value.status == 403, (actor, action)
+    with pytest.raises(BoardError) as raised:
+        ask("runner:LastOrder02", "body_up", {"slot": "2", "kind": "chess"})
+    assert raised.value.status == 422   # no such body kind
+
+
+def test_a_slot_s_restarts_are_capped(stack: Stack) -> None:
+    from runtime.hive.infra import RUNNER_RESTARTS_MAX
+
+    def ask() -> dict:
+        return stack.board.post(
+            "runner:LastOrder03", kind="request", to=OPERATOR, text="restart",
+            request={"action": "body_restart", "args": {"slot": "3"}, "why": "silent"},
+        )
+
+    for _ in range(RUNNER_RESTARTS_MAX):
+        ask()
+    with pytest.raises(BoardError) as raised:
+        ask()
+    assert raised.value.status == 429
 
 
 @pytest.mark.parametrize(
@@ -428,22 +471,45 @@ def request_of(entry_id, action, args):
 
 def test_the_command_surface_is_the_closed_set() -> None:
     assert bridge.commands_for("mc_restart", {})[0].argv[-2:] == ["restart", "mc-server"]
-    assert bridge.commands_for("status", {})[0].argv[-1] == "ps"
+    status = bridge.commands_for("status", {})[0].argv
+    assert "ps" in status and ["--profile", "*"] == status[status.index("--profile"):status.index("--profile") + 2]
     logs = bridge.commands_for("logs", {"service": "mind-2"})[0].argv
     assert logs[-3:] == ["--tail", "50", "mind-2"]
-    assert bridge.commands_for("slot_restart", {"slot": "2"})[0].argv[-1] == "2"
-    down = bridge.commands_for("slot_down", {"slot": "3"})[0].argv[-3:]
-    assert down == ["mind-3", "node-3", "body-3"]
+    # ADR-050: a slot is the sister + her mind; the body is the mind's own
+    restart = bridge.commands_for("slot_restart", {"slot": "2"})
+    assert len(restart) == 1 and restart[0].argv[-3:] == ["--force-recreate", "--no-deps", "mind-2"]
+    down = bridge.commands_for("slot_down", {"slot": "3"})
+    assert down[0].argv[-4:] == ["stop", "node-3", "mind-3", "body-3"]   # sister, mind, body
+    assert down[1].fn is not None                                         # then the world check
     up = bridge.commands_for("slot_up", {"slot": "1"})
-    assert up[0].argv[-2:] == ["--no-deps", "body-1"]
-    assert up[1].argv[-2:] == ["-q", "body-1"] and up[1].capture == "cid"
+    assert up[0].argv[-2:] == ["--no-deps", "mind-1"]
+    assert up[1].argv[-2:] == ["-q", "mind-1"] and up[1].capture == "cid"
     assert up[2].argv[1].endswith("wait_for.sh") and "{cid}" in up[2].argv[-1]
-    server = bridge.commands_for("slot_server", {"slot": "1", "server": "mc.example:25565"})
-    assert server[0].argv[-2:] == ["stop", "mind-1"]
-    assert server[1].env == {"MC_SERVER_1": "mc.example:25565"}
-    assert server[1].argv[-2:] == ["--no-deps", "body-1"]
+    assert up[3].argv[-2:] == ["--no-deps", "node-1"]
+    assert not any("body-1" in step.argv for step in up)   # the mind raises its body itself
     with pytest.raises(bridge.InfraError):
         bridge.commands_for("shell", {"cmd": "rm -rf /"})  # there is no such verb
+
+
+def test_a_body_at_home_raises_the_world_first_and_a_foreign_one_does_not(tmp_path, monkeypatch) -> None:
+    servers = tmp_path / "servers.env"
+    monkeypatch.setattr(bridge, "SERVERS_FILE", servers)
+    monkeypatch.setattr(bridge, "env_file_value", lambda name, path=None: "")
+    home = bridge.commands_for("body_up", {"slot": "2", "kind": "minecraft"})
+    assert home[0].argv[-2:] == ["--no-deps", "mc-server"] and home[-1].argv[-2:] == ["--no-deps", "body-2"]
+    servers.write_text("MC_SERVER_2=raid.example:25565\n", encoding="utf-8")
+    away = bridge.commands_for("body_restart", {"slot": "2"})
+    assert [s.argv[-3:] for s in away] == [["--force-recreate", "--no-deps", "body-2"]]
+
+
+def test_the_world_stops_only_when_no_body_is_left() -> None:
+    check = bridge._world_gc(["docker", "compose", "--profile", "*"])
+    runner, calls = fake_runner([{"out": "hive\nmc-server\nbody-1\n"}])
+    ok, text = check(runner)
+    assert ok and "stays" in text and len(calls) == 1
+    runner, calls = fake_runner([{"out": "hive\nmc-server\nmind-2\n"}, {"out": ""}])
+    ok, text = check(runner)
+    assert ok and "stopped" in text and calls[-1][-2:] == ["stop", "mc-server"]
 
 
 def test_run_steps_wires_the_captured_container_id() -> None:
@@ -548,22 +614,23 @@ def test_main_without_a_key_is_a_usage_error(monkeypatch) -> None:
 def test_bring_ups_ride_up_sh_so_the_slot_keys_arrive() -> None:
     # a bare `compose up` never sees the root .env: the mind has no runner key and
     # refuses to start (fail-closed) — every bring-up goes through docker/node/up.sh
-    for action, args in (("slot_up", {"slot": "1"}), ("slot_server", {"slot": "1", "server": "mc.example:25565"})):
+    for action, args in (("slot_up", {"slot": "1"}), ("slot_server", {"slot": "1", "server": "mc.example:25565"}),
+                         ("body_up", {"slot": "1"}), ("body_restart", {"slot": "1"})):
         ups = [s.argv for s in bridge.commands_for(action, args) if "up.sh" in " ".join(s.argv)]
         assert ups, action
         assert not any(a[:3] == ["docker", "compose", "-f"] and "up" in a for a in
                        (s.argv for s in bridge.commands_for(action, args))), action
+    # a move recreates the body alone (ADR-050): the sister and her mind live through it
     server = bridge.commands_for("slot_server", {"slot": "2", "server": "mc.example:25565"})
-    assert server[1].argv[-3:] == ["--force-recreate", "--no-deps", "body-2"]
-    assert server[1].env["MC_SERVER_2"] == "mc.example:25565"
-    assert server[-1].argv[-2:] == ["--no-deps", "mind-2"]   # node-2 is never touched
-    assert not any("node-2" in s.argv for s in server)
+    recreate = [s for s in server if s.argv[-3:] == ["--force-recreate", "--no-deps", "body-2"]]
+    assert len(recreate) == 1 and recreate[0].env["MC_SERVER_2"] == "mc.example:25565"
+    assert not any("node-2" in s.argv or "mind-2" in s.argv for s in server)
     project = bridge.commands_for("slot_server", {"slot": "2", "server": "h"}, project="t072")
-    assert project[1].env["COMPOSE_PROJECT_NAME"] == "t072"
+    assert all(s.env.get("COMPOSE_PROJECT_NAME") == "t072" for s in project if "up.sh" in " ".join(s.argv))
 
 
 def test_a_move_is_recorded_and_home_clears_it(tmp_path: Path) -> None:
-    f = tmp_path / ".stand-servers.env"
+    f = tmp_path / ".stand" / "servers.env"   # the directory is created on the first move
     bridge.record_server("1", "raid.example:25565", f)
     bridge.record_server("2", "other.example", f)
     bridge.record_server("1", "raid2.example:25570", f)
@@ -585,7 +652,7 @@ def test_the_key_comes_from_the_root_env_file(tmp_path: Path) -> None:
 
 def test_up_sh_reads_the_moves_before_env_and_lifts_the_switches() -> None:
     text = (Path(__file__).resolve().parent.parent / "docker" / "node" / "up.sh").read_text(encoding="utf-8")
-    moves = text.index(".stand-servers.env")
+    moves = text.index(".stand/servers.env")
     assert moves < text.index("lift MC_SERVER_1")
     for name in ("BODY_CAMERA_$n", "MC_SKIN_COMMAND_$n", "CHAT_TOPICS_PATH"):
         assert f'lift "{name}"' in text or f"lift {name}" in text, name

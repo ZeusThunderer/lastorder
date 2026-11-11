@@ -29,8 +29,10 @@ def test_skinrestorer_mod_is_pinned_next_to_fabric_api():
 
 def test_mc_server_mounts_the_operators_skin_and_mod_config_read_only():
     vols = COMPOSE["services"]["mc-server"]["volumes"]
-    assert "../agent/last_order/skin/sister.png:/skins/sister.png:ro" in vols
-    assert "./mc-server/skinrestorer/config.json:/data/config/skinrestorer/config.json:ro" in vols
+    # bind sources ride the daemon's view of the repo (ADR-050), `..` without up.sh
+    assert "${STAND_DAEMON_ROOT:-..}/agent/last_order/skin/sister.png:/skins/sister.png:ro" in vols
+    assert ("${STAND_DAEMON_ROOT:-..}/docker/mc-server/skinrestorer/config.json"
+            ":/data/config/skinrestorer/config.json:ro") in vols
 
 
 def test_no_other_service_sees_the_skin_or_the_mod_config():

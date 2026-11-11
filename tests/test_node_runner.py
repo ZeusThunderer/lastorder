@@ -2028,3 +2028,25 @@ def test_a_runner_restart_reattaches_an_unarmed_life_instead_of_a_birth(tmp_path
     assert any(type == "life.reattached" and payload.get("rearmed") for type, payload in rig.logs)
     assert not any(type == "life.birth" and payload.get("serial") != state.serial for type, payload in rig.logs)
     assert rig.hive.retires and rig.hive.retires[0][0] == state.serial   # her own death path
+
+
+# --- ADR-050: the runner looks after its mind (slots carry no restart policy) ------------
+
+
+def test_a_silent_mind_is_asked_back_once_per_boot(tmp_path: Path) -> None:
+    rig = Rig(tmp_path, mind_dead_s=5.0, mind_boot_s=300.0)
+    now = [100.0]
+    rig.runner._monotonic = lambda: now[0]
+    asks: list = []
+    rig.runner._hive.infra_slot = lambda action, args, text: asks.append((action, args)) or {"id": 1}
+    rig.runner._mind_unreachable()          # the first miss starts the clock
+    now[0] += 3
+    rig.runner._mind_unreachable()          # 3 s: a mind restarting, not a dead one
+    assert asks == []
+    now[0] += 3
+    rig.runner._mind_unreachable()
+    assert asks == [("slot_restart", {"slot": "1"})]
+    now[0] += 60
+    rig.runner._mind_unreachable()          # within its boot: no second ask
+    assert len(asks) == 1
+    assert any(type == "mind.restart_asked" for type, _ in rig.logs)

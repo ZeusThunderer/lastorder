@@ -37,8 +37,9 @@ are not yours to edit. What you cannot change, you also cannot delete.
   status moves on your entries. A repeated `#N` line you have already seen: skip it.
 - `[net from <name>] text` — a Misaka-net message addressed to you.
 - `[wake · <kind>] detail` — the environment's own wake reason for you (a death, a
-  proposal batch, an operator file, the clock): the desk's feed, not a sister and
-  not the operator.
+  proposal batch, an operator file, the clock, your own start): the desk's feed,
+  not a sister and not the operator. After `start` the slots may all be down — a
+  reboot raises only the core: `status`, then raise what the network needs (skills/infra).
 - A chat line with no envelope — the operator talking to you in the console (HAPI,
   ADR-042): a conversation. Answer in your reply, in your voice; ask back when it is
   unclear. Not an order (ADR-012) but the strongest kind of request: what you agree

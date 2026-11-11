@@ -524,6 +524,44 @@ function wireInfraSwitch() {
   document.querySelector("#infra-off-form .cancel-inline").addEventListener("click", () => {
     document.getElementById("infra-off-form").hidden = true;
   });
+  wireSlotButtons();
+}
+
+// --- the operator's slot buttons (ADR-050) -----------------------------------------------
+// A slot is a sister and her mind; the mind raises its own body. Each button posts an
+// operator infra request — on the board like Last Order's, run by the executor.
+
+const SLOT_ACTIONS = [
+  { action: "slot_up", label: "▲", title: "поднять слот: ум, затем сестра" },
+  { action: "slot_restart", label: "↻", title: "перезапустить ум (сестра живёт дальше)" },
+  { action: "slot_down", label: "▼", title: "снять слот: сестра, ум и тело", confirm: true },
+];
+
+function wireSlotButtons() {
+  const holder = document.getElementById("infra-slots");
+  if (!holder || holder.childElementCount) return;
+  for (const slot of ["1", "2", "3"]) {
+    const group = document.createElement("span");
+    group.className = "infra-slot";
+    group.append("слот " + slot + " ");
+    for (const spec of SLOT_ACTIONS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = spec.label;
+      button.title = spec.title;
+      button.addEventListener("click", () => {
+        if (spec.confirm && !window.confirm(
+          "Снять слот " + slot + "? Живая сестра умрёт без завещания.")) return;
+        doAction("/board/entries", {
+          kind: "request", to: "operator",
+          text: "оператор: " + spec.action + " слота " + slot,
+          request: { action: spec.action, args: { slot }, why: "кнопка оператора на доске" },
+        });
+      });
+      group.append(button);
+    }
+    holder.append(group);
+  }
 }
 
 // --- the top bar: filter and the new entry form -----------------------------------------

@@ -11,6 +11,7 @@ is_service_line, imported from runtime/perception/chat.py (T-009). Sources: the 
 
 from __future__ import annotations
 
+import os
 import socket
 import time
 from collections import deque
@@ -130,11 +131,37 @@ def _callback_port_free(port: int, address: str = DEFAULT_ADDRESS) -> bool:
         probe.close()
 
 
+def bridge_addresses(env: Mapping[str, str] | None = None) -> tuple[str, int, str, int]:
+    """Where the mind finds uc and where uc finds the mind (ADR-050).
+
+    The mind and its body are peer containers on the slot's private link: uc's
+    gateway binds localhost inside the body, so the body relays BODY_HOST:BODY_PORT
+    to it, and relays uc's localhost callback dial to this mind's CALLBACK_ADDRESS.
+    The defaults are the old one-namespace layout (everything on 127.0.0.1)."""
+    env = os.environ if env is None else env
+    return (
+        env.get("BODY_HOST") or DEFAULT_ADDRESS,
+        int(env.get("BODY_PORT") or GATEWAY_PORT),
+        env.get("CALLBACK_ADDRESS") or DEFAULT_ADDRESS,
+        int(env.get("CALLBACK_PORT") or DEFAULT_PYTHON_PROXY_PORT),
+    )
+
+
 def _default_gateway_factory(callback: BodyCallback) -> Callable[[], JavaGateway]:
+    body_host, body_port, cb_address, cb_port = bridge_addresses()
+
     def connect() -> JavaGateway:
         gw = JavaGateway(
-            gateway_parameters=GatewayParameters(auto_convert=True),
-            callback_server_parameters=CallbackServerParameters(),
+            gateway_parameters=GatewayParameters(
+                address=body_host, port=body_port, auto_convert=True
+            ),
+            # eager_load=False: explicit CallbackServerParameters default to
+            # eager_load=True, and py4j then starts the callback server INSIDE this
+            # constructor — before the probe below, on py4j's own failure path (the
+            # one that SHUTDOWNs uc's gateway). Found in ADR-050's rework.
+            callback_server_parameters=CallbackServerParameters(
+                address=cb_address, port=cb_port, eager_load=False
+            ),
             python_server_entry_point=callback,
             start_callback_server=False,  # started below, on our own failure path
         )
@@ -143,10 +170,10 @@ def _default_gateway_factory(callback: BodyCallback) -> Callable[[], JavaGateway
         # command to uc's server — the bridge then dies until a whole client
         # restart (CLAUDE.md trap) — and its cleanup crashes on the callback
         # thread being None. A busy port fails HERE, quietly, instead.
-        if not _callback_port_free(DEFAULT_PYTHON_PROXY_PORT):
+        if not _callback_port_free(cb_port, cb_address):
             gw.close()  # no callback server exists: closes the client sockets only
             raise Py4JNetworkError(
-                f"callback port {DEFAULT_PYTHON_PROXY_PORT} is busy (a live listener holds it)"
+                f"callback port {cb_port} is busy (a live listener holds it)"
             )
         try:
             gw.start_callback_server()
@@ -376,6 +403,9 @@ class Py4jBody:
         if gateway_factory is None:
             gateway_factory = _default_gateway_factory(self.callback)
         self._connect = gateway_factory
+        # when the last uc call came back (clock()); None until the first one — the
+        # mind's body supervisor reads it to tell "not up yet" from "gone" (ADR-050)
+        self.last_ok: float | None = None
 
     # -- connection ----------------------------------------------------------------
 
@@ -443,7 +473,9 @@ class Py4jBody:
         attempt = 0
         while True:
             try:
-                return fn(self._ensure())
+                result = fn(self._ensure())
+                self.last_ok = self._clock()  # the mind's body watch (ADR-050, bodyctl)
+                return result
             except Py4JNetworkError as exc:
                 self._drop()
                 if attempt >= self._retries:

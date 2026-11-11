@@ -30,14 +30,42 @@ SERVICE_RE = re.compile(r"^[a-z][a-z0-9-]{0,29}$")
 
 # action -> (required arg keys, optional arg keys); values are strings on the board
 INFRA_ACTIONS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    # the slot is the sister: node-N + mind-N (ADR-050); the body is the mind's own
     "slot_up": (("slot",), ()),
     "slot_down": (("slot",), ()),
-    "slot_restart": (("slot",), ()),
+    "slot_restart": (("slot",), ()),   # the mind restarts, the sister lives on
     "slot_server": (("slot", "server"), ()),
     "mc_restart": ((), ()),
     "status": ((), ()),
     "logs": (("service",), ("lines",)),
+    # the body verbs (ADR-050): asked by the slot's mind for its own body, or by the
+    # operator / Last Order; `kind` picks the body of a game from BODY_KINDS
+    "body_up": (("slot",), ("kind",)),
+    "body_down": (("slot",), ()),
+    "body_restart": (("slot",), ()),
 }
+
+# The bodies a mind may wear (ADR-050): kind -> the compose service of slot N. One game
+# today; another game is one more line here, its service in compose and its adapter
+# in the mind (runtime/mind/bodyctl.py BODY_ADAPTERS) — slots do not change.
+BODY_KINDS: dict[str, str] = {"minecraft": "body-{slot}"}
+DEFAULT_BODY_KIND = "minecraft"
+
+# Who may ask for what. Last Order and the operator rule the whole set; a slot's
+# environment (`runner:<slot>` — the mind and the runner hold the slot's runner key)
+# may only look after its own slot: its body, and its mind's restart.
+RUNNER_ACTIONS = frozenset({"body_up", "body_down", "body_restart", "slot_restart"})
+# body_up + body_restart + slot_restart asked by one slot within the window: a body
+# that dies at boot must not loop the executor (beyond — a `stuck` alarm instead)
+RUNNER_RESTARTS_MAX = 3
+RUNNER_RESTARTS_WINDOW_S = 600
+
+
+def body_service(slot: int | str, kind: str = DEFAULT_BODY_KIND) -> str:
+    """The compose service of slot N's body of `kind`."""
+    if kind not in BODY_KINDS:
+        raise InfraError(f"kind must be one of {sorted(BODY_KINDS)}, got {kind!r}")
+    return BODY_KINDS[kind].format(slot=int(slot))
 
 
 class InfraError(ValueError):
@@ -96,6 +124,9 @@ def check(action: Any, args: Any) -> dict[str, str]:
     if "service" in cleaned:
         if SERVICE_RE.match(cleaned["service"]) is None:
             raise InfraError("service must be a compose service name (mc-server, body-1, …)")
+    if "kind" in cleaned:
+        if cleaned["kind"] not in BODY_KINDS:
+            raise InfraError(f"kind must be one of {sorted(BODY_KINDS)}, got {cleaned['kind']!r}")
     if "lines" in cleaned:
         try:
             lines = int(cleaned["lines"])
@@ -109,13 +140,19 @@ def check(action: Any, args: Any) -> dict[str, str]:
 
 __all__ = [
     "ADDRESS_RE",
+    "BODY_KINDS",
+    "DEFAULT_BODY_KIND",
     "INFRA_ACTIONS",
+    "RUNNER_ACTIONS",
+    "RUNNER_RESTARTS_MAX",
+    "RUNNER_RESTARTS_WINDOW_S",
     "LINES_DEFAULT",
     "LINES_MAX",
     "RESULT_MAX",
     "SERVICE_RE",
     "SLOTS",
     "InfraError",
+    "body_service",
     "check",
     "is_infra",
 ]

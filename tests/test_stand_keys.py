@@ -236,7 +236,7 @@ def test_node_up_sh_passes_after_init(tmp_path):
     stub_dir.mkdir()
     docker_stub = stub_dir / "docker"
     args_file = stand / "docker.args"
-    docker_stub.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$DOCKER_ARGS_FILE\"\n",
+    docker_stub.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >> \"$DOCKER_ARGS_FILE\"\n",
                            encoding="utf-8", newline="\n")
     docker_stub.chmod(0o755)
 
@@ -254,6 +254,8 @@ def test_node_up_sh_passes_after_init(tmp_path):
     assert "refusing" not in combined
     args = args_file.read_text(encoding="utf-8").splitlines()
     assert "up" in args and "-d" in args, args  # it got as far as `docker compose up -d`
+    # ADR-050: the core up, then every slot, body and the world created but stopped
+    assert "create" in args and args.count("--profile") == 3, args
     assert not any("=" in a for a in args), args  # no key=value ever rides the argv
 
 

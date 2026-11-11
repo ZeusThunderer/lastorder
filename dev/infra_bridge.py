@@ -40,27 +40,49 @@ from typing import Any, Callable
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from runtime.hive.infra import (  # noqa: E402  (dev/ is not a package; same trick as tests)
+    BODY_KINDS,
+    DEFAULT_BODY_KIND,
+    INFRA_ACTIONS,
     LINES_DEFAULT,
     RESULT_MAX,
     InfraError,
+    body_service,
     check as check_infra,
 )
 
 STEP_TIMEOUT_S = 600  # one command; slot_restart waits for health itself (420 s inside)
 GRACE_S = 420  # the body healthcheck budget, same number as dev/slot_restart.sh
 # Last Order's server moves (T-072): docker/node/up.sh reads this file before .env, so
-# a moved slot stays moved through any later restart; a slot sent home leaves it
-SERVERS_FILE = ROOT / ".stand-servers.env"
+# a moved slot stays moved through any later restart; a slot sent home leaves it.
+# In .stand/ — the one repo directory the infra container may write (ADR-050).
+SERVERS_FILE = ROOT / ".stand" / "servers.env"
 HOME_SERVER = "mc-server:25565"
+# the poll loop touches it every round; the infra container's healthcheck reads its age
+HEARTBEAT_FILE = Path(os.environ.get("INFRA_HEARTBEAT", "") or (ROOT / ".stand" / "heartbeat"))
 
 
 @dataclass
 class Step:
-    """One command of an action: a plain argv list, never a shell string."""
+    """One command of an action: a plain argv list, never a shell string — or `fn`,
+    a check in code that decides by itself (the world's on-demand stop)."""
 
     argv: list[str]
     env: dict[str, str] = field(default_factory=dict)
     capture: str = ""  # stdout's last line lands in this name for later {name} slots
+    fn: Callable[..., tuple[bool, str]] | None = None
+
+
+def server_of(slot: str, *, servers: Path | None = None, env_file: Path | None = None) -> str:
+    """Where slot N's body plays: Last Order's recorded move, else MC_SERVER_N of the
+    root .env, else the home world — the same order docker/node/up.sh reads them."""
+    key = f"MC_SERVER_{slot}"
+    try:
+        for line in (servers or SERVERS_FILE).read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"{key}="):
+                return line.split("=", 1)[1].strip()
+    except OSError:
+        pass
+    return env_file_value(key, env_file) or HOME_SERVER
 
 
 def bash_argv(script: Path, *rest: str) -> list[str]:
@@ -84,9 +106,12 @@ def bash_argv(script: Path, *rest: str) -> list[str]:
 
 
 def commands_for(action: str, args: dict[str, str], *, project: str = "") -> list[Step]:
-    """The argv sequence of one action — the whole docker surface of the bridge."""
-    if action not in ("slot_up", "slot_down", "slot_restart", "slot_server",
-                      "mc_restart", "status", "logs"):
+    """The argv sequence of one action — the whole docker surface of the bridge.
+
+    ADR-050: a slot is node-N + mind-N; the body is the mind's (it asks for body_up /
+    body_restart itself); the home world `mc-server` runs on demand — raised before a
+    body that plays there, stopped when no body is left."""
+    if action not in INFRA_ACTIONS:
         raise InfraError(f"unknown action {action!r}")
     # posix paths throughout: `bash` and `docker` both take forward slashes, while
     # a Windows backslash path dies inside bash (seen live: exit 127, nothing ran)
@@ -99,46 +124,105 @@ def commands_for(action: str, args: dict[str, str], *, project: str = "") -> lis
     # of them and a fail-closed mind refuses to start without its runner key
     up = bash_argv(ROOT / "docker" / "node" / "up.sh")
     up_env = {"COMPOSE_PROJECT_NAME": project} if project else {}
+    every = compose + ["--profile", "*"]  # slots, bodies and the world have profiles
+
+    def world_up(server: str) -> list[Step]:
+        if server != HOME_SERVER:
+            return []  # a foreign server needs no home world
+        return [
+            Step(up + ["--no-deps", "mc-server"], env=up_env),
+            Step(compose + ["ps", "-q", "mc-server"], capture="wcid"),
+            Step(wait_healthy + ["{wcid}"]),
+        ]
+
+    def world_gc() -> Step:
+        return Step(["(stop the home world when no body is left)"], fn=_world_gc(every))
+
     if action == "mc_restart":
         return [Step(compose + ["restart", "mc-server"])]
     if action == "status":
-        return [Step(compose + ["ps"])]
+        return [Step(every + ["ps", "-a", "--format", STATUS_FORMAT])]
     if action == "logs":
         lines = args.get("lines") or str(LINES_DEFAULT)
-        return [Step(compose + ["logs", "--tail", lines, args["service"]])]
+        return [Step(every + ["logs", "--tail", lines, args["service"]])]
     slot = args["slot"]
-    if action == "slot_restart":
-        argv = bash_argv(ROOT / "dev" / "slot_restart.sh", slot)
-        if project:
-            argv += ["--project", project]
-        return [Step(argv)]
-    if action == "slot_down":
-        # the mind dies with its bridge closed gracefully first, then the sandbox
-        return [Step(compose + ["stop", f"mind-{slot}", f"node-{slot}", f"body-{slot}"])]
+    bodies = [service.format(slot=slot) for service in BODY_KINDS.values()]
     if action == "slot_up":
+        # the mind first (healthy), then the sister; the mind raises its own body
         return [
-            Step(up + ["--no-deps", f"body-{slot}"], env=up_env),
-            Step(compose + ["ps", "-q", f"body-{slot}"], capture="cid"),
-            Step(wait_healthy + ["{cid}"]),  # the py4j gateway must listen (T-055)
             Step(up + ["--no-deps", f"mind-{slot}"], env=up_env),
+            Step(compose + ["ps", "-q", f"mind-{slot}"], capture="cid"),
+            Step(wait_healthy + ["{cid}"]),
             Step(up + ["--no-deps", f"node-{slot}"], env=up_env),
         ]
+    if action == "slot_down":
+        # the sister first, then the mind (it closes the bridge gracefully), then the body
+        return [
+            Step(every + ["stop", f"node-{slot}", f"mind-{slot}", *bodies]),
+            world_gc(),
+        ]
+    if action == "slot_restart":
+        # the mind alone: the sister's session and the body live on, her runner
+        # re-arms the life clock (T-072) and the mind reconnects to its body
+        return [Step(up + ["--force-recreate", "--no-deps", f"mind-{slot}"], env=up_env)]
+    if action == "body_up":
+        service = body_service(slot, args.get("kind") or DEFAULT_BODY_KIND)
+        return [*world_up(server_of(slot)), Step(up + ["--no-deps", service], env=up_env)]
+    if action == "body_down":
+        return [Step(every + ["stop", *bodies]), world_gc()]
+    if action == "body_restart":
+        # the T-053 recreate: a fresh body connects at once, a restarted worn one may not
+        return [
+            *world_up(server_of(slot)),
+            Step(up + ["--force-recreate", "--no-deps", body_service(slot)], env=up_env),
+        ]
     if action == "slot_server":
-        # The sister lives through the move: node-N keeps running, the mind restarts
-        # with the new body and her runner re-arms the life clock (T-072). The
-        # address is recorded in SERVERS_FILE after success (`process`), so later
-        # restarts keep it; the login password for that server stays the operator's
+        # The sister and her mind live through the move: only the body is recreated
+        # on the new address (the mind's bridge reconnects by itself). The address is
+        # recorded in SERVERS_FILE after success (`process`), so later restarts keep
+        # it; the login password a foreign server asks for stays the operator's
         # MC_LOGIN_PASSWORD_N in .env (a secret, ADR-041).
         host = args["server"]
-        server_env = {**up_env, f"MC_SERVER_{slot}": host}
         return [
-            Step(compose + ["stop", f"mind-{slot}"]),
-            Step(up + ["--force-recreate", "--no-deps", f"body-{slot}"], env=server_env),
-            Step(compose + ["ps", "-q", f"body-{slot}"], capture="cid"),
-            Step(wait_healthy + ["{cid}"]),
-            Step(up + ["--no-deps", f"mind-{slot}"], env=server_env),
+            *world_up(host),
+            Step(
+                up + ["--force-recreate", "--no-deps", body_service(slot)],
+                env={**up_env, f"MC_SERVER_{slot}": host},
+            ),
+            world_gc(),
         ]
     raise InfraError(f"unknown action {action!r}")
+
+
+STATUS_FORMAT = "table {{.Service}}\t{{.State}}\t{{.Status}}"
+
+
+def _world_gc(every: list[str]) -> Callable[..., tuple[bool, str]]:
+    """The home world stops when no body of any slot is running (ADR-050)."""
+
+    def check(runner: Callable[..., subprocess.CompletedProcess]) -> tuple[bool, str]:
+        proc = runner(
+            every + ["ps", "--status", "running", "--services"],
+            cwd=str(ROOT), env=dict(os.environ), capture_output=True, text=True,
+            timeout=STEP_TIMEOUT_S,
+        )
+        if proc.returncode != 0:
+            return False, ((proc.stdout or "") + (proc.stderr or "")).strip()
+        running = (proc.stdout or "").split()
+        if "mc-server" not in running:
+            return True, "the home world is already down"
+        if any(name.startswith("body") for name in running):
+            return True, "the home world stays: a body still plays"
+        stop = runner(
+            every + ["stop", "mc-server"],
+            cwd=str(ROOT), env=dict(os.environ), capture_output=True, text=True,
+            timeout=STEP_TIMEOUT_S,
+        )
+        out = ((stop.stdout or "") + (stop.stderr or "")).strip()
+        note = "no body left: the home world stopped"
+        return stop.returncode == 0, note + ("\n" + out if out else "")
+
+    return check
 
 
 def run_steps(
@@ -151,6 +235,12 @@ def run_steps(
     captures: dict[str, str] = {}
     lines: list[str] = []
     for step in steps:
+        if step.fn is not None:
+            ok, text = step.fn(runner)
+            lines.append(text)
+            if not ok:
+                return False, "\n".join(lines)
+            continue
         argv = [part.format_map(captures) for part in step.argv]
         env = {**os.environ, **step.env}
         lines.append("$ " + " ".join(argv))
@@ -268,6 +358,7 @@ def record_server(slot: str, host: str, path: Path | None = None) -> None:
         ]
     if host != HOME_SERVER:
         lines.append(f"{key}={host}")
+    path.parent.mkdir(parents=True, exist_ok=True)
     if lines:
         path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     elif path.exists():
@@ -285,6 +376,16 @@ def env_file_value(name: str, path: Path | None = None) -> str:
     except OSError:
         pass
     return ""
+
+
+def beat(path: Path | None = None) -> None:
+    """Touch the heartbeat: the infra container is healthy while it stays fresh."""
+    path = path or HEARTBEAT_FILE
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    except OSError:
+        pass  # a read-only checkout on the host: the heartbeat is the container's
 
 
 def close_leftovers(hive: Hive) -> None:
@@ -317,6 +418,7 @@ def main_with(
         close_leftovers(hive)
     was_off: bool | None = None
     while True:
+        beat()
         status, switch = hive.call("GET", "/board/infra/switch")
         if status != 200:
             echo(f"cannot read the switch — {status} {switch.get('error', {}).get('kind', '')}")

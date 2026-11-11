@@ -911,8 +911,9 @@ def serve_mind(
 
 def main() -> None:
     from runtime.config import env
-    from runtime.game.py4j_body import Py4jBody
     from runtime.hive.client import HiveClient
+    from runtime.hive.infra import DEFAULT_BODY_KIND
+    from runtime.mind.bodyctl import BodySupervisor, make_body
     from runtime.ports import BirthRecord
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -969,7 +970,10 @@ def main() -> None:
     )
 
     call_log = JsonlLog(log_path)
-    body = Py4jBody()
+    # ADR-050: the body is the mind's — BODY_KIND picks the game's adapter here and
+    # the body service on the executor's side; the supervisor below starts it
+    body_kind = env("BODY_KIND", default=DEFAULT_BODY_KIND) or DEFAULT_BODY_KIND
+    body = make_body(body_kind)
     # Jev (T-031, ADR-027): JEV_BACKEND=rules keeps C1 on its own rules; cloud/local wire
     # the decider with the mind's virtual key through the gateway. An unknown backend or a
     # non-number JEV_* is a startup error, not a silent fallback.
@@ -1041,8 +1045,13 @@ def main() -> None:
         wait_max_s=wait_max,
         login=login,
     )
+    # The mind owns its body (ADR-050): it asks the executor for it at start and for a
+    # new one when it dies. BODY_SUPERVISE=0 leaves the body to whoever raised it.
+    if (env("BODY_SUPERVISE", default="1") or "1") != "0":
+        BodySupervisor(body, hive, username=username, kind=body_kind, log=call_log).start()
+        log.info("body supervisor armed: %s body of %s", body_kind, username)
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the harness
-    # reaches the port by service name (body-1:8700) inside the docker network, not via localhost.
+    # reaches the port by service name (mind-1:8700, ADR-050) inside the docker network, not via localhost.
     app = server.streamable_http_app(stateless_http=True, streamable_http_path="/mcp", host="0.0.0.0")
     log.info(
         "body MCP for %s on 0.0.0.0:%d/mcp (+/runner/*) log: %s", username, port, log_path or "stderr"

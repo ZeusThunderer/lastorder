@@ -1,16 +1,35 @@
-# Last Order MVP stack (ADR-015). Run from the repo root:
-#   bash docker/node/up.sh                  # the whole stack with secrets lifted from .env
+# Last Order stack (ADR-015, ADR-050). Run from the repo root:
+#   bash docker/node/up.sh        # the core up, the slots created (stopped), keys from .env
 #   NODE_DEV_OPEN=1 docker compose -f docker/compose.yml up -d   # dev, no keys: gates open
-# Slots are body-N + mind-N + node-N triples; the mind lives in its body's network
-# namespace because the unionclef py4j gateway listens on localhost only, and the node
-# sandbox reaches ONLY its own body (slot-N, internal), hive/llm-gateway/zai-egress
-# (svc-N, internal) and api.z.ai through the passthrough proxy (ADR-033, T-027).
-# Restart policy (T-037): infrastructure runs on-failure (a crashed process is
-# restarted by the daemon), but the quota spenders node-N and last-order are "no" —
-# after a Docker daemon death only `no` stays down, so the sandboxes never come back
-# unattended and burn quota (T-034 П-4; measured: on-failure/unless-stopped running
-# containers resurrect after a hard engine kill, NETWORK.md section 9).
+#
+# Tiers (ADR-050):
+# - core (no profile, restart unless-stopped — the only thing Docker brings back on its
+#   own): hive (the board), last-order, hapi-hub, llm-gateway + gateway-db, zai-egress,
+#   egress, media, infra (the executor that starts everything else);
+# - a slot = the sister node-N + her mind-N (profile `slots`): started by Last Order or
+#   the operator's board button through infra `slot_up`;
+# - a body (profile `bodies`): body-N, raised by its own mind through infra `body_up` —
+#   the body is the mind's, and a mind may wear the body of another game (BODY_KINDS);
+# - the home world (profile `world`): mc-server, raised by infra before a body that plays
+#   there and stopped when no body is left.
+# Every non-core container is restart "no": after a Docker daemon death `on-failure` and
+# `unless-stopped` both resurrect running containers (T-034 П-4, NETWORK.md section 9),
+# and slots must not come back unattended and burn quota. Crash recovery follows the
+# hierarchy instead: the runner asks for its mind back, the mind asks for its body.
+# The mind and its body are peers on the slot's private link-N (the uc py4j gateway binds
+# localhost inside the body; the body relays it to the mind's fixed link address); the
+# node sandbox reaches its mind's MCP (slot-N), hive/llm-gateway/zai-egress (svc-N) and
+# api.z.ai through the passthrough proxy alone (ADR-033, T-027).
+# Bind sources ride ${STAND_DAEMON_ROOT}: the repo as the Docker daemon sees it, the same
+# path for the host CLI and for compose inside the infra container (up.sh computes it).
 name: lastorder
+
+# json-file with rotation on every service: a long-lived stand must not fill the disk
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 # The Fabric versions in one place (T-062): the same compose variables feed the server
 # env below and the body build args, so the server and the clients cannot drift apart
@@ -27,10 +46,13 @@ x-body: &body
       # the same pin the server's MODRINTH_PROJECTS uses — one value for both sides
       FABRIC_API: *fabric-api
   image: lastorder-body:dev
-  restart: on-failure
-  depends_on:
-    mc-server:
-      condition: service_healthy
+  # ADR-050: raised by its mind through the executor, never by the stand's start; the
+  # home world is raised by the executor first (no depends_on: a body may play abroad)
+  profiles: [bodies]
+  restart: "no"
+  init: true   # tini reaps the bridge relays and the camera's ffmpeg
+  logging: *default-logging
+  security_opt: ["no-new-privileges:true"]
   mem_limit: 2g
   # Ready = uc's py4j gateway is listening (T-055): the mod starts it when the
   # client reaches the title screen (unionclef AltoClef.java onInitializeLoad →
@@ -59,8 +81,9 @@ x-body: &body
     BODY_CAMERA_SIZE: "${BODY_CAMERA_SIZE:-854x480}"
     BODY_CAMERA_BITRATE: "${BODY_CAMERA_BITRATE:-1M}"
 
-# The mind of a slot (NETWORK.md section 3): C1 plus the body MCP server on :8700 in the
-# body's network namespace (the py4j bridge stays localhost-only). The runner endpoints
+# The mind of a slot (NETWORK.md section 3): C1 plus the body MCP server on :8700, a peer
+# of its body on link-N (ADR-050: the body relays uc's localhost-only py4j gateway to the
+# mind's fixed link address; the mind asks the executor for its body). The runner endpoints
 # (/runner/status, /runner/respawn, /runner/birth) ride the same port behind the slot's
 # runner key (T-027). The Jev policy is the living sister's workplace file, reached
 # through the `current` symlink the runner maintains on the slot's workplaces volume
@@ -70,7 +93,17 @@ x-mind: &mind
     context: ..
     dockerfile: docker/mind/Dockerfile
   image: lastorder-mind:dev
-  restart: on-failure
+  profiles: [slots]
+  restart: "no"   # the runner asks for it back (ADR-050), nothing resurrects it unattended
+  logging: *default-logging
+  security_opt: ["no-new-privileges:true"]
+  # ready = the MCP and runner port answers (a 401 without the runner key is an answer)
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request as u, urllib.error as e\ntry: u.urlopen('http://127.0.0.1:8700/runner/status', timeout=2)\nexcept e.HTTPError: pass"]
+    interval: 5s
+    timeout: 3s
+    retries: 12
+    start_period: 20s
   # SIGTERM (T-055): the mind stops uvicorn, stops C1 and closes the bridge
   # within ~11 s (TEARDOWN_GRACE_S + the close itself); the grace period is
   # above that so docker never has to SIGKILL a closing mind (a SIGKILLed
@@ -126,7 +159,9 @@ x-node: &node
     dockerfile: docker/node/Dockerfile
     target: base   # the sisters' variant without ffmpeg (T-064: lo is the desk's alone)
   image: lastorder-node:dev
+  profiles: [slots]
   restart: "no"   # quota spender: no unattended resurrect after a daemon death (T-037)
+  logging: *default-logging
   mem_limit: 1.5g
   cpus: "0.5"
   read_only: true
@@ -188,6 +223,8 @@ x-node: &node
 services:
   mc-server:
     image: itzg/minecraft-server:java21
+    profiles: [world]   # ADR-050: raised by the executor before a body plays at home
+    logging: *default-logging
     environment:
       EULA: "TRUE"
       # Fabric instead of vanilla (ADR-045, T-062): loader and launcher pinned, never
@@ -217,39 +254,48 @@ services:
       - world:/data
       # the operator's chosen skin (T-061), mounted READ-ONLY for the mod's
       # collection provider; the sandboxes and the agent never see this file
-      - ../agent/last_order/skin/sister.png:/skins/sister.png:ro
+      - ${STAND_DAEMON_ROOT:-..}/agent/last_order/skin/sister.png:/skins/sister.png:ro
       # the mod's config (T-061): autoFetch off (this offline server hands out
       # its own skin), the collection provider on with the file above, slim
-      - ./mc-server/skinrestorer/config.json:/data/config/skinrestorer/config.json:ro
-    restart: on-failure
+      - ${STAND_DAEMON_ROOT:-..}/docker/mc-server/skinrestorer/config.json:/data/config/skinrestorer/config.json:ro
+    restart: "no"   # stopped when no body is left; a crash is the minds' body_restart
 
   body-1:
     <<: *body
     environment:
       <<: *body-env
       MC_USERNAME: LastOrder01
-      # MC_SERVER_1 moves this body to another server (operator-ordered, T-052 run):
-      # the body rides the default network, so an external address is reachable;
-      # mind-1 shares this netns and is recreated with it.
+      # MC_SERVER_N moves this body to another server (Last Order's slot_server, the
+      # recorded move in .stand/servers.env or .env): the body rides the default network,
+      # so an external address is reachable; its mind reconnects over the link.
       MC_SERVER: "${MC_SERVER_1:-mc-server:25565}"
+      MIND_HOST: mind-1        # the bridge relays (ADR-050): uc's callback goes here
+      MIND_LINK_IP: 10.250.1.3   # and only this address may reach uc's gateway
       # BODY_CAMERA_1=1 turns this slot's camera on (T-063): Xvfb + ffmpeg → media
       BODY_CAMERA: "${BODY_CAMERA_1:-}"
     volumes:
       - body-1:/data
-    networks: [default, slot-1, media-net]   # slot-1 carries mind-1's MCP to node-1 (internal); media-net only for the camera stream
+    networks: [default, link-1, media-net]   # link-1: the bridge to mind-1 alone (ADR-050); media-net only for the camera stream
 
   # The mind of slot 1: see the x-mind anchor.
   mind-1:
     <<: *mind
-    network_mode: "service:body-1"
-    # T-055: never connect while the body still boots (T-052 b) — the gateway
-    # must be listening first; the join of the world is the mind's own polling.
-    depends_on:
-      body-1:
-        condition: service_healthy
+    # ADR-050: a peer of its body — the MCP to node-1 on slot-1, the py4j bridge to
+    # body-1 on link-1 from a fixed address the body's relay admits, hive and the
+    # gateway on default. The mind raises its body itself (bodyctl) and reconnects
+    # whenever the body is recreated; it never boots before it (T-052 b) because the
+    # bridge only connects once uc's gateway answers.
+    networks:
+      default: {}
+      slot-1: {}
+      link-1:
+        ipv4_address: 10.250.1.3
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder01
+      BODY_HOST: body-1              # the body's relay on link-1 (ADR-050)
+      BODY_PORT: "25433"
+      CALLBACK_ADDRESS: 10.250.1.3   # uc's callback arrives here, relayed by the body
       LLM_API_KEY: "${GATEWAY_KEY_MIND_1:-}"
       MIND_RUNNER_KEY: "${HIVE_RUNNER_KEY_1:-}"
       MC_COMMANDS_DENY_SLOT: "${MC_COMMANDS_DENY_1:-}"
@@ -263,17 +309,20 @@ services:
     volumes:
       - mind-1-run:/mind-run
       - workplaces-1:/workplaces:ro   # the Jev policy of the living sister, read-only
-      - ./mind/chat-topics:/etc/lastorder/chat-topics:ro   # ADR-048, the operator's list (a dir: edits propagate)
+      - ${STAND_DAEMON_ROOT:-..}/docker/mind/chat-topics:/etc/lastorder/chat-topics:ro   # ADR-048, the operator's list (a dir: edits propagate)
 
   # The sandbox of slot 1 (T-027). zai-egress rides along (T-034 П-1): without the
   # passthrough the zcode harness has no route to api.z.ai and the session dies.
   node-1:
     <<: *node
-    depends_on: [zai-egress, mind-1, hive]   # hive creates the pending_wills subpath before uvicorn
+    depends_on:   # hive creates the pending_wills subpath before uvicorn
+      zai-egress: {condition: service_started}
+      hive: {condition: service_healthy}
+      mind-1: {condition: service_healthy}
     environment:
       <<: *node-env
       NODE_SLOT: LastOrder01
-      BODY_BASE: http://body-1:8700
+      BODY_BASE: http://mind-1:8700   # the body MCP lives in the mind (ADR-050)
       RUNNER_KEY_FILE: /run/node/secrets/runner_key
       HIVE_NODE_KEY_FILE: /run/node/secrets/node_mcp_key
       GATEWAY_KEY_FILE: /run/node/secrets/gateway_node_key
@@ -295,20 +344,26 @@ services:
       # MC_SERVER_N moves this body to another server (T-057, the infra bridge's
       # slot_server): same override shape as slot 1, all slots alike
       MC_SERVER: "${MC_SERVER_2:-mc-server:25565}"
+      MIND_HOST: mind-2
+      MIND_LINK_IP: 10.250.2.3
       BODY_CAMERA: "${BODY_CAMERA_2:-}"
     volumes:
       - body-2:/data
-    networks: [default, slot-2, media-net]
+    networks: [default, link-2, media-net]
 
   mind-2:
     <<: *mind
-    network_mode: "service:body-2"
-    depends_on:   # T-055: the gateway must listen before the mind connects
-      body-2:
-        condition: service_healthy
+    networks:   # ADR-050: see mind-1
+      default: {}
+      slot-2: {}
+      link-2:
+        ipv4_address: 10.250.2.3
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder02
+      BODY_HOST: body-2              # the body's relay on link-2 (ADR-050)
+      BODY_PORT: "25433"
+      CALLBACK_ADDRESS: 10.250.2.3   # uc's callback arrives here, relayed by the body
       LLM_API_KEY: "${GATEWAY_KEY_MIND_2:-}"
       MIND_RUNNER_KEY: "${HIVE_RUNNER_KEY_2:-}"
       MC_COMMANDS_DENY_SLOT: "${MC_COMMANDS_DENY_2:-}"
@@ -319,15 +374,18 @@ services:
     volumes:
       - mind-2-run:/mind-run
       - workplaces-2:/workplaces:ro
-      - ./mind/chat-topics:/etc/lastorder/chat-topics:ro   # ADR-048, the operator's list (a dir: edits propagate)
+      - ${STAND_DAEMON_ROOT:-..}/docker/mind/chat-topics:/etc/lastorder/chat-topics:ro   # ADR-048, the operator's list (a dir: edits propagate)
 
   node-2:
     <<: *node
-    depends_on: [zai-egress, mind-2, hive]
+    depends_on:
+      zai-egress: {condition: service_started}
+      hive: {condition: service_healthy}
+      mind-2: {condition: service_healthy}
     environment:
       <<: *node-env
       NODE_SLOT: LastOrder02
-      BODY_BASE: http://body-2:8700
+      BODY_BASE: http://mind-2:8700   # the body MCP lives in the mind (ADR-050)
       RUNNER_KEY_FILE: /run/node/secrets/runner_key
       HIVE_NODE_KEY_FILE: /run/node/secrets/node_mcp_key
       GATEWAY_KEY_FILE: /run/node/secrets/gateway_node_key
@@ -347,20 +405,26 @@ services:
       <<: *body-env
       MC_USERNAME: LastOrder03
       MC_SERVER: "${MC_SERVER_3:-mc-server:25565}"
+      MIND_HOST: mind-3
+      MIND_LINK_IP: 10.250.3.3
       BODY_CAMERA: "${BODY_CAMERA_3:-}"
     volumes:
       - body-3:/data
-    networks: [default, slot-3, media-net]
+    networks: [default, link-3, media-net]
 
   mind-3:
     <<: *mind
-    network_mode: "service:body-3"
-    depends_on:   # T-055: the gateway must listen before the mind connects
-      body-3:
-        condition: service_healthy
+    networks:   # ADR-050: see mind-1
+      default: {}
+      slot-3: {}
+      link-3:
+        ipv4_address: 10.250.3.3
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder03
+      BODY_HOST: body-3              # the body's relay on link-3 (ADR-050)
+      BODY_PORT: "25433"
+      CALLBACK_ADDRESS: 10.250.3.3   # uc's callback arrives here, relayed by the body
       LLM_API_KEY: "${GATEWAY_KEY_MIND_3:-}"
       MIND_RUNNER_KEY: "${HIVE_RUNNER_KEY_3:-}"
       MC_COMMANDS_DENY_SLOT: "${MC_COMMANDS_DENY_3:-}"
@@ -371,15 +435,18 @@ services:
     volumes:
       - mind-3-run:/mind-run
       - workplaces-3:/workplaces:ro
-      - ./mind/chat-topics:/etc/lastorder/chat-topics:ro   # ADR-048, the operator's list (a dir: edits propagate)
+      - ${STAND_DAEMON_ROOT:-..}/docker/mind/chat-topics:/etc/lastorder/chat-topics:ro   # ADR-048, the operator's list (a dir: edits propagate)
 
   node-3:
     <<: *node
-    depends_on: [zai-egress, mind-3, hive]
+    depends_on:
+      zai-egress: {condition: service_started}
+      hive: {condition: service_healthy}
+      mind-3: {condition: service_healthy}
     environment:
       <<: *node-env
       NODE_SLOT: LastOrder03
-      BODY_BASE: http://body-3:8700
+      BODY_BASE: http://mind-3:8700   # the body MCP lives in the mind (ADR-050)
       RUNNER_KEY_FILE: /run/node/secrets/runner_key
       HIVE_NODE_KEY_FILE: /run/node/secrets/node_mcp_key
       GATEWAY_KEY_FILE: /run/node/secrets/gateway_node_key
@@ -405,9 +472,8 @@ services:
       context: ..
       dockerfile: docker/mind/Dockerfile
     image: lastorder-mind:dev
-    depends_on:
-      mc-server:
-        condition: service_healthy
+    # no depends_on mc-server (ADR-050): the world runs on demand; RCON deaths answer
+    # 503 and retry while it is down
     environment:
       KNOWLEDGE_DIR: /knowledge
       RUN_DIR: /hive-run
@@ -438,8 +504,16 @@ services:
       - knowledge:/knowledge
       - hive-run:/hive-run   # not over the image's system /run (review R1-6)
       - hive-work:/lo-workplace:ro   # Last Order's workshop/, read by publish_tool (T-047)
-    networks: [default, svc-1, svc-2, svc-3, svc-lo]
-    restart: on-failure
+    networks: [default, svc-1, svc-2, svc-3, svc-lo, infra-net]   # infra-net: the executor alone
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:   # the API answers (a 401/403 without a key is an answer)
+      test: ["CMD", "python", "-c", "import urllib.request as u, urllib.error as e\ntry: u.urlopen('http://127.0.0.1:8000/board/infra/switch', timeout=3)\nexcept e.HTTPError: pass"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
   # Last Order's own sandbox (T-030, ADR-036): the admin alarm plus the short harness
   # sessions of the network's administrator. The node image carries both harnesses (the
@@ -460,8 +534,14 @@ services:
       dockerfile: docker/node/Dockerfile
       target: lo   # + ffmpeg for cutting clips out of media (T-064); sisters build `base`
     image: lastorder-node-lo:dev
-    restart: "no"   # quota spender: no unattended resurrect after a daemon death (T-037)
-    depends_on: [hive, llm-gateway]
+    # ADR-050: the core — the administrator is what starts the network after a reboot.
+    # Her long session spends quota on events only (a death, a proposal batch, the
+    # 10-minute clock); the sisters stay down until she or the operator raises them.
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      hive: {condition: service_healthy}
+      llm-gateway: {condition: service_started}
     # the video desk (T-064): the harness peaks ~600 MiB and an x264 cut rides one core,
     # so the desk gets the node precedent 1.5g and a whole core
     mem_limit: 1.5g
@@ -537,7 +617,8 @@ services:
   hapi-hub:
     build: ./hapi
     image: lastorder-hapi:dev
-    restart: on-failure
+    restart: unless-stopped
+    logging: *default-logging
     mem_limit: 256m
     environment:
       CLI_API_TOKEN: "${HAPI_CLI_KEY:-}"
@@ -557,6 +638,7 @@ services:
     build: ./jev
     image: lastorder-jev:dev
     profiles: ["jev"]
+    logging: *default-logging
     environment:
       HF_HOME: /data/hf
     command:
@@ -613,15 +695,16 @@ services:
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"   # the only provider key in the stack
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     networks: [default, gateway-internal, svc-1, svc-2, svc-3, svc-lo]
+    logging: *default-logging
     volumes:
-      - ./gateway/config.yaml:/app/config.yaml:ro
+      - ${STAND_DAEMON_ROOT:-..}/docker/gateway/config.yaml:/app/config.yaml:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')"]
       interval: 30s
       timeout: 5s
       start_period: 60s
       retries: 5
-    restart: on-failure
+    restart: unless-stopped
 
   # Postgres of the gateway: virtual keys and spend rows. Only llm-gateway sees it (private
   # network, no published port); the default password matches the mc-server RCON precedent of
@@ -640,7 +723,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    restart: on-failure
+    restart: unless-stopped
+    logging: *default-logging
 
   # The only way out of a node sandbox (T-027 plan review P1-3): a TLS passthrough with an
   # SNI allowlist of exactly api.z.ai. In svc-N and svc-lo it carries the network alias
@@ -650,8 +734,9 @@ services:
   # same subscription route as the sisters.
   zai-egress:
     image: nginx:1.27-alpine
+    logging: *default-logging
     volumes:
-      - ./node/zai-egress.conf:/etc/nginx/nginx.conf:ro
+      - ${STAND_DAEMON_ROOT:-..}/docker/node/zai-egress.conf:/etc/nginx/nginx.conf:ro
     networks:
       egress-out: {}
       svc-1:
@@ -662,7 +747,7 @@ services:
         aliases: ["api.z.ai"]
       svc-lo:
         aliases: ["api.z.ai"]
-    restart: on-failure
+    restart: unless-stopped
 
   # The grants egress proxy (T-046, ADR-041, TASKBOARD.md 5.3): an HTTP CONNECT
   # tunnel that opens ONLY the domains of active egress grants. It asks hive over
@@ -679,7 +764,8 @@ services:
       HIVE_URL: http://hive:8000
       HIVE_TOOL_KEY: "${HIVE_TOOL_KEY:-}"
     networks: [egress-out, svc-lo]
-    restart: on-failure
+    restart: unless-stopped
+    logging: *default-logging
 
   # The camera sink (T-063, ADR-045 §9): bodies with BODY_CAMERA_N=1 publish their Xvfb
   # screen over RTSP; MediaMTX records every stream into the `footage` ring buffer
@@ -690,7 +776,8 @@ services:
   # and the box has no way out — recording is all it does.
   media:
     image: bluenviron/mediamtx:1.21.3
-    restart: on-failure
+    restart: unless-stopped
+    logging: *default-logging
     mem_limit: 512m
     environment:
       # the ring depth (ADR-045: write always, decide later); 1d = 24h. MEDIA_SEGMENT
@@ -698,9 +785,62 @@ services:
       MTX_PATHDEFAULTS_RECORDDELETEAFTER: "${MEDIA_RETENTION:-1d}"
       MTX_PATHDEFAULTS_RECORDSEGMENTDURATION: "${MEDIA_SEGMENT:-1h}"
     volumes:
-      - ./media/mediamtx.yml:/mediamtx.yml:ro
+      - ${STAND_DAEMON_ROOT:-..}/docker/media/mediamtx.yml:/mediamtx.yml:ro
       - footage:/recordings
     networks: [media-net]
+
+  # The infra executor (ADR-050; it replaces the host-side bridge of ADR-044): polls the
+  # board for infra requests — Last Order's, the operator's buttons, a slot's own body
+  # and mind asks — and runs the closed action set (runtime/hive/infra.py) as
+  # `docker/node/up.sh` / `docker compose` argv, never a shell string, never a build.
+  # Docker socket = host admin: no agent runs here, the only way in is the board with
+  # the infra key, the only network is infra-net to the hive. It reads the repo (and
+  # its .env, the stand's keys) read-only at the daemon's path, so the bind sources
+  # compose computes resolve on the daemon side; it writes only .stand/ (the recorded
+  # moves). Core: it is what raises everything else after a reboot.
+  infra:
+    build: ./infra
+    image: lastorder-infra:dev
+    restart: unless-stopped
+    init: true
+    depends_on:
+      hive: {condition: service_healthy}
+    working_dir: ${STAND_DAEMON_ROOT:-/stand}
+    command: ["python3", "dev/infra_bridge.py", "--interval", "10"]
+    environment:
+      HIVE_URL: http://hive:8000
+      HIVE_INFRA_KEY: "${HIVE_INFRA_KEY:-}"
+      STAND_DAEMON_ROOT: "${STAND_DAEMON_ROOT:-/stand}"
+      INFRA_HEARTBEAT: /tmp/heartbeat
+      HOME: /tmp
+      DOCKER_CONFIG: /tmp/.docker
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: ${STAND_DAEMON_ROOT:-..}
+        target: ${STAND_DAEMON_ROOT:-/stand}
+        read_only: true
+      - type: bind
+        source: ${STAND_DAEMON_ROOT:-..}/.stand
+        target: ${STAND_DAEMON_ROOT:-/stand}/.stand
+        bind: {create_host_path: true}
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    mem_limit: 256m
+    pids_limit: 256
+    healthcheck:   # the poll loop touches the heartbeat every round
+      test: ["CMD-SHELL", "find /tmp/heartbeat -mmin -2 | grep -q heartbeat"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
+    networks: [infra-net]
 
 volumes:
   world:
@@ -725,10 +865,23 @@ networks:
   gateway-internal: {}
   # carries only the hub's loopback port publish (see hapi-hub above)
   hapi-web: {}
-  # body-N + node-N of one slot: the mind's MCP and runner endpoints, nothing else
+  # mind-N + node-N of one slot: the mind's MCP and runner endpoints, nothing else
   slot-1: {internal: true}
   slot-2: {internal: true}
   slot-3: {internal: true}
+  # body-N + mind-N of one slot (ADR-050): the py4j bridge alone. Fixed subnets: the
+  # body's relay admits the mind's fixed address only; node-N is never on it.
+  link-1:
+    internal: true
+    ipam: {config: [{subnet: 10.250.1.0/29}]}
+  link-2:
+    internal: true
+    ipam: {config: [{subnet: 10.250.2.0/29}]}
+  link-3:
+    internal: true
+    ipam: {config: [{subnet: 10.250.3.0/29}]}
+  # hive + infra (ADR-050): the executor reaches the board and nothing else
+  infra-net: {internal: true}
   # hive + llm-gateway + zai-egress + node-N of one slot: the services a node may use
   svc-1: {internal: true}
   svc-2: {internal: true}

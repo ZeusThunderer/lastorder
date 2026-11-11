@@ -31,7 +31,7 @@ def test_camera_is_a_per_slot_switch_off_by_default():
 def test_media_service_is_pinned_and_internal():
     svc = COMPOSE["services"]["media"]
     assert svc["image"] == "bluenviron/mediamtx:1.21.3"   # pinned, never latest
-    assert svc["restart"] == "on-failure"
+    assert svc["restart"] == "unless-stopped"   # the core (ADR-050)
     assert svc["networks"] == ["media-net"]
     assert "ports" not in svc   # nothing reaches media from the host
     assert COMPOSE["networks"]["media-net"]["internal"] is True

@@ -195,6 +195,9 @@ class NodeRunner:
         self._sweep = sweep or self._kill_sister_uid_processes
         self._alarms = alarms
         self._monotonic = monotonic or time.monotonic
+        # the mind watch (ADR-050): since when it has not answered, when it was asked back
+        self._mind_down_since: float | None = None
+        self._mind_asked_at: float | None = None
         # the console session ids this runner already used (life and will boots):
         # a killed session's log line must not be mistaken for the next boot's
         # report — the ids ride the exclusion set of boot_report (the will's 409)
@@ -390,11 +393,38 @@ class NodeRunner:
         attempt = 0
         while True:
             try:
-                return self._mind.status()
+                status = self._mind.status()
+                self._mind_down_since = None
+                return status
             except HiveUnavailable as exc:
                 self._log("mind.unreachable", {"attempt": attempt + 1, "error": str(exc)})
+                self._mind_unreachable()
                 self._sleep(self._hive_pause(attempt))
                 attempt += 1
+
+    def _mind_unreachable(self) -> None:
+        """The runner looks after its mind (ADR-050): slot containers carry no
+        restart policy (nothing comes back unattended after a Docker restart), so a
+        mind gone longer than mind_dead_s is asked back through the executor —
+        `slot_restart` of this slot, once per mind_boot_s; the board caps it."""
+        now = self._monotonic()
+        if self._mind_down_since is None:
+            self._mind_down_since = now
+            return
+        if now - self._mind_down_since < self.cfg.mind_dead_s:
+            return
+        if self._mind_asked_at is not None and now - self._mind_asked_at < self.cfg.mind_boot_s:
+            return
+        self._mind_asked_at = now
+        slot = "".join(ch for ch in self.cfg.slot[-2:] if ch.isdigit())
+        try:
+            self._hive.infra_slot(
+                "slot_restart", {"slot": str(int(slot))},
+                f"{self.cfg.slot}: the mind has not answered for {int(now - self._mind_down_since)} s",
+            )
+            self._log("mind.restart_asked", {"slot": self.cfg.slot})
+        except (HiveRejected, HiveUnavailable, ValueError) as exc:
+            self._log("mind.restart_ask_failed", {"error": str(exc)})
 
     # --- birth --------------------------------------------------------------------------
 
@@ -795,7 +825,9 @@ class NodeRunner:
     def _death_status(self, state: LifeState | None = None) -> Death | None:
         try:
             status = self._mind.status()
+            self._mind_down_since = None
         except HiveUnavailable:
+            self._mind_unreachable()
             return None  # the mind restarts; the session keeps running meanwhile
         if not status.get("dead"):
             if state is not None and not status.get("serial") and self._live_unarmed(state):

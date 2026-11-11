@@ -67,6 +67,35 @@ if [ "${BODY_CAMERA:-}" = "1" ]; then
   ) &
 fi
 
+# The link to the mind (ADR-050): the mind is a peer container now, not a tenant of
+# this network namespace. uc's py4j gateway binds 127.0.0.1:25333 and dials its
+# callback at 127.0.0.1:25334 (AltoClef.java:177; uc is not ours to change), so two
+# relays carry the bridge across the slot's private link network:
+#   mind  -> BODY_RELAY_PORT (only MIND_LINK_IP may connect) -> uc's gateway;
+#   uc's callback dial 127.0.0.1:25334 -> MIND_HOST:25334 (the mind's callback server).
+# Each rides a restart loop like the camera's ffmpeg; init (tini) reaps them.
+if [ -n "${MIND_HOST:-}" ]; then
+  RELAY_PORT="${BODY_RELAY_PORT:-25433}"
+  RANGE=""
+  if [ -n "${MIND_LINK_IP:-}" ]; then RANGE=",range=${MIND_LINK_IP}/32"; fi
+  (
+    set +e
+    while true; do
+      socat "TCP-LISTEN:${RELAY_PORT},reuseaddr,fork${RANGE}" TCP:127.0.0.1:25333
+      echo "relay: gateway relay exited (rc=$?), restarting in 1 s" >&2
+      sleep 1
+    done
+  ) &
+  (
+    set +e
+    while true; do
+      socat TCP-LISTEN:25334,bind=127.0.0.1,reuseaddr,fork "TCP:${MIND_HOST}:25334"
+      echo "relay: callback relay exited (rc=$?), restarting in 1 s" >&2
+      sleep 1
+    done
+  ) &
+fi
+
 cat > /data/HeadlessMC/config.properties <<PROPS
 hmc.offline=true
 hmc.offline.username=${MC_USERNAME}
