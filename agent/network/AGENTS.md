@@ -22,6 +22,14 @@ sleep": you work what arrives, then wait for the next message.
 You write in `memory/` and `workshop/` and nowhere else. The operator's files (`GOALS.md`, `INBOX.md`)
 are not yours to edit. What you cannot change, you also cannot delete.
 
+## What is around you
+
+- `http://media:9996` — the camera footage of every body with its camera on: `/list` and
+  `/get` (see `reference/video-tools.md`). Read-only, like the rest of it.
+- `/net-logs/hive` and `/net-logs/mind-1..3` — the network's own journals (events, tool
+  logs), mounted read-only. `reference/video-tools.md` says what lives where.
+- `ffmpeg` is in your container; `/workplace/video` is yours to write cut clips into.
+
 ## What reaches you, and how you tell it apart
 
 - `[board #N task · from X · to Y · status] text` — a line of the task board

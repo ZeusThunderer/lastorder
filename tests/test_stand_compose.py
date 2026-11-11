@@ -90,7 +90,8 @@ def test_zai_egress_carries_api_zai_into_svc_lo():
     nets = COMPOSE["services"]["zai-egress"]["networks"]
     assert nets["svc-lo"]["aliases"] == ["api.z.ai"]
     assert COMPOSE["networks"]["svc-lo"]["internal"] is True
-    assert COMPOSE["services"]["last-order"]["networks"] == ["svc-lo"]
+    # T-064: media-net joined for the footage; svc-lo is still the only way out
+    assert COMPOSE["services"]["last-order"]["networks"] == ["svc-lo", "media-net"]
 
 
 # --- T-054: wait_events under the harness tool timeout ------------------------------------------

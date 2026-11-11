@@ -3,7 +3,7 @@
 The camera is a per-slot switch (BODY_CAMERA_N) on top of shared stream parameters;
 the default stand must behave exactly as before (T-063 acceptance: BODY_CAMERA unset →
 the body starts headless, media is optional). The media box records and serves clips
-on the internal media-net only: node-N sandboxes and (until T-064) last-order have no
+on the internal media-net only: node-N sandboxes have no (the desk joins in T-064)
 route to it, and nothing is published to the host.
 """
 
@@ -42,8 +42,8 @@ def test_bodies_reach_media_nodes_do_not():
     for n in (1, 2, 3):
         assert "media-net" in COMPOSE["services"][f"body-{n}"]["networks"], f"body-{n}"
         assert "media-net" not in COMPOSE["services"][f"node-{n}"]["networks"], f"node-{n}"
-    # a sister sandbox (and until T-064 the desk too) has no route to the footage
-    assert "media-net" not in COMPOSE["services"]["last-order"]["networks"]
+    # a sister sandbox has no route to the footage (the desk joins it in T-064)
+    assert "media-net" in COMPOSE["services"]["last-order"]["networks"]
 
 
 def test_retention_is_env_driven_with_a_24h_default():

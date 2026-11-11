@@ -235,9 +235,16 @@ RTSP+запись+playback, остальное выключено). Пишет �
 - вырезка mp4: `GET http://media:9996/get?path=LastOrder01&start=<RFC3339>&duration=<сек>&format=mp4`
   [проверено: 8-секундная вырезка, валидный `ftyp isom`]
 
-Сеть: `media-net` — внутренняя, в ней тела (все три, независимо от камеры) и `media`; наружу из
-`media` пути нет, портов на хосте нет. Сёстры (`node-N`) в `media-net` не входят — из `slot-N`
-имя `media` даже не резолвится [проверено на стенде]. Last Order получает доступ в T-064.
+Сеть: `media-net` — внутренняя, в ней тела (все три, независимо от камеры), `media` и (T-064)
+`last-order`; наружу из `media` пути нет, портов на хосте нет. Сёстры (`node-N`) в `media-net`
+не входят — из `slot-N` имя `media` даже не резолвится [проверено на стенде].
+
+Видео-стол Last Order (T-064): сервис `last-order` строит цель `lo` образа узла (`lastorder-node-lo:dev`,
+= base + ffmpeg; сёстры остаются на `base`), входит в `media-net`, получает журналы сети на чтение
+(`hive-run:/net-logs/hive:ro`, `mind-N-run:/net-logs/mind-N:ro` — запись падает), режет вырезки ffmpeg'ом
+в `/workplace/video`. Лимиты: 1.5g / 1 cpu (харнесс ~600 MiB + кодирование одним ядром). Справка столу —
+`agent/network/reference/video-tools.md`, что вокруг — AGENTS.md «What is around you»; повелений там нет
+(ADR-045: поведение пишет не код).
 
 ## Ключи стенда
 Прогон идёт с ключами: без них `docker/node/up.sh` отказывается подниматься (fail-closed R2-6),

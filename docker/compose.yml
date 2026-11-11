@@ -120,6 +120,7 @@ x-node: &node
   build:
     context: ..
     dockerfile: docker/node/Dockerfile
+    target: base   # the sisters' variant without ffmpeg (T-064: lo is the desk's alone)
   image: lastorder-node:dev
   restart: "no"   # quota spender: no unattended resurrect after a daemon death (T-037)
   mem_limit: 1.5g
@@ -435,11 +436,14 @@ services:
     build:
       context: ..
       dockerfile: docker/node/Dockerfile
-    image: lastorder-node:dev
+      target: lo   # + ffmpeg for cutting clips out of media (T-064); sisters build `base`
+    image: lastorder-node-lo:dev
     restart: "no"   # quota spender: no unattended resurrect after a daemon death (T-037)
     depends_on: [hive, llm-gateway]
-    mem_limit: 1g
-    cpus: "0.5"
+    # the video desk (T-064): the harness peaks ~600 MiB and an x264 cut rides one core,
+    # so the desk gets the node precedent 1.5g and a whole core
+    mem_limit: 1.5g
+    cpus: "1.0"
     read_only: true
     tmpfs:
       - /tmp:size=512m,mode=1777
@@ -480,7 +484,14 @@ services:
     volumes:
       - hive-work:/workplace
       - knowledge:/knowledge:ro
-    networks: [svc-lo]
+      # the network's journals, read-only (T-064): the desk cuts video by the journals'
+      # timestamps; a write into them must fail. The whole hive-run rides along — the
+      # administrator is the one agent trusted with every slot's record.
+      - hive-run:/net-logs/hive:ro
+      - mind-1-run:/net-logs/mind-1:ro
+      - mind-2-run:/net-logs/mind-2:ro
+      - mind-3-run:/net-logs/mind-3:ro
+    networks: [svc-lo, media-net]   # media-net: the footage of the camera bodies (T-063)
 
 
   # The HAPI hub (ADR-042, T-044): the operator's console. Upstream, unmodified,
