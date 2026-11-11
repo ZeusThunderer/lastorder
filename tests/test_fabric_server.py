@@ -1,10 +1,12 @@
 """T-062: mc-server on Fabric — versions pinned in one place, server and bodies in step.
 
 The loader and launcher are pinned to the stable fabricmc.net meta picks for 1.21.11
-(checked 2026-11-11), never "latest" (the itzg image floats otherwise); fabric-api is
-the single server mod (ADR-045: no mods "for the future"), pinned by Modrinth version
-number. The same FABRIC_API compose variable builds the body image and the server mod
-list — these tests keep the two sides and the Dockerfile fallback from drifting.
+(checked 2026-11-11), never "latest" (the itzg image floats otherwise); every server
+mod is pinned by Modrinth version number, and the list stays exactly the mods a task
+put there — fabric-api (T-062) and the skinrestorer skin mod (T-061), nothing
+speculative (ADR-045). The same FABRIC_API compose variable builds the body image and
+the server mod list — these tests keep the two sides and the Dockerfile fallback from
+drifting.
 """
 
 from __future__ import annotations
@@ -33,19 +35,26 @@ def test_mc_server_is_fabric_with_pinned_loader_and_launcher():
     assert compose_default(env["FABRIC_LAUNCHER_VERSION"]) == "1.1.2"
 
 
-def test_the_single_server_mod_is_fabric_api():
+def test_the_server_mod_list_is_fabric_api_plus_the_skin_mod():
     projects = COMPOSE["services"]["mc-server"]["environment"]["MODRINTH_PROJECTS"]
-    m = re.fullmatch(r"fabric-api:(.+)", projects)
-    assert m, "the only server mod entry must be fabric-api, pinned"
-    assert compose_default(m.group(1)) == "0.140.0+1.21.11"
+    # the exact list: fabric-api (T-062) and skinrestorer (T-061) — a new mod is a
+    # deliberate act, each entry pinned by a ${VAR:-version} with an explicit default
+    assert projects.split(",") == [
+        "fabric-api:${FABRIC_API:-0.140.0+1.21.11}",
+        "skinrestorer:${SKINRESTORER:-2.11.1+1.21.11-fabric}",
+    ]
+    for entry in projects.split(","):
+        _project, _, pin = entry.partition(":")
+        assert compose_default(pin), f"unpinned server mod entry: {entry}"
 
 
 def test_bodies_build_with_the_same_fabric_api():
     for n in (1, 2, 3):
         arg = COMPOSE["services"][f"body-{n}"]["build"]["args"]["FABRIC_API"]
         assert compose_default(arg) == "0.140.0+1.21.11", f"body-{n}"
-    server = COMPOSE["services"]["mc-server"]["environment"]["MODRINTH_PROJECTS"]
-    pin = compose_default(server.split(":", 1)[1])
+    projects = COMPOSE["services"]["mc-server"]["environment"]["MODRINTH_PROJECTS"]
+    entries = dict(e.split(":", 1) for e in projects.split(","))
+    pin = compose_default(entries["fabric-api"])
     dockerfile = (ROOT / "docker" / "body" / "Dockerfile").read_text(encoding="utf-8")
     m = re.search(r"^ARG FABRIC_API=(\S+)", dockerfile, re.MULTILINE)
     assert m and m.group(1) == pin, "the body Dockerfile fallback ARG drifted from compose"

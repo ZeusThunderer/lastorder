@@ -1,0 +1,74 @@
+{
+  "language": "en_us",
+  "command": {
+    "enabled": true,
+    "permissionLevel": 0,
+    "targetsPermissionLevel": 2
+  },
+  "storage": {
+    "location": "world"
+  },
+  "join": {
+    "refreshSkin": true,
+    "skipRefreshProviders": [],
+    "applyDelay": 0,
+    "autoFetch": {
+      "enabled": false,
+      "overrideExisting": false,
+      "providers": [
+        "mojang"
+      ]
+    }
+  },
+  "request": {
+    "proxy": "",
+    "timeout": 10,
+    "userAgent": ""
+  },
+  "providers": {
+    "mojang": {
+      "enabled": true,
+      "name": "mojang",
+      "cache": {
+        "enabled": true,
+        "duration": 60
+      }
+    },
+    "ely_by": {
+      "enabled": true,
+      "name": "ely.by",
+      "cache": {
+        "enabled": true,
+        "duration": 60
+      }
+    },
+    "mineskin": {
+      "apiKey": "",
+      "proxyUrlUpload": false,
+      "allowedDomains": [],
+      "enabled": true,
+      "name": "web",
+      "cache": {
+        "enabled": true,
+        "duration": 300
+      }
+    },
+    "collection": {
+      "sources": [
+        {
+          "name": "sister",
+          "path": "/skins/sister.png",
+          "variant": "slim"
+        }
+      ],
+      "enabled": true,
+      "name": "collection",
+      "cache": {
+        "enabled": true,
+        "duration": 604800
+      }
+    },
+    "custom": []
+  },
+  "version": 3
+}

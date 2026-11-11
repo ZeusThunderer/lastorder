@@ -284,8 +284,10 @@ def check_say(text: Any) -> str:
 
 # The stand's deny list, always on top of whatever the operator configures: the
 # login/password commands are the environment's (mind-N logs in itself), and a
-# sister spending the slot's credential must stay impossible.
-DEFAULT_DENY = ("login", "l", "register", "reg", "changepassword", "unregister")
+# sister spending the slot's credential must stay impossible. `skin` likewise:
+# the skin is the operator's pick, applied by the stand (T-061) — never a
+# sister's own move on this or any server.
+DEFAULT_DENY = ("login", "l", "register", "reg", "changepassword", "unregister", "skin")
 
 
 def parse_deny(*values: str | None) -> tuple[str, ...]:
@@ -966,9 +968,23 @@ def main() -> None:
         env("MC_COMMANDS_DENY_SLOT", default="") or "",
     )
     password = env("MC_LOGIN_PASSWORD", default="") or ""
-    login = SessionLogin(password, send=lambda text: body.act("chat", {"text": text})) if password else None
+    # T-061: the skin command an external server expects after /login (compose
+    # `MC_SKIN_COMMAND_N` → `MC_SKIN_COMMAND`); empty — the default — sends nothing.
+    skin_command = env("MC_SKIN_COMMAND", default="") or ""
+    login = (
+        SessionLogin(
+            password,
+            send=lambda text: body.act("chat", {"text": text}),
+            skin_command=skin_command,
+        )
+        if password
+        else None
+    )
     if password:
-        log.info("login armed: mind-N logs into the server itself (the password is never logged)")
+        log.info(
+            "login armed: mind-N logs into the server itself (the password is never logged)%s",
+            "; a skin command follows each login" if skin_command else "",
+        )
 
     server, _impl, _executor = build_mind(
         body,

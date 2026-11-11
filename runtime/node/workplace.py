@@ -741,7 +741,9 @@ def create_workplace(
     if root.exists():
         raise FileExistsError(f"workplace of {serial_dir(serial)} already exists")
     root.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(template_dir, root)
+    # `skin/` is the operator's source material for the server-side skin mod
+    # (T-061), never a sister's file — it stays out of every born workplace.
+    shutil.copytree(template_dir, root, ignore=shutil.ignore_patterns("skin"))
 
     # PERSONA.md: the template's placeholder file becomes this node's rendered core.
     _write_readonly(
