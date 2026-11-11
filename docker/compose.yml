@@ -12,8 +12,20 @@
 # containers resurrect after a hard engine kill, NETWORK.md section 9).
 name: lastorder
 
+# The Fabric versions in one place (T-062): the same compose variables feed the server
+# env below and the body build args, so the server and the clients cannot drift apart
+# (kept equal by tests/test_fabric_server.py). Loader 0.20.1 and launcher 1.1.2 are the
+# stable fabricmc.net meta picks for 1.21.11 (checked 2026-11-11), fabric-api is the
+# only server mod (ADR-045: no mods "for the future"). At start the image downloads the
+# mods from modrinth.com — the mc-server's only new egress (docker-topology.md).
+x-fabric-api: &fabric-api "${FABRIC_API:-0.140.0+1.21.11}"
+
 x-body: &body
-  build: ./body
+  build:
+    context: ./body
+    args:
+      # the same pin the server's MODRINTH_PROJECTS uses — one value for both sides
+      FABRIC_API: *fabric-api
   image: lastorder-body:dev
   restart: on-failure
   depends_on:
@@ -38,6 +50,14 @@ x-body: &body
     BODY_SIM_DISTANCE: "${BODY_SIM_DISTANCE:-5}"   # vanilla client minimum; lower falls back to 12
     BODY_MAX_FPS: "${BODY_MAX_FPS:-10}"
     MALLOC_ARENA_MAX: "2"   # glibc arenas: 8 per thread by default, 2 is plenty for a JVM body
+    # the server's loader pin rides the same variable (T-062): entrypoint turns it into
+    # HeadlessMC's fabric/<mc>/<loader> target, so the bodies' loader cannot float either
+    FABRIC_LOADER: "${FABRIC_LOADER:-0.20.1}"
+    # camera stream parameters (T-063, ADR-045 §9): per-slot switch BODY_CAMERA_N below;
+    # defaults sized in T-065, off changes nothing until a slot turns the camera on
+    BODY_CAMERA_FPS: "${BODY_CAMERA_FPS:-10}"
+    BODY_CAMERA_SIZE: "${BODY_CAMERA_SIZE:-854x480}"
+    BODY_CAMERA_BITRATE: "${BODY_CAMERA_BITRATE:-1M}"
 
 # The mind of a slot (NETWORK.md section 3): C1 plus the body MCP server on :8700 in the
 # body's network namespace (the py4j bridge stays localhost-only). The runner endpoints
@@ -100,6 +120,7 @@ x-node: &node
   build:
     context: ..
     dockerfile: docker/node/Dockerfile
+    target: base   # the sisters' variant without ffmpeg (T-064: lo is the desk's alone)
   image: lastorder-node:dev
   restart: "no"   # quota spender: no unattended resurrect after a daemon death (T-037)
   mem_limit: 1.5g
@@ -165,8 +186,13 @@ services:
     image: itzg/minecraft-server:java21
     environment:
       EULA: "TRUE"
-      TYPE: "VANILLA"
+      # Fabric instead of vanilla (ADR-045, T-062): loader and launcher pinned, never
+      # "latest"; the world on the same volume survives the switch unchanged.
+      TYPE: "FABRIC"
       VERSION: "1.21.11"
+      FABRIC_LOADER_VERSION: "${FABRIC_LOADER:-0.20.1}"
+      FABRIC_LAUNCHER_VERSION: "${FABRIC_LAUNCHER:-1.1.2}"
+      MODRINTH_PROJECTS: "fabric-api:${FABRIC_API:-0.140.0+1.21.11}"
       ONLINE_MODE: "FALSE"
       ENFORCE_SECURE_PROFILE: "FALSE"   # offline clients cannot sign chat
       DIFFICULTY: "easy"
@@ -193,9 +219,11 @@ services:
       # the body rides the default network, so an external address is reachable;
       # mind-1 shares this netns and is recreated with it.
       MC_SERVER: "${MC_SERVER_1:-mc-server:25565}"
+      # BODY_CAMERA_1=1 turns this slot's camera on (T-063): Xvfb + ffmpeg → media
+      BODY_CAMERA: "${BODY_CAMERA_1:-}"
     volumes:
       - body-1:/data
-    networks: [default, slot-1]   # slot-1 carries mind-1's MCP to node-1 (internal)
+    networks: [default, slot-1, media-net]   # slot-1 carries mind-1's MCP to node-1 (internal); media-net only for the camera stream
 
   # The mind of slot 1: see the x-mind anchor.
   mind-1:
@@ -249,9 +277,10 @@ services:
       # MC_SERVER_N moves this body to another server (T-057, the infra bridge's
       # slot_server): same override shape as slot 1, all slots alike
       MC_SERVER: "${MC_SERVER_2:-mc-server:25565}"
+      BODY_CAMERA: "${BODY_CAMERA_2:-}"
     volumes:
       - body-2:/data
-    networks: [default, slot-2]
+    networks: [default, slot-2, media-net]
 
   mind-2:
     <<: *mind
@@ -298,9 +327,10 @@ services:
       <<: *body-env
       MC_USERNAME: LastOrder03
       MC_SERVER: "${MC_SERVER_3:-mc-server:25565}"
+      BODY_CAMERA: "${BODY_CAMERA_3:-}"
     volumes:
       - body-3:/data
-    networks: [default, slot-3]
+    networks: [default, slot-3, media-net]
 
   mind-3:
     <<: *mind
@@ -406,11 +436,14 @@ services:
     build:
       context: ..
       dockerfile: docker/node/Dockerfile
-    image: lastorder-node:dev
+      target: lo   # + ffmpeg for cutting clips out of media (T-064); sisters build `base`
+    image: lastorder-node-lo:dev
     restart: "no"   # quota spender: no unattended resurrect after a daemon death (T-037)
     depends_on: [hive, llm-gateway]
-    mem_limit: 1g
-    cpus: "0.5"
+    # the video desk (T-064): the harness peaks ~600 MiB and an x264 cut rides one core,
+    # so the desk gets the node precedent 1.5g and a whole core
+    mem_limit: 1.5g
+    cpus: "1.0"
     read_only: true
     tmpfs:
       - /tmp:size=512m,mode=1777
@@ -451,7 +484,14 @@ services:
     volumes:
       - hive-work:/workplace
       - knowledge:/knowledge:ro
-    networks: [svc-lo]
+      # the network's journals, read-only (T-064): the desk cuts video by the journals'
+      # timestamps; a write into them must fail. The whole hive-run rides along — the
+      # administrator is the one agent trusted with every slot's record.
+      - hive-run:/net-logs/hive:ro
+      - mind-1-run:/net-logs/mind-1:ro
+      - mind-2-run:/net-logs/mind-2:ro
+      - mind-3-run:/net-logs/mind-3:ro
+    networks: [svc-lo, media-net]   # media-net: the footage of the camera bodies (T-063)
 
 
   # The HAPI hub (ADR-042, T-044): the operator's console. Upstream, unmodified,
@@ -619,6 +659,27 @@ services:
     networks: [egress-out, svc-lo]
     restart: on-failure
 
+  # The camera sink (T-063, ADR-045 §9): bodies with BODY_CAMERA_N=1 publish their Xvfb
+  # screen over RTSP; MediaMTX records every stream into the `footage` ring buffer
+  # (recordDeleteAfter via MEDIA_RETENTION, default 1d = 24h) and serves /list + /get on
+  # :9996. The pinned image carries its own config at /mediamtx.yml (docker/media/);
+  # rtmp/hls/webrtc/api are off. Internal only: media-net carries the bodies and (T-064)
+  # last-order, node-N sandboxes have no route to it, nothing is published to the host,
+  # and the box has no way out — recording is all it does.
+  media:
+    image: bluenviron/mediamtx:1.21.3
+    restart: on-failure
+    mem_limit: 512m
+    environment:
+      # the ring depth (ADR-045: write always, decide later); 1d = 24h. MEDIA_SEGMENT
+      # only shortens the pieces for a stand check — production keeps the 1h default.
+      MTX_PATHDEFAULTS_RECORDDELETEAFTER: "${MEDIA_RETENTION:-1d}"
+      MTX_PATHDEFAULTS_RECORDSEGMENTDURATION: "${MEDIA_SEGMENT:-1h}"
+    volumes:
+      - ./media/mediamtx.yml:/mediamtx.yml:ro
+      - footage:/recordings
+    networks: [media-net]
+
 volumes:
   world:
   body-1:
@@ -636,6 +697,7 @@ volumes:
   workplaces-1:
   workplaces-2:
   workplaces-3:
+  footage:
 
 networks:
   gateway-internal: {}
@@ -655,3 +717,7 @@ networks:
   svc-lo: {internal: true}
   # the only network with a route out: zai-egress alone sits on it
   egress-out: {}
+  # body cameras → media (T-063, ADR-045 §9): bodies publish RTSP, media records and
+  # serves clips; internal — no route out, no host ports, and node-N never joins it
+  # (a sister sandbox cannot reach the footage; last-order joins in T-064)
+  media-net: {internal: true}

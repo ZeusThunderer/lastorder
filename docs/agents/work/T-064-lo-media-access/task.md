@@ -2,7 +2,7 @@
 id: T-064
 title: Last Order и видео — доступ к media, ffmpeg, журналы сети на чтение, справка об инструментах
 stage: I
-status: ready
+status: done
 criticality: critical
 lane: b
 after: [T-063]

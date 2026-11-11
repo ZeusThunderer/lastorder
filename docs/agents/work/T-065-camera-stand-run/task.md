@@ -2,7 +2,7 @@
 id: T-065
 title: Прогон камер на стенде — три тела на Xvfb в media, цена CPU и памяти, влияние на C1
 stage: I
-status: ready
+status: in_progress
 criticality: normal
 lane: b
 after: [T-063, T-064]

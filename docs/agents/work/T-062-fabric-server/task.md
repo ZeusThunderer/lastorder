@@ -2,7 +2,7 @@
 id: T-062
 title: mc-server на Fabric — закреплённые версии загрузчика и модов, мир без потерь
 stage: I
-status: ready
+status: done
 criticality: normal
 lane: b
 after: []
