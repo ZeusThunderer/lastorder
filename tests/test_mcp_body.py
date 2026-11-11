@@ -938,6 +938,29 @@ def test_session_login_masks_the_password_everywhere() -> None:
     assert login.mask("plain line") == "plain line"
 
 
+def test_session_login_sends_the_skin_command_after_each_entry() -> None:
+    """T-061: one configured command rides the environment's own login path on
+    external servers; empty — the stand default — sends nothing."""
+    sent: list[str] = []
+    clock = FakeClock()
+    login = SessionLogin("hunter2", sent.append, clock=clock, skin_command="/skin set sister")
+    login.on_tick(True, [])  # world entry: the skin command follows the login
+    assert sent == ["/login hunter2", "/skin set sister"]
+    del sent[:]
+    clock.now += 31.0  # a relogin prompt behind the cooldown resends the login only
+    login.on_tick(True, ["Use /login to play"])
+    assert sent == ["/login hunter2"]
+    login.on_tick(False, [])
+    login.on_tick(True, [])  # a kick and a rejoin: both go out again
+    assert sent[-2:] == ["/login hunter2", "/skin set sister"]
+
+
+def test_session_login_without_a_skin_command_sends_only_the_login() -> None:
+    sent: list[str] = []
+    SessionLogin("hunter2", sent.append).on_tick(True, [])
+    assert sent == ["/login hunter2"]
+
+
 def test_the_executor_masks_the_password_out_of_chat_entries(stack: Stack) -> None:
     """chat_entry is the single door into observe() and chat.line: the password
     dies there, never reaching a log, an event or the agent."""
