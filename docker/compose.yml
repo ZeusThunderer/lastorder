@@ -186,7 +186,10 @@ services:
       VERSION: "1.21.11"
       FABRIC_LOADER_VERSION: "${FABRIC_LOADER:-0.20.1}"
       FABRIC_LAUNCHER_VERSION: "${FABRIC_LAUNCHER:-1.1.2}"
-      MODRINTH_PROJECTS: "fabric-api:${FABRIC_API:-0.140.0+1.21.11}"
+      # skinrestorer (T-061): the sisters' skins on this offline server — the only
+      # actively maintained server-side Fabric skin mod with an exact 1.21.11 build
+      # (Modrinth `skinrestorer`, checked 2026-11-11); pinned like fabric-api above.
+      MODRINTH_PROJECTS: "fabric-api:${FABRIC_API:-0.140.0+1.21.11},skinrestorer:${SKINRESTORER:-2.11.1+1.21.11-fabric}"
       ONLINE_MODE: "FALSE"
       ENFORCE_SECURE_PROFILE: "FALSE"   # offline clients cannot sign chat
       DIFFICULTY: "easy"
@@ -202,6 +205,12 @@ services:
       - "${MC_HOST_PORT:-25565}:25565"   # join from the host to watch
     volumes:
       - world:/data
+      # the operator's chosen skin (T-061), mounted READ-ONLY for the mod's
+      # collection provider; the sandboxes and the agent never see this file
+      - ../agent/last_order/skin/sister.png:/skins/sister.png:ro
+      # the mod's config (T-061): autoFetch off (this offline server hands out
+      # its own skin), the collection provider on with the file above, slim
+      - ./mc-server/skinrestorer/config.json:/data/config/skinrestorer/config.json:ro
     restart: on-failure
 
   body-1:
@@ -235,6 +244,10 @@ services:
       # the slot's server password (T-053): mind-N logs in itself; the value is
       # lifted by up.sh into THIS mind alone, never into node-N
       MC_LOGIN_PASSWORD: "${MC_LOGIN_PASSWORD_1:-}"
+      # the slot's post-login skin command (T-061): what an external server's own
+      # skin plugin expects, sent by the environment right after /login; empty —
+      # the default — sends nothing (our mc-server skins come from skinrestorer)
+      MC_SKIN_COMMAND: "${MC_SKIN_COMMAND_1:-}"
     volumes:
       - mind-1-run:/mind-run
       - workplaces-1:/workplaces:ro   # the Jev policy of the living sister, read-only
@@ -288,6 +301,7 @@ services:
       # the slot's server password (T-053): mind-N logs in itself; the value is
       # lifted by up.sh into THIS mind alone, never into node-N
       MC_LOGIN_PASSWORD: "${MC_LOGIN_PASSWORD_2:-}"
+      MC_SKIN_COMMAND: "${MC_SKIN_COMMAND_2:-}"   # the T-061 skin command, slot shape of mind-1
     volumes:
       - mind-2-run:/mind-run
       - workplaces-2:/workplaces:ro
@@ -337,6 +351,7 @@ services:
       # the slot's server password (T-053): mind-N logs in itself; the value is
       # lifted by up.sh into THIS mind alone, never into node-N
       MC_LOGIN_PASSWORD: "${MC_LOGIN_PASSWORD_3:-}"
+      MC_SKIN_COMMAND: "${MC_SKIN_COMMAND_3:-}"   # the T-061 skin command, slot shape of mind-1
     volumes:
       - mind-3-run:/mind-run
       - workplaces-3:/workplaces:ro

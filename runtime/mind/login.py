@@ -29,7 +29,13 @@ _REGISTER_PROMPT = re.compile(r"/register", re.IGNORECASE)
 class SessionLogin:
     """Sends `/login` on world entry and answers a server that asks to register;
     re-logins on a repeated prompt behind a cooldown. `send` is the body's chat
-    lever; nothing here logs — the password exists only inside the sent commands."""
+    lever; nothing here logs — the password exists only inside the sent commands.
+
+    `skin_command` (T-061) is the environment's own move on servers that manage
+    skins by command (the external stand server): one configured command sent
+    right after each world-entry `/login`, by the same lever and under the same
+    password masking. Empty (the default) sends nothing. It is not a secret and
+    holds no password — `mask` would cut any echo that ever contained one."""
 
     def __init__(
         self,
@@ -38,11 +44,13 @@ class SessionLogin:
         *,
         clock: Callable[[], float] = time.monotonic,
         retry_s: float = 30.0,
+        skin_command: str = "",
     ):
         self._password = str(password or "")
         self._send = send
         self._clock = clock
         self._retry_s = retry_s
+        self._skin_command = str(skin_command or "").strip()
         self._was_in_game = False
         self._last_login_at = -1e9
         self._registered = False
@@ -57,6 +65,8 @@ class SessionLogin:
             return
         if in_game and not self._was_in_game:  # a join or a rejoin after a kick
             self._send(f"/login {self._password}")
+            if self._skin_command:
+                self._send(self._skin_command)
             self._last_login_at = self._clock()
         self._was_in_game = in_game
         if not in_game:
