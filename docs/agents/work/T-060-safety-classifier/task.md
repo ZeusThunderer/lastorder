@@ -2,7 +2,7 @@
 id: T-060
 title: Классификатор безопасности — второе мнение о запросах infra Last Order на локальной модели
 stage: I
-status: ready
+status: blocked
 criticality: normal
 after: [T-057]
 branch: z/T-060-safety-classifier

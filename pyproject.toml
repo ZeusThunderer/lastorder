@@ -17,7 +17,14 @@ hive = ["fastapi>=0.115", "uvicorn>=0.30"]
 [dependency-groups]
 # The hive extra rides along in dev so plain `uv run pytest` covers the API tests too
 # (tests/test_hive_*.py); the image installs it explicitly (docker/mind/Dockerfile).
-dev = ["pytest>=8", "last-order[hive]"]
+dev = [
+    "pytest>=8",
+    "last-order[hive]",
+    "pyyaml>=6.0.3",
+]
+safety = [
+    "gliner2[local]>=2.1.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -28,3 +35,6 @@ packages = ["runtime"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# the real safety model (T-060) runs only on request: pytest -m model
+addopts = "-m 'not model'"
+markers = ["model: runs a real local model (the optional `safety` group)"]
