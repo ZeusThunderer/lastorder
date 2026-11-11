@@ -50,6 +50,19 @@ compose() {
     fi
 }
 
+# `up` goes through docker/node/up.sh: it lifts the slot keys from the root .env
+# (a bare compose up leaves mind-N with an empty MIND_RUNNER_KEY — found in T-058).
+# up.sh passes its args to `compose up -d`; the project rides COMPOSE_PROJECT_NAME.
+compose_up() {
+    if [ "$DRY_RUN" = 1 ]; then
+        echo "${PROJECT_ARGS[1]:+COMPOSE_PROJECT_NAME=${PROJECT_ARGS[1]} }bash docker/node/up.sh $*"
+    elif [ ${#PROJECT_ARGS[@]} -gt 0 ]; then
+        COMPOSE_PROJECT_NAME="${PROJECT_ARGS[1]}" bash "$HERE/../docker/node/up.sh" "$@"
+    else
+        bash "$HERE/../docker/node/up.sh" "$@"
+    fi
+}
+
 node_running() {  # the sandbox of slot N: an up mid-life session dies with the mind
     [ "$DRY_RUN" = 1 ] && return 1
     [ "$(docker compose "${PROJECT_ARGS[@]}" -f "$COMPOSE_FILE" ps --status running -q "node-$1" | wc -l)" -gt 0 ]
@@ -69,7 +82,7 @@ for n in "${SLOTS[@]}"; do
     echo "== slot $n: mind stop (SIGTERM, graceful bridge close)"
     compose stop "mind-$n"
     echo "== slot $n: body recreate (fresh container, fresh netns)"
-    compose up -d --force-recreate --no-deps "body-$n"
+    compose_up --force-recreate --no-deps "body-$n"
     echo "== slot $n: wait for the gateway healthcheck"
     if [ "$DRY_RUN" != 1 ]; then
         # compose ps -q resolves the real container name in ANY project (the
@@ -88,6 +101,6 @@ for n in "${SLOTS[@]}"; do
     # --no-deps: the stand is up, only this mind starts — a bare `up` also
     # reconciles siblings and can stumble on env drift (a parallel stand's
     # ports, seen live). The body's health was the gate, checked explicitly.
-    compose up -d --no-deps "mind-$n"
+    compose_up --no-deps "mind-$n"
 done
 echo "slot_restart: done (${SLOTS[*]})"

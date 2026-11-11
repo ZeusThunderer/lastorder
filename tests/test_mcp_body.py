@@ -17,7 +17,9 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import os
 import signal
+import tempfile
 import threading
 import time
 import types
@@ -152,7 +154,9 @@ class Stack:
         login: "SessionLogin | None" = None,
     ):
         self.body = body or FakeBody()
-        self._tmp = f".mcp-body-test-{time.monotonic_ns()}.jsonl"
+        # the temp dir, not the cwd: a stack that never reaches close() left these
+        # files in the repo root (and every worktree)
+        self._tmp = os.path.join(tempfile.gettempdir(), f".mcp-body-test-{time.monotonic_ns()}.jsonl")
         self.calls_file = JsonlLog(self._tmp)
         extra: dict = {}
         if deny_commands is not None:

@@ -137,9 +137,15 @@ def test_slot_restart_dry_run_prints_the_sequence():
         check=True,
     ).stdout
     assert "stop mind-1" in out
-    assert "up -d --force-recreate --no-deps body-1" in out
+    # `up` goes through docker/node/up.sh, which lifts the slot keys from .env (T-058)
+    assert "docker/node/up.sh --force-recreate --no-deps body-1" in out
     assert "--healthy" in out and "ps -q body-1" in out
-    assert "up -d --no-deps mind-1" in out
+    assert "docker/node/up.sh --no-deps mind-1" in out
+    other = subprocess.run(
+        ["bash", "dev/slot_restart.sh", "1", "--dry-run", "-p", "t999"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert "COMPOSE_PROJECT_NAME=t999 bash docker/node/up.sh --no-deps mind-1" in other
 
 
 # --- the infra bridge surface (T-057) --------------------------------------------------------

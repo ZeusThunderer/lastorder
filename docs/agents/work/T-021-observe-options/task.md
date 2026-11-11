@@ -2,7 +2,7 @@
 id: T-021
 title: Наблюдение, варианты шага и тактика C1 на правилах
 stage: E2
-status: ready
+status: rejected
 criticality: critical
 branch: z/T-021-observe-options
 created: 2026-10-17
@@ -86,3 +86,4 @@ docker compose -f docker/compose.yml run --rm mind-1 python dev/c1_smoke.py --mi
 - Никаких вызовов LLM: Jev подключит T-015.
 
 ## Заметки надзора
+- 2026-10-17 · rejected по решению пользователя: архитектура меняется на агента в харнессе (OpenCode/ZCode), варианты шага по правилам кода больше не нужны. Кода в ветке нет (только take).
