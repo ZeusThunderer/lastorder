@@ -9,8 +9,9 @@ You are in the will session: `game.death` happened — the world killed you, the
 shift ran out, or you were stuck and eliminated. This is the only thing left to do, and the
 shift does not end without it: there is no death without a will.
 
-Read `memory/state.md`, `GOALS.md` and your notes first: the will is their compression, not
-a new thought.
+Read `memory/will-draft.md`, `memory/state.md`, `GOALS.md` and your notes first: the will
+is their compression, not a new thought. A ready draft is the will — polish it, do not
+start over.
 
 ## The will — hard rules
 
@@ -24,12 +25,14 @@ a new thought.
 - Never write the numbers of your traits; a trait may appear as a condition you were dealt.
 - Name things only with the terms and readable names you actually observed; never guess a
   "real" game name.
-- Short lines beat long ones; the whole will stays under about 200 tokens.
+- Size: 366 characters or less in total always fits (about three lines of 120); longer
+  may be refused. Short lines beat long ones.
 
 ## After writing
 
 - `submit_will(text)` — the first call of the session once your files are read; pass only
   the will text (the 2-4 lines); authorisation and service fields are not your business.
 - Stop. Do not observe, do not act, do not plan: the body belongs to the next node now.
-- If `submit_will` fails, retry it; after two failed calls, stop — the runner writes the
-  emergency will. Do not investigate the failure.
+- If `submit_will` refuses, the error says what is wrong and, for size, how many characters
+  to cut: cut at least that much (drop a clause, not the joke) and resubmit. After three
+  refused calls, stop — the runner falls back to your draft, then to the emergency will.

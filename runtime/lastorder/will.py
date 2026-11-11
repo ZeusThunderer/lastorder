@@ -16,6 +16,7 @@ dropping the oldest events first (section 10: a death keeps the last ones).
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -23,7 +24,12 @@ from pathlib import Path
 from typing import Sequence
 
 from runtime.config import CHARACTER_DIR
-from runtime.knowledge.budget import WILL_INPUT_BUDGET, estimate_tokens
+from runtime.knowledge.budget import (
+    WILL_BODY_MAX_TOKENS,
+    WILL_BODY_SAFE_CHARS,
+    WILL_INPUT_BUDGET,
+    estimate_tokens,
+)
 from runtime.knowledge.schema import (
     CAUSES,
     CAUSE_LESSON,
@@ -220,7 +226,7 @@ def _emergency(
                         "пишу без своей головы, голова уже молчит.",
                         f"Смерть: {CAUSE_TEXT[safe_cause]}; последнее действие: неизвестно.",
                         "Перед концом видел: ничего приметного.",
-                        f"Урок: {CAUSE_LESSON[safe_cause]} Проверь сам.",
+                        f"Урок: {CAUSE_LESSON[safe_cause]}. Проверь сам.",
                     ]
                 ),
             }
@@ -326,5 +332,13 @@ def check_will_body(body: str) -> None:
         raise WillRejected("trait numbers in the will body")
     if NAMESPACED.findall(body):
         raise WillRejected("raw game ids in the will body")
-    if estimate_tokens(body) > 220:
-        raise WillRejected("the body is over the 220-token inheritance quota")
+    size = estimate_tokens(body)
+    if size > WILL_BODY_MAX_TOKENS:
+        # the numbers the writer needs to fix it in one retry (T-071: three sisters
+        # missed by 2-90 tokens and gave up — the bare refusal said by how much)
+        cut = math.ceil((size - WILL_BODY_MAX_TOKENS) / 0.6) + 10
+        raise WillRejected(
+            f"the body is {len(body)} characters, ~{size} tokens by the hive estimate; "
+            f"the cap is {WILL_BODY_MAX_TOKENS}: cut about {cut} characters and resubmit "
+            f"(a will of {WILL_BODY_SAFE_CHARS} characters or less always fits)"
+        )

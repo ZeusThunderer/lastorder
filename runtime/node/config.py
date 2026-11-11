@@ -81,6 +81,9 @@ class NodeConfig:
     sister_uid: int | None  # the harness runs as this uid; None = no privilege drop
     sister_gid: int | None
     dev_open: bool = False  # NODE_DEV_OPEN=1: the explicit open dev mode (review R2-6)
+    # a will session whose file stopped growing this long gave up (T-071): end it,
+    # her draft or the template speaks — instead of the whole will_timeout_s
+    will_quiet_s: float = 180.0
 
     @classmethod
     def from_env(cls) -> "NodeConfig":
@@ -167,4 +170,5 @@ class NodeConfig:
             sister_uid=uid,
             sister_gid=gid if uid is not None else None,
             dev_open=(env("NODE_DEV_OPEN", default="") or "") == "1",
+            will_quiet_s=_float("WILL_QUIET_S", 180.0),
         )

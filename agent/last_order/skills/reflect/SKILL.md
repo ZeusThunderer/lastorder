@@ -30,6 +30,9 @@ a new item.
    your own memory; the network's knowledge goes through the proposal.
 5. Pending votes (`knowledge()`): read the candidates and vote your observation — accept or
    reject on evidence, not politeness.
+6. Rewrite `memory/will-draft.md`: the will you would leave if you died right now, by the
+   rules of skills/write-will (2-4 lines, at most 366 characters, one lesson, one joke). If
+   your will session cannot speak, the runner leaves this draft as your will.
 
 ## What not to do
 

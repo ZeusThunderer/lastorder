@@ -75,6 +75,8 @@ CORE_MEMORY_LIMIT_BYTES = 1536  # core.md; hive trims on a line boundary
 # --- slice quotas (what hive puts into a KnowledgeSlice / Inheritance) ------------------
 
 WILL_BODY_MAX_TOKENS = 220  # any will body, LLM or emergency; bound for B_INHERITANCE
+# the length that fits whatever the letters: 0.6 tokens per char is the estimate's worst case
+WILL_BODY_SAFE_CHARS = int(WILL_BODY_MAX_TOKENS / 0.6)  # 366
 INHERITANCE_WILLS = 3  # full texts of the latest wills (K)
 INHERITANCE_SUMMARY_TOKENS = 160  # predecessors (<=10 lines) plus active nodes
 INHERITANCE_TERMS_TOKENS = 100  # collective terms, <= 10 of them

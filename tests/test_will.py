@@ -289,3 +289,16 @@ def test_template_placeholder_mismatch_is_an_error():
         build_will_messages(node(), NAMING, reflection(), template="Stray {unknown} placeholder")
     with pytest.raises(PersonaError, match="unused"):
         build_will_messages(node(), NAMING, reflection(), template="Only {node_name} here")
+
+
+def test_the_size_refusal_names_the_numbers_to_fix_it() -> None:
+    # T-071: a bare "over the quota" made three sisters give up 2-90 tokens over the cap
+    from runtime.knowledge.budget import WILL_BODY_SAFE_CHARS, estimate_tokens
+
+    body = "Следующий узел: " + "у воды целься раньше, observe после шага, " * 12 + "\nШутка: считала дважды."
+    with pytest.raises(WillRejected) as err:
+        check_will_body(body)
+    text = str(err.value)
+    assert f"~{estimate_tokens(body)} tokens" in text and "cap is 220" in text
+    assert "cut about" in text and f"{WILL_BODY_SAFE_CHARS} characters" in text
+    assert estimate_tokens("ж" * WILL_BODY_SAFE_CHARS) <= 220   # the safe length really fits

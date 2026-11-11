@@ -165,7 +165,8 @@ def test_line_finding_and_will_order_rules_present():
     for needle in (
         "first call of the session",
         "authorisation",
-        "two failed calls",
+        "three refused calls",  # T-071: the refusal names the fix, one more try
+        "how many characters",
         "emergency will",
     ):
         assert needle in skill, needle

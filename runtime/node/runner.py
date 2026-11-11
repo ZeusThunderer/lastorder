@@ -55,6 +55,9 @@ from runtime.node.willproxy import WillProxy
 
 LIFE_PREFIX = "Life session."
 WILL_PREFIX = "Will session (you have just died)."
+# the sister's own will draft in memory/ (skills/reflect keeps it, T-071): the
+# runner's second choice after a submitted will, before the emergency template
+WILL_DRAFT_FILE = "will-draft.md"
 # _wait_session's quota sentinel: the long session died on quota while the body
 # lives — not a Death, the life loop owns the switch/wait after it
 QUOTA_DURING_SESSION = "quota-during-session"
@@ -788,10 +791,10 @@ class NodeRunner:
             self._log("will.session_skipped", {"serial": serial, "harness": adapter_name})
         will_text, will_origin = self._will_of(state, cause, text, died_at, self._harness_model(adapter_name))
         self._log(
-            "will.written" if will_origin == "agent" else "will.emergency",
+            {"agent": "will.written", "draft": "will.from_draft"}.get(will_origin, "will.emergency"),
             {"serial": serial, "origin": will_origin},
         )
-        if will_origin != "agent":
+        if will_origin == "emergency":
             # section 7: the runner, not the agent, wrote the will — the operator
             # wants to know a node died without speaking for herself
             self._alarm("emergency_will", "the will is the runner's emergency template, not the agent's", state)
@@ -822,8 +825,13 @@ class NodeRunner:
         self, state: LifeState, cause: str, text: str, died_at: str, model: str
     ) -> tuple[str, str]:
         """The agent's staged will body with the service fields filled by the
-        environment (T-040), else the emergency template — never nothing."""
+        environment (T-040); else her own draft (`memory/will-draft.md`, T-071) cut
+        to the checks; else the emergency template — never nothing."""
         staged = self._staged_will(state.serial)
+        origin = "agent"
+        if staged is None:
+            staged = self._draft_will(state.serial)
+            origin = "draft"
         if staged is not None:
             try:
                 will = assemble_will(
@@ -837,7 +845,7 @@ class NodeRunner:
                     model=model,
                     emergency=False,
                 )
-                return will.to_markdown(), "agent"
+                return will.to_markdown(), origin
             except SchemaError:
                 pass  # broken life state: the emergency template below still speaks
         traits = self._traits_of(state)
@@ -865,6 +873,38 @@ class NodeRunner:
             return Traits(**state.traits)
         except TypeError:
             return Traits(5, 5, 5, 5, 5, quirk="черты утеряны вместе с состоянием", seed=0)
+
+    def _draft_will(self, serial: int) -> str | None:
+        """The sister's own will draft (skills/reflect keeps `memory/will-draft.md`),
+        when the will session could not speak: headings and bullets dropped, the
+        first lines that pass the will checks — trailing lines go first, never
+        below two. Her words beat the template; None — the template speaks."""
+        path = (
+            self.cfg.workplaces / "agent" / workplace.serial_dir(serial)
+            / "memory" / WILL_DRAFT_FILE
+        )
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+        lines = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith(("#", ">", "```", "<!--")):
+                continue
+            if line.startswith(("- ", "* ")):
+                line = line[2:].strip()
+            if line:
+                lines.append(line)
+        lines = lines[:4]
+        while len(lines) >= 2:
+            body = "\n".join(lines)
+            try:
+                check_will_body(body)
+                return body
+            except WillRejected:
+                lines = lines[:-1]
+        return None
 
     def _staged_will(self, serial: int) -> str | None:
         """The staged will body, or None. Since T-040 `submit_will` stages the text
@@ -1002,10 +1042,28 @@ class NodeRunner:
                     self._deliver_opener(adapter, boot.hub_session_id, prompt, state)
             if process is not None:
                 deadline = time.monotonic() + self.cfg.will_timeout_s
+                # T-071: a console session never ends its turn, so a sister who gave up
+                # (two refused submits) held the slot for the whole timeout. Her
+                # session file stops growing — after will_quiet_s of that, stop.
+                progress = getattr(adapter, "session_progress", None) if long_running else None
+                will_dir = root / f"{workplace.PI_WILL_SESSION_PREFIX}{workplace.serial_dir(state.serial)}"
+                pi_id = boot.pi_session_id if long_running and boot is not None else None
+                last_size, last_move = None, time.monotonic()
                 while process.poll() is None and time.monotonic() < deadline:
                     if long_running and self._staged_will(state.serial) is not None:
                         self._log("will.staged", {"serial": state.serial})
                         break
+                    if progress is not None and pi_id is not None:
+                        now = time.monotonic()
+                        size = progress(pi_id, will_dir)
+                        if size is not None and size != last_size:
+                            last_size, last_move = size, now
+                        elif last_size is not None and now - last_move >= self.cfg.will_quiet_s:
+                            self._log(
+                                "will.session_quiet",
+                                {"serial": state.serial, "quiet_s": self.cfg.will_quiet_s},
+                            )
+                            break
                     time.sleep(0.05)
                 if process.poll() is None:
                     process.terminate()

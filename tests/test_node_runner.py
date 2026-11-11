@@ -1952,3 +1952,51 @@ def test_pi_will_mode_swaps_the_session_dir_to_a_per_death_one(tmp_path: Path, m
     workplace.set_will_mode(tmp_path, "pi", "http://127.0.0.1:8702", serial=154)
     will = json.loads((agent_dir / "settings.json").read_text(encoding="utf-8"))
     assert will["sessionDir"] == ".pi-will-00154"
+
+
+# --- T-071: the will block on the stand (three sisters missed the size cap and gave up) ----
+
+
+def _draft(rig: "Rig", serial: int, text: str) -> None:
+    memory = rig.cfg.workplaces / "agent" / f"{serial:05d}" / "memory"
+    memory.mkdir(parents=True, exist_ok=True)
+    (memory / "will-draft.md").write_text(text, encoding="utf-8")
+
+
+def test_the_draft_speaks_when_the_will_session_gives_up(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    long_tail = "Третья строка, слишком длинная для квоты наследства, " * 8
+    _draft(rig, state.serial, "# Will draft (черновик)\n\n- Следующий узел: у воды целься на четыре блока раньше.\n"
+           "- Шутка: считала дважды, второй счёт честнее.\n" + long_tail + "\n")
+    rig.script(FakeProcess(code=0, output="silent"))
+    rig.mind.kill()
+    rig.alarms.calls.clear()
+    rig.runner._death_path(state, "game", "x", "zcode")
+    will = Will.from_markdown(rig.hive.retires[0][2])
+    assert will.meta.emergency is False
+    assert will.body == "Следующий узел: у воды целься на четыре блока раньше.\nШутка: считала дважды, второй счёт честнее."
+    assert any(type == "will.from_draft" for type, _ in rig.logs)
+    assert rig.alarms.calls == []   # her words, not the runner's template
+
+
+def test_a_draft_that_cannot_pass_leaves_the_template(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    _draft(rig, state.serial, "# только заголовок\n\nодна строка\n")
+    rig.script(FakeProcess(code=0, output="silent"))
+    rig.mind.kill()
+    rig.runner._death_path(state, "game", "x", "zcode")
+    will = Will.from_markdown(rig.hive.retires[0][2])
+    assert will.meta.emergency is True
+    assert ". Проверь сам." in will.body   # the template's lesson ends with its period
+
+
+def test_hapi_will_session_ends_when_it_goes_quiet(tmp_path: Path) -> None:
+    rig, hapi = _hapi_rig(tmp_path, will_timeout_s=30.0, will_quiet_s=0.2)
+    state = rig.runner._birth()
+    rig.script(FakeProcess(hang=True))   # the console session never ends its turn
+    started = time.monotonic()
+    rig.runner.run_will_session(state, "pi")
+    assert time.monotonic() - started < 10.0
+    assert any(type == "will.session_quiet" for type, _ in rig.logs)
