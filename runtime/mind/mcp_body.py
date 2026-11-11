@@ -284,8 +284,10 @@ def check_say(text: Any) -> str:
 
 # The stand's deny list, always on top of whatever the operator configures: the
 # login/password commands are the environment's (mind-N logs in itself), and a
-# sister spending the slot's credential must stay impossible.
-DEFAULT_DENY = ("login", "l", "register", "reg", "changepassword", "unregister")
+# sister spending the slot's credential must stay impossible. `skin` likewise:
+# the skin is the operator's pick, applied by the stand (T-061) — never a
+# sister's own move on this or any server.
+DEFAULT_DENY = ("login", "l", "register", "reg", "changepassword", "unregister", "skin")
 
 
 def parse_deny(*values: str | None) -> tuple[str, ...]:

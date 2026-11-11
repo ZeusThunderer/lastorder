@@ -855,6 +855,8 @@ def test_check_server_command_accepts_a_player_command() -> None:
         "/reg pw pw",
         "/changepassword a b",
         "/unregister",
+        "/skin set web slim https://x/x.png",  # the skin is the operator's, not a sister's (T-061)
+        "/SkinRestorer:skin set player X",
         "/warp; /kill",  # one command per call
         "/warp pers\n/kill",
         "/say §kx",
