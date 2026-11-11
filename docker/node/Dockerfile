@@ -3,7 +3,7 @@
 # under /run/secrets, renders nothing into env, and drops every harness process to the
 # `sister` uid (plan review P1-1). Base is python:3.12-slim like the mind image; node 22
 # comes from NodeSource (zcode-app-cli needs node:sqlite, i.e. Node >= 22).
-FROM python:3.12-slim
+FROM python:3.12-slim AS base
 
 ARG OPENCODE_VERSION=1.19.3
 ARG ZCODE_APP_CLI_VERSION=3.15.3-36
@@ -100,3 +100,11 @@ RUN chmod 0755 /usr/local/bin/node-entrypoint
 WORKDIR /workplaces
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/node-entrypoint"]
 CMD ["python", "-m", "runtime.node"]
+
+# The Last Order desk variant (T-064, ADR-045): the same image plus ffmpeg, so the
+# desk can cut clips out of the media ring buffer by itself. The sisters never cut
+# video, so their services build the `base` target explicitly and stay lean.
+FROM base AS lo
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*

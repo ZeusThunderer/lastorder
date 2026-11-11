@@ -193,6 +193,59 @@ Last Order управляет составом сети сама, без одо�
 - `slot_restart` идёт через `dev/slot_restart.sh` (порядок T-055, отказ при живом `node-N`
   без `--force` уходит на доску как `failed` — это честный ответ Last Order).
 
+## Сервер Fabric (T-062, ADR-045)
+`mc-server` — `itzg/minecraft-server:java21` с `TYPE: FABRIC`, `VERSION: 1.21.11`. Версии
+закреплены и лежат в одном месте — переменных compose с дефолтами (`docker/compose.yml`):
+`FABRIC_LOADER` (0.20.1), `FABRIC_LAUNCHER` (1.1.2), `FABRIC_API` (0.140.0+1.21.11).
+`FABRIC_API` собирает и мод сервера (`MODRINTH_PROJECTS: fabric-api:…`), и образы тел
+(build arg в `x-body`), равенство сторон держит `tests/test_fabric_server.py`. Переопределение —
+экспорт переменной перед `docker compose` или `docker/.env` (compose читает его у своего
+compose-файла, не корневой `.env`); `up.sh` эти переменные не поднимает.
+
+- Добавить серверный мод — одна строка с версией в `MODRINTH_PROJECTS` (синтаксис
+  `проект:версия`, версия — номер Modrinth, напр. `fabric-api:0.140.0+1.21.11`). При старте
+  образ качает моды с modrinth.com — это единственный новый выход `mc-server` наружу
+  [проверено: документация образа, docker-minecraft-server.readthedocs.io, раздел Modrinth].
+  Моды «на будущее» не добавляются (ADR-045).
+- Мир: Fabric не меняет формат мира, volume `world` тот же. Перед сменой типа сервера и вообще
+  перед рискованными операциями — снимок: `bash dev/backup_world.sh` (архив в `./backups`,
+  потоком через контейнер, без bind-mount). Восстановление в живой volume — только
+  `--force`, сначала проверить архив на копии: `--volume <имя-копии>`
+  [проверено: снимок 121M/291 записей, восстановление в копию, листинги совпали].
+- Тела: Fabric Loader телам пинит тот же `FABRIC_LOADER` — entrypoint даёт HeadlessMC цель
+  `fabric:<mc>:<loader>` [проверено на стенде: `Installing 1.21.11 with fabric 0.20.1`,
+  `Launching version fabric-loader-0.20.1-1.21.11`, тело вошло в мир]. Без переменной
+  остаётся старое поведение `fabric:<mc>` — HMC берёт свежей загрузчик сам.
+
+## Камера и media (T-063, ADR-045 §9)
+Камера — переключатель слота: `BODY_CAMERA_N=1` (в `.env` или окружением compose). Тело со
+включённой камерой рендерит мир на фиксированном Xvfb-дисплее `:99` и ffmpeg'ом (в образе тела)
+стримит экран в `media` — `rtsp://media:8554/<LastOrderNN>`; ffmpeg в цикле перезапускается,
+поэтому рестарт `media` не роняет тело и поток возвращается сам
+[проверено: рестарт media, тело healthy, «camera: ffmpeg exited (rc=224), restarting»). Без
+`BODY_CAMERA_N` тело стартует как раньше (`headless`), `media` не обязателен. Параметры потока —
+`BODY_CAMERA_FPS` (10), `BODY_CAMERA_SIZE` (854x480), `BODY_CAMERA_BITRATE` (1M); дистанцию
+прорисовки для съёмки поднимают обычными `BODY_RENDER_DISTANCE`/`BODY_XMX` слота.
+
+`media` — MediaMTX `bluenviron/mediamtx:1.21.3` (конфиг `docker/media/mediamtx.yml`, только
+RTSP+запись+playback, остальное выключено). Пишет все потоки в кольцевой буфер: volume `footage`,
+сегменты по 1ч, глубина кольца `MEDIA_RETENTION` (по умолчанию `1d` = 24ч; для проверки удаления
+на стенде задают короткие `MEDIA_SEGMENT`/`MEDIA_RETENTION`). Выдача:
+- список записей: `GET http://media:9996/list?path=LastOrder01`
+- вырезка mp4: `GET http://media:9996/get?path=LastOrder01&start=<RFC3339>&duration=<сек>&format=mp4`
+  [проверено: 8-секундная вырезка, валидный `ftyp isom`]
+
+Сеть: `media-net` — внутренняя, в ней тела (все три, независимо от камеры), `media` и (T-064)
+`last-order`; наружу из `media` пути нет, портов на хосте нет. Сёстры (`node-N`) в `media-net`
+не входят — из `slot-N` имя `media` даже не резолвится [проверено на стенде].
+
+Видео-стол Last Order (T-064): сервис `last-order` строит цель `lo` образа узла (`lastorder-node-lo:dev`,
+= base + ffmpeg; сёстры остаются на `base`), входит в `media-net`, получает журналы сети на чтение
+(`hive-run:/net-logs/hive:ro`, `mind-N-run:/net-logs/mind-N:ro` — запись падает), режет вырезки ffmpeg'ом
+в `/workplace/video`. Лимиты: 1.5g / 1 cpu (харнесс ~600 MiB + кодирование одним ядром). Справка столу —
+`agent/network/reference/video-tools.md`, что вокруг — AGENTS.md «What is around you»; повелений там нет
+(ADR-045: поведение пишет не код).
+
 ## Ключи стенда
 Прогон идёт с ключами: без них `docker/node/up.sh` отказывается подниматься (fail-closed R2-6),
 а приём воли падает в аварийные завещания (T-032). `dev/stand_keys.py` готовит `.env`,
