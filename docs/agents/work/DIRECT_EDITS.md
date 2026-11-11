@@ -108,3 +108,18 @@
 - Коммит: ce0c099
 - Почему не через ZCode: стенд стоит, съёмка идёт; правка в 1 строку без выбора решения.
   [проверено: pytest 984 passed, check.py ok] На стенде — после пересборки образа node.
+
+## D-011 · 2026-11-07 · T-067
+- Основание: 6 (задача надзора) с расширением объёма по решению оператора — «For the spectators,
+  you can create an additional container with a higher level of detail».
+- Файлы: docker/camera/{Dockerfile,entrypoint.sh,cam.sh}, docker/compose.camera.yml (оверлей,
+  профиль `camera`; основной compose.yml не тронут), dev/video/{cam.sh,direct.sh}.
+- Коммит: 10b74bf (+ правки в ветке c/T-067-intro-video)
+- Что это: клиент Fabric без uc в режиме наблюдателя, Xvfb 1920×1080, дистанция 10, ffmpeg пишет
+  видео и звук игры (PulseAudio null-sink). Агента, ключей и RCON в контейнере нет; spectate/tp
+  даёт скрипт оператора через `rcon-cli` mc-server. Сеть — только default (рядом с mc-server).
+- Находка для T-063: HeadlessMC в офлайне без `hmc.check.xvfb=true` вырезает рендер даже под Xvfb
+  («game will start in headless mode»), то есть `BODY_RENDER=xvfb` тел, вероятно, рисует чёрное.
+  [проверено: камера, чёрный кадр до флага, мир после] Тела с этим флагом не проверялись.
+- [проверено: 1080p, ~15–18 к/с на 6–7 ядрах CPU (llvmpipe), звук −3.6 дБ пик на тестовом
+  playsound] Тестов pytest нет: оверлей вне основного compose, тесты конфига его не читают.

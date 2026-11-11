@@ -1,0 +1,310 @@
+<!doctype html>
+<html
+  lang="ru"
+  data-composition-variables='[
+    {"id":"color-ink","type":"color","label":"Text","default":"#f2f2f2"},
+    {"id":"color-accent","type":"color","label":"Accent (sister lens green)","default":"#3fd37a"},
+    {"id":"color-death","type":"color","label":"Death line","default":"#f0a040"},
+    {"id":"font-display","type":"string","label":"Display font","default":"Oswald"},
+    {"id":"font-chat","type":"string","label":"Chat font","default":"IBM Plex Mono"}
+  ]'
+>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <!-- T-067 trailer "Передача смены" (SPEC.md). Every line is a real log line of 2026-11-07. -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+    <style>
+      :root {
+        --color-ink: #f2f2f2;
+        --color-accent: #3fd37a;
+        --color-death: #f0a040;
+        --font-display: "Oswald";
+        --font-chat: "IBM Plex Mono";
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+      #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+      .ground { position: absolute; inset: 0; background: #000; }
+      .wrap { position: absolute; inset: 0; overflow: hidden; }
+      .wrap video { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; object-fit: cover; }
+
+      /* game chat: the vanilla "<name> text" line, the medium of the film */
+      .chat { position: absolute; left: 96px; bottom: 150px; max-width: 1560px; z-index: 40; }
+      .chat .line {
+        display: inline-block; font-family: var(--font-chat), monospace; font-weight: 500; font-size: 36px;
+        line-height: 1.38; color: var(--color-ink); background: rgba(0, 0, 0, 0.5);
+        padding: 12px 22px; text-shadow: 3px 3px 0 #3a3a3a;
+      }
+      .chat .who { color: var(--color-accent); }
+      .chat .sys { color: var(--color-death); }
+      .chat .ts { color: #9a9a9a; }
+      .chat.big { bottom: 470px; left: 140px; max-width: 1640px; }
+      .chat.big .line { font-size: 46px; padding: 16px 28px; }
+      .chat.hook { bottom: 170px; }
+      .chat.hook .line { font-size: 44px; padding: 14px 26px; }
+      .chat .acc { color: var(--color-accent); }
+
+      /* narration: plain sentence that says what the viewer is looking at */
+      .note {
+        position: absolute; left: 120px; top: 120px; max-width: 1680px; z-index: 50;
+        font-family: var(--font-display), sans-serif; font-weight: 600; font-size: 76px; line-height: 1.12;
+        color: var(--color-ink); text-shadow: 5px 5px 0 rgba(0, 0, 0, 0.6), 0 0 30px rgba(0, 0, 0, 0.35);
+      }
+      .note > div { display: inline; background: rgba(0, 0, 0, 0.42); padding: 4px 22px 8px;
+        box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+      .note .acc { color: var(--color-accent); }
+      .note.low { top: auto; bottom: 200px; }
+      .note.dark { top: 700px; font-weight: 500; font-size: 62px; color: #d6d6d6; }
+      .note.dark > div { background: none; padding: 0; }
+
+      /* titles: condensed caps with the game's hard drop shadow */
+      .title {
+        position: absolute; left: 120px; top: 360px; z-index: 50;
+        font-family: var(--font-display), sans-serif; font-weight: 700; text-transform: uppercase;
+        font-size: 132px; line-height: 1; letter-spacing: 0.04em; color: var(--color-ink);
+        text-shadow: 6px 6px 0 rgba(0, 0, 0, 0.55); white-space: nowrap;
+      }
+      .title .acc { color: var(--color-accent); }
+      .title.big { left: 0; right: 0; top: 520px; text-align: center; font-size: 176px; text-shadow: 7px 7px 0 rgba(0, 0, 0, 0.7), 0 0 42px rgba(0, 0, 0, 0.35); }
+      .title.mid { top: 430px; }
+      .title.end { top: 380px; font-size: 200px; }
+      .log {
+        position: absolute; left: 96px; top: 96px; z-index: 45; font-family: var(--font-chat), monospace;
+        font-weight: 500; font-size: 30px; color: #d8d8d8; background: rgba(0, 0, 0, 0.5); padding: 8px 18px;
+      }
+      .log b { color: var(--color-accent); font-weight: 600; }
+      .will { position: absolute; left: 160px; right: 160px; top: 330px; z-index: 45; }
+      .will .head { font-family: var(--font-display), sans-serif; font-weight: 600; font-size: 64px; color: #d6d6d6; margin-bottom: 40px; }
+      .will .body {
+        font-family: var(--font-chat), monospace; font-weight: 500; font-size: 46px; line-height: 1.45;
+        color: var(--color-ink);
+      }
+      .will .body em { font-style: normal; color: var(--color-accent); }
+      .sub {
+        position: absolute; left: 0; right: 0; top: 640px; text-align: center; z-index: 50;
+        font-family: var(--font-display), sans-serif; font-weight: 400; font-size: 58px; letter-spacing: 0.06em;
+        color: var(--color-ink); text-shadow: 4px 4px 0 rgba(0, 0, 0, 0.55);
+      }
+      .url { top: 760px; font-family: var(--font-chat), monospace; font-size: 46px; letter-spacing: 0; color: var(--color-accent); text-shadow: 3px 3px 0 #000; }
+      .url > div { display: inline-block; background: rgba(0, 0, 0, 0.55); padding: 6px 22px; }
+      .credit {
+        position: absolute; left: 0; right: 0; bottom: 64px; text-align: center; z-index: 50;
+        font-family: var(--font-chat), monospace; font-size: 26px; color: #cfcfcf; text-shadow: 2px 2px 0 #000;
+      }
+      .fx { position: absolute; inset: 0; z-index: 80; pointer-events: none; }
+      #flash { background: #fff; opacity: 0; }
+      #dip { background: #000; opacity: 0; }
+      #leak { inset: -400px; opacity: 0; mix-blend-mode: screen;
+        background: radial-gradient(ellipse 70% 90% at 18% 40%, rgba(255, 170, 90, 0.95), rgba(255, 120, 40, 0.35) 45%, rgba(0, 0, 0, 0) 75%); }
+      .bar { position: absolute; left: 0; width: 1920px; z-index: 81; opacity: 0; mix-blend-mode: difference; background: #fff; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="81" data-width="1920" data-height="1080">
+      <div class="ground"></div>
+
+      <!-- ===== footage (each <video> is timed; its wrapper is not) ===== -->
+      <div class="wrap" id="w-hook"><video id="v-hook" class="clip" src="assets/clips/hook_pair.mp4" data-start="0" data-duration="3.6" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap" id="w-crane"><video id="v-crane" class="clip" src="assets/clips/crane_coast.mp4" data-start="4.2" data-duration="2.8" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap" id="w-birth"><video id="v-birth" class="clip" src="assets/clips/birth_pov.mp4" data-start="7" data-duration="9" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap" id="w-tfly"><video id="v-tfly" class="clip" src="assets/clips/title_fly.mp4" data-start="16" data-duration="3.1" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-grove" class="clip" src="assets/clips/grove_high.mp4" data-start="19.1" data-duration="1.55" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-ravine" class="clip" src="assets/clips/ravine_two.mp4" data-start="20.65" data-duration="1.55" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-path" class="clip" src="assets/clips/path_walk.mp4" data-start="22.2" data-duration="3.1" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-meet" class="clip" src="assets/clips/meet_back.mp4" data-start="25.3" data-duration="3.09" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-slope" class="clip" src="assets/clips/slope_two.mp4" data-start="28.39" data-duration="1.55" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-coal" class="clip" src="assets/clips/coal_pov.mp4" data-start="29.94" data-duration="3.1" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-q1" class="clip" src="assets/clips/q_orbit.mp4" data-start="33.04" data-duration="0.775" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-q2" class="clip" src="assets/clips/q_coast.mp4" data-start="33.815" data-duration="0.775" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-q3" class="clip" src="assets/clips/q_close.mp4" data-start="34.59" data-duration="0.775" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap" id="w-q4"><video id="v-q4" class="clip" src="assets/clips/q_forest.mp4" data-start="35.365" data-duration="0.765" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap" id="w-cave"><video id="v-cave" class="clip" src="assets/clips/cave_death.mp4" data-start="41.5" data-duration="8.8" data-track-index="1" data-has-audio="true" data-volume="2" playsinline></video></div>
+      <div class="wrap" id="w-reborn"><video id="v-reborn" class="clip" src="assets/clips/reborn_back.mp4" data-start="55" data-duration="6.2" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-c1" class="clip" src="assets/clips/c_ocean.mp4" data-start="61.2" data-duration="3.1" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-c2" class="clip" src="assets/clips/c_grove.mp4" data-start="64.3" data-duration="1.55" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-c3" class="clip" src="assets/clips/c_crane.mp4" data-start="65.85" data-duration="3.09" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-c4" class="clip" src="assets/clips/c_pair.mp4" data-start="68.94" data-duration="1.55" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap"><video id="v-c5" class="clip" src="assets/clips/c_table.mp4" data-start="70.49" data-duration="1.55" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap" id="w-c6"><video id="v-c6" class="clip" src="assets/clips/c_orbit.mp4" data-start="72.04" data-duration="1.55" data-track-index="1" muted playsinline></video></div>
+      <div class="wrap" id="w-end"><video id="v-end" class="clip" src="assets/clips/end_ocean.mp4" data-start="73.59" data-duration="7.41" data-track-index="1" muted playsinline></video></div>
+
+      <!-- ===== words: game chat (real lines, real times) ===== -->
+      <div class="chat hook clip" id="c-kill0" data-start="0.45" data-duration="3.15" data-track-index="3"><div class="line" data-type>LastOrder02 <span class="sys">was slain by</span> LastOrder01</div></div>
+      <div class="chat clip" id="c-160first" data-start="12.1" data-duration="3.85" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> Я 00160. От 00156 беру завет: … проверять всё своими руками.</div></div>
+      <div class="chat clip" id="c-meet" data-start="26.0" data-duration="3.85" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> 00161, вижу тебя — считаю встречу состоявшейся.</div></div>
+      <div class="chat clip" id="c-coal" data-start="30.16" data-duration="2.9" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder02&gt;</span> 00161: уголь добыт, 7 штук … факт в базу.</div></div>
+      <div class="chat big clip" id="c-kill" data-start="36.6" data-duration="4.8" data-track-index="3"><div class="line" data-type><span class="ts">[18:06:37]</span> LastOrder02 <span class="sys">was slain by</span> LastOrder01</div></div>
+      <div class="chat big clip" id="c-sorry" data-start="37.6" data-duration="3.8" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> 161!! Это я, 160 — моё тело … убило тебя, прости.</div></div>
+      <div class="chat clip" id="c-163" data-start="57.3" data-duration="3.85" data-track-index="3"><div class="line" data-type><span class="who">&lt;LastOrder01&gt;</span> Узел 00163, тело LastOrder01 снова на ногах. … <span class="acc">перед attack — смотри entities</span></div></div>
+
+      <!-- ===== words: narration (what the viewer is looking at) ===== -->
+      <div class="note clip" id="n-ai" data-start="7.25" data-duration="2.5" data-track-index="5"><div data-words>LastOrder01 — не игрок, а <span class="acc">ИИ-агент</span></div></div>
+      <div class="note clip" id="n-ttl" data-start="9.85" data-duration="2.55" data-track-index="5"><div data-words>У каждой сестры — 45 минут жизни</div></div>
+      <div class="note clip" id="n-chat" data-start="22.3" data-duration="3.55" data-track-index="5"><div data-words>Договариваются в обычном чате игры</div></div>
+      <div class="note clip" id="n-base" data-start="30.0" data-duration="3.0" data-track-index="5"><div data-words>Каждая находка — в общую базу знаний</div></div>
+      <div class="note clip" id="n-food" data-start="33.1" data-duration="2.6" data-track-index="5"><div data-words>Еда кончается. Сёстры идут охотиться на свинью</div></div>
+      <div class="note dark clip" id="n-why" data-start="38.6" data-duration="3.55" data-track-index="5"><div data-words>Её команда <span class="acc">attack</span> — без цели. Тело ударило ближайшего: сестру.</div></div>
+      <div class="note clip" id="n-next" data-start="55.4" data-duration="2.6" data-track-index="5"><div data-words>Тело то же. Сестра новая — 00163</div></div>
+
+      <!-- ===== words: titles ===== -->
+      <div class="title mid clip" id="t-ago" data-start="4.45" data-duration="2.5" data-track-index="4"><div data-letters>За 36 минут до этого</div></div>
+      <div class="title big clip" id="t-name" data-start="16.05" data-duration="2.95" data-track-index="4"><div data-letters>Last Order</div></div>
+      <div class="title clip" id="t-three" data-start="19.15" data-duration="1.45" data-track-index="4"><div data-letters>Один мир</div></div>
+      <div class="title clip" id="t-one" data-start="20.7" data-duration="1.45" data-track-index="4"><div data-letters>Две <span class="acc">сестры</span></div></div>
+      <div class="title clip" id="t-clock" data-start="42.2" data-duration="3.4" data-track-index="4"><div data-letters>45 минут истекли</div></div>
+      <div class="will clip" id="t-will" data-start="50.6" data-duration="4.3" data-track-index="4">
+        <div class="head" data-type>Умирая, 00160 пишет завещание следующей:</div>
+        <div class="body" data-type>Урок, оплаченный жизнью сестры: … <em>Перед attack смотри entities, рядом сестра — не махать.</em></div>
+      </div>
+      <div class="title clip" id="t-death" data-start="61.35" data-duration="2.85" data-track-index="4"><div data-letters>Сёстры умирают</div></div>
+      <div class="title clip" id="t-shift" data-start="64.4" data-duration="4.45" data-track-index="4"><div data-letters>Знание <span class="acc">остаётся</span></div></div>
+      <div class="title clip" id="t-reads" data-start="69.0" data-duration="1.45" data-track-index="4"><div data-letters>Следующая читает</div></div>
+      <div class="title clip" id="t-self" data-start="70.55" data-duration="2.95" data-track-index="4"><div data-letters>И решает <span class="acc">сама</span></div></div>
+      <div class="title big end clip" id="t-end" data-start="74.0" data-duration="7" data-track-index="4"><div data-letters>Last Order</div></div>
+      <div class="sub clip" id="t-endsub" data-start="75.2" data-duration="5.8" data-track-index="4"><div>сеть ИИ-сестёр в одном мире Minecraft</div></div>
+      <div class="sub url clip" id="t-url" data-start="76.1" data-duration="4.9" data-track-index="4"><div data-type>github.com/ZeusThunderer/lastorder</div></div>
+      <div class="credit clip" id="t-credit" data-start="76.8" data-duration="4.2" data-track-index="4" data-layout-ignore><div>Музыка: Kevin MacLeod (incompetech.com), CC BY 4.0 · все реплики и кадры настоящие, 07.11.2026</div></div>
+
+      <!-- ===== transitions ===== -->
+      <div class="fx" id="flash"></div>
+      <div class="fx" id="dip"></div>
+      <div class="fx" id="leak"></div>
+      <div class="bar" id="g1" style="top: 180px; height: 70px"></div>
+      <div class="bar" id="g2" style="top: 520px; height: 34px"></div>
+      <div class="bar" id="g3" style="top: 760px; height: 110px"></div>
+
+      <!-- ===== music (Kevin MacLeod, CC BY 4.0) and silence ===== -->
+      <audio id="m-hook" src="assets/music/interloper.mp3" data-start="0" data-duration="3.6" data-media-start="2.0" data-volume="0.45" data-fade-in="0.3" data-fade-out="0.08"></audio>
+      <audio id="m-ago" src="assets/music/interloper.mp3" data-start="4.2" data-duration="11.85" data-media-start="5.6" data-volume="0.45" data-fade-in="1.2" data-fade-out="0.05"></audio>
+      <audio id="m-drive1" src="assets/music/volatile.mp3" data-start="16" data-duration="20.13" data-media-start="37.863" data-volume="0.4" data-fade-out="0.03"></audio>
+      <audio id="m-somber" src="assets/music/interloper.mp3" data-start="39.4" data-duration="15.6" data-media-start="51.765" data-volume="0.45" data-fade-in="2.2" data-fade-out="0.4"></audio>
+      <audio id="m-drive2" src="assets/music/volatile.mp3" data-start="55" data-duration="26" data-media-start="124.485" data-volume="0.4" data-fade-out="2.2"></audio>
+    </div>
+
+    <script>
+      const tl = gsap.timeline({ paused: true });
+
+      // letters for titles (children of the timed .title), per-letter blur-in, expo.out
+      document.querySelectorAll("[data-letters]").forEach((el) => {
+        const walk = (node) => {
+          [...node.childNodes].forEach((n) => {
+            if (n.nodeType === 3) {
+              const frag = document.createDocumentFragment();
+              [...n.textContent].forEach((ch) => {
+                const s = document.createElement("span");
+                s.className = "ch";
+                s.style.display = "inline-block";
+                s.style.whiteSpace = "pre";
+                s.textContent = ch;
+                frag.appendChild(s);
+              });
+              n.replaceWith(frag);
+            } else walk(n);
+          });
+        };
+        walk(el);
+      });
+      document.querySelectorAll("[data-words]").forEach((el) => {
+        const walk = (node) => [...node.childNodes].forEach((n) => {
+          if (n.nodeType === 3) {
+            const frag = document.createDocumentFragment();
+            n.textContent.split(/(\s+)/).forEach((w) => {
+              if (!w) return;
+              if (/^\s+$/.test(w)) { frag.appendChild(document.createTextNode(w)); return; }
+              const s = document.createElement("span"); s.className = "w"; s.style.display = "inline-block"; s.textContent = w; frag.appendChild(s);
+            });
+            n.replaceWith(frag);
+          } else walk(n);
+        });
+        walk(el);
+      });
+      const startOf = (el) => parseFloat(el.closest(".clip").dataset.start);
+      const endOf = (el) => { const c = el.closest(".clip"); return parseFloat(c.dataset.start) + parseFloat(c.dataset.duration); };
+
+      document.querySelectorAll("[data-letters]").forEach((el) => {
+        const t0 = startOf(el), t1 = endOf(el);
+        const chs = el.querySelectorAll(".ch");
+        tl.fromTo(chs, { opacity: 0, filter: "blur(8px)" },
+          { opacity: 1, filter: "blur(0px)", duration: 0.35, ease: "expo.out", stagger: 0.035 }, t0);
+        tl.to(el, { opacity: 0, filter: "blur(10px)", duration: 0.16, ease: "power3.in" }, t1 - 0.17);
+      });
+
+      document.querySelectorAll("[data-words]").forEach((el) => {
+        const t0 = startOf(el), t1 = endOf(el);
+        tl.fromTo(el.querySelectorAll(".w"), { opacity: 0, y: 14, filter: "blur(6px)" },
+          { opacity: 1, y: 0, filter: "blur(0px)", duration: 0.3, ease: "expo.out", stagger: 0.07 }, t0);
+        tl.to(el, { opacity: 0, filter: "blur(10px)", duration: 0.16, ease: "power3.in" }, t1 - 0.17);
+      });
+
+      // typing: characters appear in reading order (works across wrapped lines), then hold still
+      document.querySelectorAll("[data-type]").forEach((el) => {
+        const chs = [];
+        const walk = (node) => [...node.childNodes].forEach((n) => {
+          if (n.nodeType === 3) {
+            const frag = document.createDocumentFragment();
+            [...n.textContent].forEach((ch) => { const s = document.createElement("span"); s.textContent = ch; chs.push(s); frag.appendChild(s); });
+            n.replaceWith(frag);
+          } else walk(n);
+        });
+        walk(el);
+        const t0 = startOf(el) + (el.classList.contains("body") ? 0.35 : 0);
+        const step = Math.min(0.022, 1.6 / chs.length);
+        tl.fromTo(chs, { opacity: 0 }, { opacity: 1, duration: 0.001, ease: "none", stagger: step }, t0);
+      });
+
+      // chat stacking: a newer line pushes the visible older line up, like the game's chat
+      const chats = [...document.querySelectorAll(".chat")].sort((a, b) => a.dataset.start - b.dataset.start);
+      chats.forEach((c, i) => {
+        const inner = c.querySelector(".line");
+        let y = 0;
+        chats.slice(i + 1).forEach((n) => {
+          const ns = parseFloat(n.dataset.start);
+          if (ns < endOf(c) && ns > startOf(c)) {
+            y -= n.querySelector(".line").getBoundingClientRect().height + 10;
+            tl.to(inner, { y, duration: 0.12, ease: "power2.out" }, ns);
+          }
+        });
+        tl.to(inner, { opacity: 0, duration: 0.15, ease: "power1.in" }, endOf(c) - 0.16);
+      });
+      document.querySelectorAll(".log > div, .will, .sub > div, .credit > div").forEach((el) => {
+        tl.to(el, { opacity: 0, duration: 0.15 }, endOf(el) - 0.16);
+      });
+      tl.fromTo("#t-endsub > div", { opacity: 0, filter: "blur(8px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.25, ease: "expo.out" }, 75.2);
+      tl.fromTo("#t-credit > div", { opacity: 0 }, { opacity: 1, duration: 0.4 }, 76.8);
+
+      // slow push on the held shots
+      tl.fromTo("#w-birth", { scale: 1.0 }, { scale: 1.06, duration: 9, ease: "none" }, 7);
+      tl.fromTo("#w-reborn", { scale: 1.0 }, { scale: 1.05, duration: 6.2, ease: "none" }, 55);
+
+      // T1: white flash on the title hit (16.0 = Volatile 37.863)
+      tl.set("#flash", { opacity: 1 }, 16.0);
+      tl.to("#flash", { opacity: 0, duration: 0.3, ease: "expo.out" }, 16.0);
+      tl.fromTo("#w-tfly", { scale: 1.12 }, { scale: 1.0, duration: 0.5, ease: "expo.out" }, 16.0);
+
+      // T2: glitch into black on the kill (music section boundary 36.13)
+      [[35.75, -60], [35.82, 48], [35.88, -110], [35.95, 90], [36.02, -180], [36.08, 240]].forEach(([t, x]) =>
+        tl.set("#w-q4", { x, skewX: x / 12 }, t));
+      tl.set(["#g1", "#g2", "#g3"], { opacity: 1 }, 35.82);
+      [[35.88, 260, -140, 380], [35.95, -320, 200, -90], [36.02, 140, -380, 220]].forEach(([t, a, b, c]) => {
+        tl.set("#g1", { x: a }, t); tl.set("#g2", { x: b }, t); tl.set("#g3", { x: c }, t);
+      });
+      tl.set(["#g1", "#g2", "#g3"], { opacity: 0 }, 36.13);
+
+      // T3: dip to black after the death (3 darkening frames, then the will on black)
+      tl.to("#dip", { opacity: 0.45, duration: 0.1, ease: "none" }, 50.2);
+      tl.set("#dip", { opacity: 0 }, 50.3);
+
+      // T4: light leak on the rebirth (Volatile B2 at 55.0)
+      tl.fromTo("#leak", { opacity: 0, x: -200 }, { opacity: 1, x: 120, duration: 0.45, ease: "power2.out" }, 54.75);
+      tl.to("#leak", { opacity: 0, x: 380, duration: 0.9, ease: "power2.inOut" }, 55.2);
+      tl.fromTo("#w-reborn", { opacity: 0 }, { opacity: 1, duration: 0.35, ease: "power2.out" }, 55.0);
+
+      // T5: zoom through into the end card (73.59)
+      tl.to("#w-c6", { scale: 1.6, filter: "blur(14px)", duration: 0.32, ease: "power3.in" }, 73.27);
+      tl.fromTo("#w-end", { scale: 1.3, filter: "blur(12px)" }, { scale: 1.0, filter: "blur(0px)", duration: 0.5, ease: "expo.out" }, 73.59);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

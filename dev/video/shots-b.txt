@@ -1,0 +1,8 @@
+# shoot B 2026-11-07 ~18:44Z: both sisters in the oak grove (89,95)
+o2g_high  30 LastOrder02 orbit speed=0.3 h=12 r=12
+o1g_high  30 LastOrder01 orbit speed=-0.3 h=12 r=12
+o2g_mid   30 LastOrder02 orbit speed=0.45 h=6 r=7
+b1g_back  25 LastOrder01 back
+p2g_pov   20 LastOrder02 pov
+o1g_mid   30 LastOrder01 orbit speed=-0.45 h=6 r=7
+c1g_crane 25 LastOrder01 dolly v=-0.04 dy=0.12 start=2,2,2

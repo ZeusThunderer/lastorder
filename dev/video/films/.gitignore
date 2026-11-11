@@ -1,0 +1,10 @@
+# downloaded or generated: rebuilt by build.sh
+music/
+fonts/
+*/assets/clips/
+*/assets/music/
+*/assets/fonts/
+*/.hyperframes/
+*/node_modules/
+*/assets/paper.png
+*/assets/sfx/

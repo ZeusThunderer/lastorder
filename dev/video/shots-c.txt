@@ -1,0 +1,2 @@
+# shoot C: 00162 (LastOrder02) life-clock death at ~18:52:35Z, from behind, then the respawn
+d2_death 170 LastOrder02 back

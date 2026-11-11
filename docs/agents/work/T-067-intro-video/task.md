@@ -2,7 +2,7 @@
 id: T-067
 title: Ролик-знакомство с Last Order — персонаж, сеть сестёр, кадры игры
 stage: —
-status: ready
+status: done
 criticality: normal
 owner: supervisor
 after: []
@@ -88,3 +88,35 @@ ffmpeg -i dev/video/out/intro.mp4 -vf "fps=1/4,scale=480:-1,tile=6x5" -frames:v 
 - Установку программ оператор делает сам по инструкции надзора.
 
 ## Заметки надзора
+- 2026-11-07, решения оператора: (1) режиссёрский сценарий, раскадровка с кадрами, таймкоды,
+  стиль — [script.md](script.md); (2) снимать систему как она работает сейчас, по video-toolkit.md,
+  эпизод 6 честный; (3) для съёмки — отдельный контейнер-наблюдатель с высокой детализацией
+  (объём расширен: `docker/camera/`, `docker/compose.camera.yml`, D-009). Порядок: съёмка → черновой
+  монтаж → проверка планов и сценария → исправления → чистовой монтаж.
+- Съёмка take1 2026-11-07 17:30–17:50Z: node-1, node-2 (`docker start`, конфиг прошлого прогона:
+  старые body без healthcheck не дают `up.sh` поднять node через depends_on). Стенд под `dev/stand.sh lock T-067`.
+- 2026-11-07, оператор: «это презентация, а не видео» — нужен трейлер с настоящими кадрами,
+  переходами, музыкой и сценарием, на HyperFrames. Слайдовый вариант (`dev/video/build_intro.py`,
+  `cut.json`) оставлен как объяснялка, основной — трейлер `dev/video/trailer/` (сюжет A
+  «Передача смены», выбор оператора): STORYLINES.md, SPEC.md, REVIEW.md, storyboard.jpg.
+  Съёмка: камера-наблюдатель + серверный датапак ригов (`dev/video/camrig/lo_cam`, установлен в
+  мир `world/datapacks`, отключается `datapack disable "file/lo_cam"`), `dev/video/shoot.sh`.
+  Сборка одной командой: `bash dev/video/trailer/build.sh`. Рендер: `dev/video/out/trailer.mp4`.
+- Находка (вне задачи, в задачу среды): `act attack` без `allow` бьёт ближайшую сущность, в том
+  числе сестру — 18:06:37 00160 убила 00161 (mind-1 log, chat «LastOrder02 was slain by LastOrder01»).
+- 2026-11-08, оператор: ещё пара роликов на новых кадрах; эстетика — авангард начала XX века,
+  монтаж и режиссура — по грамматике *Monogatari*; рендер и запись — на GPU. Сюжеты —
+  `dev/video/films/STORYLINES.md`; выбор оператора «i APPROVE» = рекомендация B «45 минут.
+  Интертитры» + A «Кино-глаз» и съёмка. Планы: `dev/video/films/{b45,kinoglaz}/SPEC.md`.
+- Съёмка film1 2026-11-08 21:02–21:57Z: стенд под `dev/stand.sh lock T-067` (снят просроченный
+  замок T-058, 423 мин). `docker run --gpus all` вешает VM Docker Desktop (дважды), поэтому камера —
+  на хосте: `dev/video/hostcam.sh` (клиент Fabric на Java 21 из Prism Launcher, запуск без
+  HeadlessMC — `hostcam_launch.py`, захват монитора 2 ddagrab + h264_nvenc, звук через VB-Cable),
+  режиссёр `dev/video/films/direct.sh`. Docker завис и при авто-старте двух стендов разом
+  (lastorder + t048): поднимать стенд по контейнерам. Без `hapi-hub` харнесс сестры падает за 1 с
+  (heroine 00183 проснулась только в 21:10:38 после запуска hub).
+- D-010 · ce0c099 (main) · живой зонд квоты принимал метку времени hapi «[..:..:..429]» за HTTP 429 и
+  убивал здоровые сессии сестёр (00183, 00184 простаивали 21:12–21:31). Образ node пересобран,
+  node-1/node-2 пересозданы; голый `docker compose up` дал узлы без ключей (`harness.waits: no key`,
+  21:31–21:38) — пересоздавать только через `bash docker/node/up.sh --no-deps --force-recreate node-N`
+  (21:38:11); жизни 00183 и 00184 продолжились по state.json.
