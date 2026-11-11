@@ -46,6 +46,7 @@ from runtime.mind.executor import (
 )
 from runtime.mind.jev import JevGate
 from runtime.mind.login import SessionLogin
+from runtime.perception.topics import TopicFilter
 from runtime.perception.translate import Perception
 
 log = logging.getLogger("mcp_body")
@@ -501,7 +502,9 @@ class BodyMcp:
         """A logged call whose dict answer goes out as compact JSON (T-056)."""
         return compact_answer(await self._tool(name, args, fn))
 
-    def _seen(self, raw: str, kind: str) -> str:
+    def _seen(self, raw: str, kind: str, fallback: str | None = None) -> str:
+        if kind == "entity":  # a name on a banned topic never reaches the agent (ADR-048)
+            raw = self._x.masked_name(raw, fallback or "entity")
         return self._perception.see(raw, kind).render()
 
     # -- section 4 tools (sync bodies; the async wrappers in build_server add logging) ---
@@ -535,7 +538,7 @@ class BodyMcp:
             "entities": [
                 {
                     "kind": str(e.kind),
-                    "name": self._seen(e.name, "entity"),
+                    "name": self._seen(e.name, "entity", str(e.kind)),
                     "dist_m": round(float(e.dist_m), 1),
                     "pos": list(e.pos) if e.pos else None,
                 }
@@ -986,10 +989,28 @@ def main() -> None:
             "; a skin command follows each login" if skin_command else "",
         )
 
+    # Banned chat topics (ADR-048): the operator's file, mounted into this container
+    # alone. Set but unreadable or broken — a startup error, never an open filter;
+    # a later broken edit keeps the last good list and says so in the journal.
+    topics_path = env("CHAT_TOPICS_PATH", default="") or ""
+    topic_filter = None
+    if topics_path:
+        topic_filter = TopicFilter(
+            path=topics_path,
+            on_reload_error=lambda err: call_log.record("error", scope="chat_topics", error=err),
+        )
+        log.info(
+            "chat topics armed: %d topics, %d patterns from %s",
+            len(topic_filter.topics), topic_filter.patterns, topics_path,
+        )
+    else:
+        log.warning("CHAT_TOPICS_PATH is empty: other players' chat reaches the agent unfiltered")
+
     server, _impl, _executor = build_mind(
         body,
         username=username,
         call_log=call_log,
+        topic_filter=topic_filter,
         birth=birth,
         hive=hive,
         jev=jev,

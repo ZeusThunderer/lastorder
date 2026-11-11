@@ -42,6 +42,7 @@ from typing import Any
 from runtime.lastorder.death import DeathDetector, classify_death
 from runtime.mind.jev import JevGate
 from runtime.perception.chat import is_service_line, parse_speaker, strip_formatting
+from runtime.perception.topics import TopicFilter
 from runtime.perception.translate import Perception
 from runtime.ports import BirthRecord, GameState, Option
 from runtime.hive.client import HiveClient, HiveRejected, HiveUnavailable
@@ -308,6 +309,7 @@ class Executor:
         jev: JevGate | None = None,
         operator_name: str = "",
         login: "SessionLogin | None" = None,
+        topic_filter: TopicFilter | None = None,
     ):
         if not TICK_MIN_S <= tick_interval <= TICK_MAX_S:
             raise ValueError(
@@ -348,6 +350,10 @@ class Executor:
         # The environment's own /login (T-053): sends on world entry, masks the
         # password out of everything the agent or a log can see. None — off.
         self._login = login
+        # The operator's banned chat topics (ADR-048): a line, a name or a death
+        # text on one is dropped HERE, before any event, journal or observe() —
+        # the provider never receives it. None or an empty list — off.
+        self._topics = topic_filter
 
         # One lock for the whole body: the C1 thread and the MCP tool threads share it (P1-6).
         self.body_lock = threading.RLock()
@@ -429,7 +435,27 @@ class Executor:
         text = str(raw or "")
         if is_service_line(text):
             return None
-        return self._perception.scrub(strip_formatting(text)).strip() or None
+        clean = self._perception.scrub(strip_formatting(text)).strip()
+        if clean and self._banned(clean, scope="text"):
+            return None
+        return clean or None
+
+    def _banned(self, text: str, *, scope: str, name: bool = False) -> bool:
+        """True when `text` is on a banned topic. The journal records the topic and
+        the scope alone — never the text: Last Order reads these journals (ADR-048)."""
+        if self._topics is None:
+            return False
+        hit = self._topics.name_topic(text) if name else self._topics.topic(text)
+        if hit is None:
+            return False
+        self._log.record("event", event="chat.filtered", topic=hit, scope=scope)
+        return True
+
+    def masked_name(self, raw: Any, fallback: str) -> str:
+        """A player or entity name on a banned topic gives way to `fallback` (its
+        kind): the agent still sees something is there, never what it is called."""
+        text = str(raw or "")
+        return fallback if text and self._banned(text, scope="name", name=True) else text
 
     def chat_entry(self, raw: Any) -> dict[str, Any] | None:
         """One chat line as the agent sees it (T-051): the text scrubbed plain, `from`
@@ -448,6 +474,12 @@ class Executor:
         parsed = parse_speaker(text)
         if parsed is not None:
             speaker, body = parsed
+        # banned topics (ADR-048): the speaker's name and the whole line, before
+        # the scrub — a hit drops the line entirely, as if it was never said
+        if speaker is not None and self._banned(speaker, scope="speaker", name=True):
+            return None
+        if self._banned(text, scope="chat"):
+            return None
         clean = self._perception.scrub(body).strip()
         if not clean:
             return None
@@ -459,7 +491,9 @@ class Executor:
         entry["text"] = clean
         return entry
 
-    def _seen(self, raw: str, kind: str) -> str:
+    def _seen(self, raw: str, kind: str, fallback: str | None = None) -> str:
+        if kind == "entity":
+            raw = self.masked_name(raw, fallback or "entity")
         return self._perception.see(raw, kind).render()
 
     # -- events -------------------------------------------------------------------------
@@ -563,7 +597,7 @@ class Executor:
                 if text is not None:
                     fields["text"] = text
                 if source is not None:
-                    fields["source"] = self._seen(source.name, "entity")
+                    fields["source"] = self._seen(source.name, "entity", str(source.kind))
                     fields["source_dist_m"] = round(float(source.dist_m), 1)
                 self._emit("game.damage", **fields)
             # server.info and game.event are uc bookkeeping: dropped (ADR-037)
@@ -574,7 +608,7 @@ class Executor:
             source = self._nearest_hostile()
             fields: dict[str, Any] = {"hp_from": round(self._hp, 1), "hp_to": round(hp, 1)}
             if source is not None:
-                fields["source"] = self._seen(source.name, "entity")
+                fields["source"] = self._seen(source.name, "entity", str(source.kind))
             self._emit("game.damage", **fields)
         self._hp = hp
 

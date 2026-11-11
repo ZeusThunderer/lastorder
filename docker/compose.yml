@@ -108,6 +108,10 @@ x-mind: &mind
     # below. The login PASSWORD stays in mind-N alone (MC_LOGIN_PASSWORD below): the
     # node sandbox never sees it.
     MC_COMMANDS_DENY: "${MC_COMMANDS_DENY:-}"
+    # Banned chat topics (ADR-048): the operator's list, mounted read-only into the
+    # minds alone (see each mind's volumes) — never into a sandbox, where the list
+    # itself would reach a prompt. Empty turns the filter off.
+    CHAT_TOPICS_PATH: "${CHAT_TOPICS_PATH:-/etc/lastorder/chat-topics/topics.txt}"
   command: ["python", "-m", "runtime.mind"]
 
 # The node sandbox of a slot (T-027, ADR-033): the runner plus both harnesses in one
@@ -259,6 +263,7 @@ services:
     volumes:
       - mind-1-run:/mind-run
       - workplaces-1:/workplaces:ro   # the Jev policy of the living sister, read-only
+      - ./mind/chat-topics:/etc/lastorder/chat-topics:ro   # ADR-048, the operator's list (a dir: edits propagate)
 
   # The sandbox of slot 1 (T-027). zai-egress rides along (T-034 П-1): without the
   # passthrough the zcode harness has no route to api.z.ai and the session dies.
@@ -314,6 +319,7 @@ services:
     volumes:
       - mind-2-run:/mind-run
       - workplaces-2:/workplaces:ro
+      - ./mind/chat-topics:/etc/lastorder/chat-topics:ro   # ADR-048, the operator's list (a dir: edits propagate)
 
   node-2:
     <<: *node
@@ -365,6 +371,7 @@ services:
     volumes:
       - mind-3-run:/mind-run
       - workplaces-3:/workplaces:ro
+      - ./mind/chat-topics:/etc/lastorder/chat-topics:ro   # ADR-048, the operator's list (a dir: edits propagate)
 
   node-3:
     <<: *node

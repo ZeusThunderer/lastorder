@@ -1,0 +1,89 @@
+# Banned topics of other players' chat — the operator's file (runtime/perception/topics.py).
+# A chat line, player name or entity name on any of these topics is dropped inside mind-N:
+# no sister, no Last Order, no journal and no model provider ever sees it.
+# Mounted read-only into mind-N alone (CHAT_TOPICS_PATH); edits apply within ~5 s, no restart.
+#
+#   stem        a word starting with it (порн → порно, порнуха)
+#   =word       exactly this word
+#   *part       a word containing it
+#   two words   consecutive words, each by the same rules
+# Look-alike letters (сeкс), digits (s3x, п0рн), repeats (сеееекс) and spelled-out letters
+# (s.e.x) are folded on both sides — write each stem once, in plain letters.
+# A stem that is too short hits ordinary words (anal → analysis): prefer =word for those.
+# The [section] name is what the journal records instead of the text — keep it neutral.
+
+[sexual]
+sex
+porn
+=xxx
+nsfw
+hentai
+nude
+=nudes
+naked
+=boob
+=boobs
+=tits
+=titty
+=cock
+=cocks
+dick
+penis
+vagin
+pussy
+=cum
+cumshot
+orgasm
+horny
+erotic
+fetish
+bdsm
+blowjob
+handjob
+=anal
+masturb
+onlyfans
+=milf
+=rape
+rapist
+pedo
+paedo
+=loli
+lolicon
+shota
+incest
+=strip club
+stripper
+секс
+порн
+эрот
+хентай
+нюдс
+=голая
+=голые
+=голый
+голышом
+сиськ
+сисек
+титьк
+пенис
+вагин
+=анал
+анальн
+оральн
+минет
+оргазм
+мастурб
+дроч
+трах
+шлюх
+проститут
+изнасил
+насильник
+педофил
+инцест
+=лоли
+стриптиз
+порнух
+интим фото
+возбужда
