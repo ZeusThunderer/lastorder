@@ -2,7 +2,7 @@
 id: T-061
 title: Скин сестёр — тела LastOrder01..03 в скине sister.png на своём и внешнем сервере
 stage: I
-status: ready
+status: in_progress
 criticality: normal
 lane: b
 after: [T-053, T-062]
