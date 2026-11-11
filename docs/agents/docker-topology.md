@@ -217,6 +217,37 @@ compose-файла, не корневой `.env`); `up.sh` эти перемен
   `Launching version fabric-loader-0.20.1-1.21.11`, тело вошло в мир]. Без переменной
   остаётся старое поведение `fabric:<mc>` — HMC берёт свежей загрузчик сам.
 
+## Скин сестёр (T-061)
+Скин сестёр (`agent/last_order/skin/sister.png`, 64×64, slim) на своём сервере раздаёт
+мод `skinrestorer` (строка в `MODRINTH_PROJECTS`, пин `${SKINRESTORER:-2.11.1+1.21.11-fabric}`).
+Аккаунты офлайн, скин ставит среда — у сестры команды скинов в инструментах нет.
+
+- Файл скина — операторский, mc-server получает его read-only
+  (`../agent/last_order/skin/sister.png:/skins/sister.png:ro`), больше этот mount нигде.
+  Конфиг мода `docker/mc-server/skinrestorer/config.json` (тоже :ro): `join.autoFetch`
+  выключен (иначе мод тянет скины Mojang на входе и затирает наш), провайдер
+  `collection` включён с источником `sister` = `/skins/sister.png`, вариант slim.
+- Стартовый `FileSystemException … config.json … Device or resource busy` в логах mc-server —
+  безобидная запись мода обратно поверх read-only bind: конфиг уже прочитан, скин
+  ставится [проверено: T-061, применение на изолированном стенде].
+- Хранилище скинов — в volume мира (`/data/world/skinrestorer/<offline-uuid>.json`,
+  текстуры подписанные), перезапуск mc-server переживает, повторно применять не нужно.
+- Применить ко всем телам: `bash dev/apply_skin.sh [--project NAME]` — rcon-команда
+  `skin set collection sister LastOrder0N` на все три слота, тела могут быть офлайн
+  (скин сработает на входе). `--dry-run` печатает команды.
+- Выходы mc-server: modrinth.com на старте (T-062) плюс api.mineskin.org — мод подписывает
+  через MineSkin собственные скины (локальный файл, web-URL): без подписи ванильный клиент
+  текстуры отбрасывает [проверено: T-061, в сохранённом скине есть signature]. api.mojang.com
+  и sessionserver нужны только при включённом autoFetch — он выключен; строка про
+  sessionserver в логе старта — печать окружения, не запрос.
+- Финальная проверка — глазами оператора: зайти любым офлайн-клиентом 1.21.11 на хост-порт
+  `${MC_HOST_PORT}` и посмотреть на тело.
+- Внешний сервер (mc.example.net): среду ведёт `MC_SKIN_COMMAND_N` в `.env` (compose даёт
+  `MC_SKIN_COMMAND` в mind-N, тот же путь, что пароль T-053; пусто — ничего не шлётся) —
+  команда скина уходит сразу после `/login`. Какая команда принята на внешнем сервере, не
+  проверялось (аккаунт оператора); кандидат на серверах со SkinsRestorer — `/skin <ник>`
+  [источник: skinsrestorer.net; не проверено].
+
 ## Ключи стенда
 Прогон идёт с ключами: без них `docker/node/up.sh` отказывается подниматься (fail-closed R2-6),
 а приём воли падает в аварийные завещания (T-032). `dev/stand_keys.py` готовит `.env`,
