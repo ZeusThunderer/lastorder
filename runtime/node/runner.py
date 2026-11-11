@@ -348,6 +348,16 @@ class NodeRunner:
             )
             return
         armed = status.get("serial")
+        if not armed and self._live_unarmed(state):
+            # T-072: the mind restarted mid-life (a server move, a slot restart) and
+            # lost the clock; the saved life is unfinished and its workplace stands —
+            # re-arm it and carry on, never orphan her for a fresh birth (no will)
+            assert state is not None
+            self._rearm(state)
+            self._log("life.reattached", {"serial": state.serial, "rearmed": True})
+            death, adapter_name = self._life(state)
+            self._death_path(state, death.cause, death.text, adapter_name)
+            return
         if not armed:
             if self._keys_missing():
                 # fail-closed (review R2-6): without both keys the node would run open —
@@ -494,7 +504,7 @@ class NodeRunner:
         try:
             quick_exits = 0  # consecutive instant deaths of a RESUMED long session
             while True:
-                death = self._death_status()
+                death = self._death_status(state)
                 if death is not None:
                     return death, adapter_name
                 if not self._adapter_ready(adapter_name):
@@ -745,7 +755,7 @@ class NodeRunner:
                     process.kill()
                     self._log("session.quota_live", {"serial": state.serial})
                     return QUOTA_DURING_SESSION
-                death = self._death_status()
+                death = self._death_status(state)
                 if death is not None:
                     process.terminate()
                     if process.poll() is None:
@@ -763,12 +773,33 @@ class NodeRunner:
         except HiveUnavailable:
             return None
 
-    def _death_status(self) -> Death | None:
+    def _live_unarmed(self, state: LifeState | None) -> bool:
+        """A saved life the mind no longer knows: unfinished (the death path clears
+        the state), with its workplace and a real clock to re-arm."""
+        if state is None or state.serial <= 0 or state.ttl_min <= 0 or not state.born_at:
+            return False
+        return (self.cfg.workplaces / "agent" / workplace.serial_dir(state.serial)).exists()
+
+    def _rearm(self, state: LifeState) -> None:
+        """Arm the mind's clock again with the life's ORIGINAL birth (T-072): the
+        45 minutes keep counting from the birth, not from the mind restart. A
+        refusal means someone armed it already; unavailability retries next poll."""
+        try:
+            self._mind.arm(state.serial, state.born_at, state.ttl_min)
+            self._log("life.rearmed", {"serial": state.serial})
+        except HiveRejected as exc:
+            self._log("life.rearm_refused", {"serial": state.serial, "error": str(exc)})
+        except HiveUnavailable:
+            pass
+
+    def _death_status(self, state: LifeState | None = None) -> Death | None:
         try:
             status = self._mind.status()
         except HiveUnavailable:
             return None  # the mind restarts; the session keeps running meanwhile
         if not status.get("dead"):
+            if state is not None and not status.get("serial") and self._live_unarmed(state):
+                self._rearm(state)  # the mind came back without her clock (T-072)
             return None
         return Death(str(status.get("cause") or "game"), str(status.get("death_text") or ""))
 

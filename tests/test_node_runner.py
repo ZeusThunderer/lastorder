@@ -2000,3 +2000,31 @@ def test_hapi_will_session_ends_when_it_goes_quiet(tmp_path: Path) -> None:
     rig.runner.run_will_session(state, "pi")
     assert time.monotonic() - started < 10.0
     assert any(type == "will.session_quiet" for type, _ in rig.logs)
+
+
+# --- T-072: a mind restart mid-life (a server move) keeps the sister and her clock ---------
+
+
+def test_a_mind_restart_mid_life_rearms_her_original_clock(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    first = rig.mind.arm_calls[-1]
+    rig.mind.armed = None   # mind-N recreated by slot_server: the clock is gone
+    assert rig.runner._death_status(state) is None
+    assert rig.mind.arm_calls[-1] == first   # the same serial, born_at and ttl — not a new life
+    assert any(type == "life.rearmed" for type, _ in rig.logs)
+    rig.mind.arm_calls.clear()
+    rig.runner._death_status(state)          # armed again: nothing more to do
+    assert rig.mind.arm_calls == []
+
+
+def test_a_runner_restart_reattaches_an_unarmed_life_instead_of_a_birth(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    rig.mind.armed = None   # the mind lost the clock while the runner was down
+    rig.script(FakeProcess(hang=True))
+    rig.mind.kill_at_status = rig.mind.status_calls + 3
+    rig.runner._generation()
+    assert any(type == "life.reattached" and payload.get("rearmed") for type, payload in rig.logs)
+    assert not any(type == "life.birth" and payload.get("serial") != state.serial for type, payload in rig.logs)
+    assert rig.hive.retires and rig.hive.retires[0][0] == state.serial   # her own death path

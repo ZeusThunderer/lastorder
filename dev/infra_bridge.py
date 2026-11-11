@@ -48,6 +48,10 @@ from runtime.hive.infra import (  # noqa: E402  (dev/ is not a package; same tri
 
 STEP_TIMEOUT_S = 600  # one command; slot_restart waits for health itself (420 s inside)
 GRACE_S = 420  # the body healthcheck budget, same number as dev/slot_restart.sh
+# Last Order's server moves (T-072): docker/node/up.sh reads this file before .env, so
+# a moved slot stays moved through any later restart; a slot sent home leaves it
+SERVERS_FILE = ROOT / ".stand-servers.env"
+HOME_SERVER = "mc-server:25565"
 
 
 @dataclass
@@ -90,6 +94,11 @@ def commands_for(action: str, args: dict[str, str], *, project: str = "") -> lis
     if project:
         compose += ["-p", project]
     wait_healthy = bash_argv(ROOT / "dev" / "wait_for.sh", str(GRACE_S), "--healthy")
+    # bring-ups ride docker/node/up.sh (T-072): it lifts the slot's keys, login
+    # password, camera and server from the root .env — a bare `compose up` sees none
+    # of them and a fail-closed mind refuses to start without its runner key
+    up = bash_argv(ROOT / "docker" / "node" / "up.sh")
+    up_env = {"COMPOSE_PROJECT_NAME": project} if project else {}
     if action == "mc_restart":
         return [Step(compose + ["restart", "mc-server"])]
     if action == "status":
@@ -108,26 +117,26 @@ def commands_for(action: str, args: dict[str, str], *, project: str = "") -> lis
         return [Step(compose + ["stop", f"mind-{slot}", f"node-{slot}", f"body-{slot}"])]
     if action == "slot_up":
         return [
-            Step(compose + ["up", "-d", "--no-deps", f"body-{slot}"]),
+            Step(up + ["--no-deps", f"body-{slot}"], env=up_env),
             Step(compose + ["ps", "-q", f"body-{slot}"], capture="cid"),
             Step(wait_healthy + ["{cid}"]),  # the py4j gateway must listen (T-055)
-            Step(compose + ["up", "-d", "--no-deps", f"mind-{slot}"]),
-            Step(compose + ["up", "-d", "--no-deps", f"node-{slot}"]),
+            Step(up + ["--no-deps", f"mind-{slot}"], env=up_env),
+            Step(up + ["--no-deps", f"node-{slot}"], env=up_env),
         ]
     if action == "slot_server":
-        # a live override: the value rides THIS recreate alone. It is not written
-        # into .env — a later full `up` re-reads .env and may revert the body.
-        # A durable move stays the operator's: MC_SERVER_N in .env (docker-topology).
+        # The sister lives through the move: node-N keeps running, the mind restarts
+        # with the new body and her runner re-arms the life clock (T-072). The
+        # address is recorded in SERVERS_FILE after success (`process`), so later
+        # restarts keep it; the login password for that server stays the operator's
+        # MC_LOGIN_PASSWORD_N in .env (a secret, ADR-041).
         host = args["server"]
+        server_env = {**up_env, f"MC_SERVER_{slot}": host}
         return [
             Step(compose + ["stop", f"mind-{slot}"]),
-            Step(
-                compose + ["up", "-d", "--force-recreate", "--no-deps", f"body-{slot}"],
-                env={f"MC_SERVER_{slot}": host},
-            ),
+            Step(up + ["--force-recreate", "--no-deps", f"body-{slot}"], env=server_env),
             Step(compose + ["ps", "-q", f"body-{slot}"], capture="cid"),
             Step(wait_healthy + ["{cid}"]),
-            Step(compose + ["up", "-d", "--no-deps", f"mind-{slot}"]),
+            Step(up + ["--no-deps", f"mind-{slot}"], env=server_env),
         ]
     raise InfraError(f"unknown action {action!r}")
 
@@ -236,12 +245,46 @@ def process(
         return
     echo(f"#{entry_id} {action} {cleaned}: running")
     ok, transcript = run_steps(steps, runner=runner)
+    if ok and action == "slot_server":
+        record_server(cleaned["slot"], cleaned["server"])
     text = transcript[-RESULT_MAX:]
     status, body = hive.call(
         "POST", f"/board/infra/{entry_id}/result", {"ok": ok, "text": text}
     )
     echo(f"#{entry_id}: {'done' if ok else 'failed'}"
          + ("" if status == 200 else f" (report {status}: {body.get('error', {}).get('kind', '')})"))
+
+
+def record_server(slot: str, host: str, path: Path | None = None) -> None:
+    """Keep Last Order's move for later restarts (docker/node/up.sh reads the file):
+    one MC_SERVER_N line per moved slot; the home server drops the line."""
+    path = path or SERVERS_FILE
+    key = f"MC_SERVER_{slot}"
+    lines = []
+    if path.exists():
+        lines = [
+            line for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith(f"{key}=")
+        ]
+    if host != HOME_SERVER:
+        lines.append(f"{key}={host}")
+    if lines:
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    elif path.exists():
+        path.unlink()
+
+
+def env_file_value(name: str, path: Path | None = None) -> str:
+    """One value from the root .env, quotes stripped — the operator runs the bridge
+    without exporting the key by hand (the same lift docker/node/up.sh does)."""
+    path = path or ROOT / ".env"
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"{name}="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
 
 
 def close_leftovers(hive: Hive) -> None:
@@ -301,7 +344,9 @@ def main_with(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="The Last Order infra bridge executor")
     parser.add_argument("--url", default=os.environ.get("HIVE_URL", "http://127.0.0.1:18080"))
-    parser.add_argument("--key", default=os.environ.get("HIVE_INFRA_KEY", ""))
+    parser.add_argument(
+        "--key", default=os.environ.get("HIVE_INFRA_KEY", "") or env_file_value("HIVE_INFRA_KEY")
+    )
     parser.add_argument("--interval", type=float, default=15.0, help="poll seconds")
     parser.add_argument("--dry-run", action="store_true", help="print commands, touch nothing")
     parser.add_argument("--once", action="store_true", help="one poll cycle and exit")

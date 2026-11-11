@@ -535,5 +535,69 @@ def test_main_closes_the_leftovers_of_a_crashed_run() -> None:
     assert any(p[0] == "/board/infra/6/take" for p in hive.posts)  # then new work
 
 
-def test_main_without_a_key_is_a_usage_error() -> None:
+def test_main_without_a_key_is_a_usage_error(monkeypatch) -> None:
+    # neither the env nor the root .env (the stand's real .env has one since T-072)
+    monkeypatch.delenv("HIVE_INFRA_KEY", raising=False)
+    monkeypatch.setattr(bridge, "env_file_value", lambda name, path=None: "")
     assert bridge.main(["--dry-run"]) == 2
+
+
+# --- T-072: Last Order moves a slot to another server, and the move holds -----------------
+
+
+def test_bring_ups_ride_up_sh_so_the_slot_keys_arrive() -> None:
+    # a bare `compose up` never sees the root .env: the mind has no runner key and
+    # refuses to start (fail-closed) — every bring-up goes through docker/node/up.sh
+    for action, args in (("slot_up", {"slot": "1"}), ("slot_server", {"slot": "1", "server": "mc.example:25565"})):
+        ups = [s.argv for s in bridge.commands_for(action, args) if "up.sh" in " ".join(s.argv)]
+        assert ups, action
+        assert not any(a[:3] == ["docker", "compose", "-f"] and "up" in a for a in
+                       (s.argv for s in bridge.commands_for(action, args))), action
+    server = bridge.commands_for("slot_server", {"slot": "2", "server": "mc.example:25565"})
+    assert server[1].argv[-3:] == ["--force-recreate", "--no-deps", "body-2"]
+    assert server[1].env["MC_SERVER_2"] == "mc.example:25565"
+    assert server[-1].argv[-2:] == ["--no-deps", "mind-2"]   # node-2 is never touched
+    assert not any("node-2" in s.argv for s in server)
+    project = bridge.commands_for("slot_server", {"slot": "2", "server": "h"}, project="t072")
+    assert project[1].env["COMPOSE_PROJECT_NAME"] == "t072"
+
+
+def test_a_move_is_recorded_and_home_clears_it(tmp_path: Path) -> None:
+    f = tmp_path / ".stand-servers.env"
+    bridge.record_server("1", "raid.example:25565", f)
+    bridge.record_server("2", "other.example", f)
+    bridge.record_server("1", "raid2.example:25570", f)
+    assert f.read_text(encoding="utf-8").splitlines() == [
+        "MC_SERVER_2=other.example", "MC_SERVER_1=raid2.example:25570",
+    ]
+    bridge.record_server("2", bridge.HOME_SERVER, f)
+    bridge.record_server("1", bridge.HOME_SERVER, f)
+    assert not f.exists()
+
+
+def test_the_key_comes_from_the_root_env_file(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_text('OTHER=1\nHIVE_INFRA_KEY="k-123"\n', encoding="utf-8")
+    assert bridge.env_file_value("HIVE_INFRA_KEY", env) == "k-123"
+    assert bridge.env_file_value("MISSING", env) == ""
+    assert bridge.env_file_value("HIVE_INFRA_KEY", tmp_path / "nope") == ""
+
+
+def test_up_sh_reads_the_moves_before_env_and_lifts_the_switches() -> None:
+    text = (Path(__file__).resolve().parent.parent / "docker" / "node" / "up.sh").read_text(encoding="utf-8")
+    moves = text.index(".stand-servers.env")
+    assert moves < text.index("lift MC_SERVER_1")
+    for name in ("BODY_CAMERA_$n", "MC_SKIN_COMMAND_$n", "CHAT_TOPICS_PATH"):
+        assert f'lift "{name}"' in text or f"lift {name}" in text, name
+
+
+def test_the_desk_gets_every_dir_its_manual_points_at() -> None:
+    # T-072: AGENTS.md sends Last Order to reference/video-tools.md, and the admin
+    # copied only skills/ — every camera call answered "invalid path name" unexplained
+    import re
+    from runtime.hive import admin
+
+    manual = (admin.WORKPLACE_TEMPLATE / "AGENTS.md").read_text(encoding="utf-8")
+    for path in set(re.findall(r"`(reference|skills)/[^`]+`", manual)):
+        assert path in admin.CORE_DIRS, path
+    assert (admin.WORKPLACE_TEMPLATE / "reference" / "video-tools.md").exists()

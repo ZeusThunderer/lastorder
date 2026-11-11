@@ -112,6 +112,10 @@ LEVER_REQUIRED: dict[str, frozenset[str]] = {
     "tap_key": frozenset({"key"}),
     "hold_key": frozenset({"key"}),
     "strike": frozenset({"pos"}),
+    # attack is uc's punkAny: it hunts PLAYERS, never mobs, and with no names it takes
+    # the nearest player of all — a sister on the stand, a stranger on a public server
+    # (k-0120, k-0149: two sisters killed that way). The names are the target (T-072).
+    "attack": frozenset({"allow"}),
     "eat": frozenset({"slot"}),
     "get": frozenset({"item"}),
     "equip": frozenset({"item"}),
@@ -226,6 +230,9 @@ def validate_args(lever: str, args: Mapping[str, Any]) -> dict[str, Any]:
                     _err(f"{lever}.{name}: bad player name {item!r}")
                 cleaned.append(item)
             out[name] = cleaned
+            if lever == "attack" and name == "allow" and not cleaned:
+                _err("attack.allow: name the player(s) to attack — attack hunts players only; "
+                     "for a mob use strike {pos}")
         elif lever == "strike" and name == "pos":
             if not isinstance(value, (list, tuple)) or len(value) != 3:
                 _err("strike.pos must be [x, y, z]")
@@ -560,6 +567,12 @@ class BodyMcp:
 
     def act(self, intent: str, args: Mapping[str, Any] | None = None) -> dict[str, Any]:
         cleaned = validate_args(intent, args)
+        if intent == "attack":
+            me = self._x.username.lower()
+            if any(n.lower() == me for n in cleaned.get("allow", ())):
+                raise ToolError("attack.allow names this body itself")
+            # never her own body, whatever the list says
+            cleaned["avoid"] = sorted({*cleaned.get("avoid", ()), self._x.username})
         try:
             submitted = self._x.submit(intent, cleaned)
         except RuntimeError as exc:  # the dead state refuses intents (review P1-2)
@@ -655,7 +668,9 @@ def build_server(
     async def act(intent: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
         """Give C1 the next intent. `intent` is EXACTLY one lever name: goto, goto_far,
         look_at, select_hotbar, place_block, bridge_to, pillar_to, tap_key, hold_key,
-        mine, attack, attack_stop, strike, use_held, eat, get, equip. All parameters go
+        mine, attack, attack_stop, strike, use_held, eat, get, equip. attack hunts PLAYERS
+        by name until attack_stop ({"allow": ["Name"]}); a mob is hit with strike {"pos":
+        [x, y, z]}. All parameters go
         in the `args` object, e.g. {"intent": "goto", "args": {"x": 5, "y": 64, "z": 5}},
         {"intent": "get", "args": {"item": "oak log", "count": 8}}. C1 executes it, may
         interrupt it for a threat and returns to it; you learn the outcome from

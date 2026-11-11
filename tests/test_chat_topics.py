@@ -236,3 +236,24 @@ def test_the_list_is_mounted_read_only_into_the_minds_alone() -> None:
         assert not any("chat-topics" in v for v in vols), name
     env = services["mind-1"]["environment"]
     assert env["CHAT_TOPICS_PATH"] == "${CHAT_TOPICS_PATH:-/etc/lastorder/chat-topics/topics.txt}"
+
+
+# --- T-072: attack hunts named players only (k-0120, k-0149: sisters killed by a bare attack) ----
+
+
+def test_attack_needs_named_players_and_never_hits_its_own_body() -> None:
+    from runtime.mind.mcp_body import ToolError, validate_args
+
+    with pytest.raises(ToolError, match="missing required"):
+        validate_args("attack", {})
+    with pytest.raises(ToolError, match="strike"):
+        validate_args("attack", {"allow": []})
+    body = FakeBody()
+    _server, impl, x = build_mind(body, username="LastOrder01", start_c1=False, idle_s=10_000.0)
+    with pytest.raises(ToolError, match="itself"):
+        impl.act("attack", {"allow": ["lastorder01"]})
+    impl.act("attack", {"allow": ["Stranger"]})
+    queued = x._queue[-1] if hasattr(x, "_queue") and x._queue else None
+    intent = queued or x._pending_act or x._current
+    args = getattr(intent, "args", None) or {}
+    assert args.get("allow") == ["Stranger"] and "LastOrder01" in args.get("avoid", [])

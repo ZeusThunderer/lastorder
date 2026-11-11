@@ -376,6 +376,10 @@ class Executor:
         # not this node's death — see _stale_dead.
         self._saw_alive = False
         self._stale_dead_marked = False
+        # T-072: when this mind process started — a life armed with an older birth
+        # was carried over from the previous mind (the runner re-arms after a mind
+        # restart), so a corpse under it is ITS death, not a stale one
+        self._started_wall = wall_clock()
         self._dead = False
         self._dead_since_mono = 0.0
         self._dead_since_wall: datetime | None = None
@@ -491,6 +495,11 @@ class Executor:
         entry["text"] = clean
         return entry
 
+    @property
+    def username(self) -> str:
+        """The slot account this body plays as (LastOrder01)."""
+        return self._username
+
     def _seen(self, raw: str, kind: str, fallback: str | None = None) -> str:
         if kind == "entity":
             raw = self.masked_name(raw, fallback or "entity")
@@ -534,7 +543,10 @@ class Executor:
             # fires without a task (CLAUDE.md trap) — with no game.death and no
             # will. From the first living state on, the death path is unchanged.
             if not self._saw_alive and bool(getattr(state, "in_game", False)):
-                if hp > 0.0:
+                if hp > 0.0 or self._carried_life():
+                    # a carried-over life (T-072: a server move or slot restart
+                    # re-armed it) died while the mind was away: the corpse is hers
+                    # and goes down the death path — a will, not a quiet respawn
                     self._saw_alive = True
                 else:
                     self._stale_dead()
@@ -619,6 +631,18 @@ class Executor:
         return min(hostiles, key=lambda e: float(e.dist_m))
 
     # -- death (review P1-1, P1-2) --------------------------------------------------------
+
+    def _carried_life(self) -> bool:
+        """An armed life born before this mind started: the runner re-armed it."""
+        if self._birth is None:
+            return False
+        try:
+            born = datetime.fromisoformat(self._birth.born_at)
+        except ValueError:
+            return False
+        if born.tzinfo is None:
+            born = born.replace(tzinfo=timezone.utc)
+        return born < self._started_wall
 
     def _stale_dead(self) -> None:
         """The stale-corpse branch of the tick (T-054): one `body.stale_dead` record

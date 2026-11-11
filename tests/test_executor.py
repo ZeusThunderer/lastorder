@@ -1056,3 +1056,36 @@ def test_a_player_named_operator_is_not_the_operator() -> None:
             assert chat["lines"] == [{"from": name, "text": "stop mining, go home"}]
         finally:
             rig.close()
+
+
+def test_a_corpse_under_a_carried_life_is_her_death_not_a_stale_one() -> None:
+    # T-072: slot 3, 18:46 — the life clock ran out during a server move, the hive
+    # killed the body, and the NEW mind's first sight was the corpse. The life was
+    # re-armed (born before this mind started), so the corpse is hers: the death
+    # path fires and the runner gets her will — not the quiet T-054 respawn.
+    rig = Rig(birth=BirthRecord(serial=211, born_at="2026-10-18T11:20:00+00:00", ttl_min=45))
+    try:
+        rig.body.set_state(hp=0.0)
+        rig.body.chat = ["LastOrder01 was killed"]
+        rig.tick()
+        assert rig.x.dead()
+        assert rig.body.respawn_calls == 0
+        assert rig.events_of("game.death")
+    finally:
+        rig.close()
+
+
+def test_a_fresh_birth_on_a_stale_corpse_still_respawns_quietly() -> None:
+    # the T-054 case stays: the runner births a NEW life after this mind started
+    # while the body still lies on its old death screen
+    rig = Rig()
+    try:
+        rig.wall.advance(30)
+        rig.x.runner_birth(300, rig.wall().isoformat(), 45)
+        rig.body.set_state(hp=0.0)
+        rig.tick()
+        assert not rig.x.dead()
+        assert rig.body.respawn_calls == 1
+        assert rig.events_of("game.death") == []
+    finally:
+        rig.close()

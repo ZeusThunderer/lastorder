@@ -31,9 +31,30 @@ lift() { # lift <var> [file key]: env wins, then the root .env
 lift ZCODE_API_KEY ZAI_API_KEY
 # the operator's game name (T-051) rides the same lift: a stand config value, not a key
 lift OPERATOR_MC_NAME
-lift MC_SERVER_1  # a slot on another server: an address, not a secret (all slots, T-057)
+# A slot on another server: an address, not a secret (all slots, T-057). Last Order's
+# own moves (infra `slot_server`, T-072) live in $ROOT/.stand-servers.env, written by
+# the host executor; they win over .env so a later restart keeps her choice. Env wins
+# over both. A slot sent home (mc-server:25565) leaves the file.
+if [ -f "$ROOT/.stand-servers.env" ]; then
+  for n in 1 2 3; do
+    eval "cur=\"\${MC_SERVER_${n}:-}\""
+    if [ -z "$cur" ]; then
+      val="$(sed -n "s/^MC_SERVER_${n}=//p" "$ROOT/.stand-servers.env" | head -1 | tr -d '\r')"
+      [ -n "$val" ] && export "MC_SERVER_${n}=$val"
+    fi
+  done
+fi
+lift MC_SERVER_1
 lift MC_SERVER_2
 lift MC_SERVER_3
+# per-slot stand switches compose reads only from this process (it never sees the root
+# .env): the camera (T-063) and the post-login skin command (T-061); the chat topics
+# path (ADR-048) — empty in .env turns the filter off
+for n in 1 2 3; do
+  lift "BODY_CAMERA_$n"
+  lift "MC_SKIN_COMMAND_$n"
+done
+lift CHAT_TOPICS_PATH
 # player commands (ADR-043, T-053): the common deny list, per-slot extras and the
 # per-slot server login passwords — a password reaches that slot's mind ONLY
 # (compose wires MC_LOGIN_PASSWORD_N into mind-N alone; node-N never sees it)

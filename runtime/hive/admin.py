@@ -92,7 +92,9 @@ ADMIN_DIR = ".admin"  # the alarm's own state and events, root-owned
 STATE_FILE = "state.json"
 OPENCODE_CONFIG = "opencode.json"
 CORE_FILES = ("PERSONA.md", "AGENTS.md", "SESSION_PROMPT.md")  # rewritten every start (P1-3)
-CORE_DIRS = ("skills",)
+# reference/: the desk's tool notes (video-tools.md, T-064) — AGENTS.md points at
+# them; left out, she met "invalid path name" with no manual (T-072)
+CORE_DIRS = ("skills", "reference")
 OPERATOR_FILES = ("INBOX.md", "GOALS.md")  # created once, then root's alone (P1-2)
 AGENT_DIRS = ("memory", "workshop")  # the agent's writable zone (workshop: T-047)
 WORKPLACE_TEMPLATE = REPO_ROOT / "agent" / "network"

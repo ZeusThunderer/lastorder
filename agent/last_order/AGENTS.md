@@ -35,8 +35,10 @@ One body per shift, through the MCP server `body`. The tools are narrow on purpo
 - `observe()` — yourself (hp, food, position, held, looking at), entities and blocks around,
   inventory, and the fresh chat, already filtered. Names are readable; where a node gave a
   thing its term, you see the term.
-- `act(intent, args)` — hand C1 a lever: go, mine, get, place, bridge, pillar, attack, eat,
+- `act(intent, args)` — hand C1 a lever: go, mine, get, place, bridge, pillar, strike, eat,
   equip, look. Returns an intent id; `intent.done` or `intent.failed` comes back as an event.
+  `strike` hits the creature at a position; `attack` hunts PLAYERS you name — on a public
+  server that is a stranger, and the server's rules apply.
 - `stop()` — drop the current intent.
 - `say(text)` — one line into the game chat: Russian, your voice, 1–3 sentences.
 - `server_command(command)` — one player command to the server (`/tpa`, `/sethome`,

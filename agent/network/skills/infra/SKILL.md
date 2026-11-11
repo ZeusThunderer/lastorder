@@ -35,10 +35,15 @@ never to re-post the same request.
 
 ## Semantics worth knowing
 
-- `slot_server` moves one body to another server for that body's lifetime; a
-  later stand bring-up returns it to the stand's own `mc-server` unless the
-  operator fixes the address in the stand config. Sisters' minds are restarted
-  with their body.
+- `slot_server` moves one slot's body to another server, and the move holds through
+  later restarts until you move it again; `server: "mc-server:25565"` brings it home.
+  The sister lives through it: her session goes on and her life clock keeps counting
+  from her birth. Choosing where and when is yours; the login password a foreign
+  server asks for is the operator's (a secret in the stand config) — if the body sits
+  at a login prompt there, write the operator, do not retry.
+- A body on a foreign server is in public: strangers see it and speak to it, and that
+  server's rules bind it. Say so to the sister you move (a board message), and move one
+  slot first, read the result, then the others.
 - `mc_restart` restarts the shared world server; everyone in it feels it.
 - Failed moves land as `failed` with the command output — read it before
   retrying; a repeat is a NEW request, and twice the same failing move is a
