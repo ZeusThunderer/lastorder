@@ -119,7 +119,7 @@ WSL2, 24 ГБ / 18 CPU. До T-003 (замер E1 и baseline T-003, серве�
 образом, думает по старым правилам (найдено в T-058: образ узла на стенде был двухдневной
 давности):
 
-    docker compose -f docker/compose.yml build node mind && \
+    docker compose -f docker/compose.yml build node-1 mind-1 && \
     docker compose -f docker/compose.yml up -d --force-recreate --no-deps node-1 mind-1
 
 Подъём одной командой (поднимает ключи из `.env`, останавливает брошенные тела слотов
