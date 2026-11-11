@@ -60,7 +60,15 @@ PROPS
 
 cd /data
 # Java takes user.home from passwd, not $HOME: without this the 0.5 GB .minecraft lands outside the volume.
-CMD=(java -Duser.home=/data -jar /opt/body/headlessmc-launcher.jar --command launch "fabric:${MC_VERSION}" $LWJGL)
+# Fabric Loader pin (T-062): with FABRIC_LOADER set (compose default = the server's pin)
+# HeadlessMC gets the fabric:<mc>:<loader> form — verified on HMC 2.10.0 ("Installing
+# 1.21.11 with fabric 0.20.1"); the bare fabric:<mc> form would keep HMC's own pick,
+# the latest loader at boot time.
+FABRIC_TARGET="fabric:${MC_VERSION}"
+if [ -n "${FABRIC_LOADER:-}" ]; then
+  FABRIC_TARGET="fabric:${MC_VERSION}:${FABRIC_LOADER}"
+fi
+CMD=(java -Duser.home=/data -jar /opt/body/headlessmc-launcher.jar --command launch "$FABRIC_TARGET" $LWJGL)
 if [ "$BODY_RENDER" = "xvfb" ]; then
   exec xvfb-run -a -s "-screen 0 854x480x24" "${CMD[@]}"
 fi

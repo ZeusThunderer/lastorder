@@ -12,8 +12,20 @@
 # containers resurrect after a hard engine kill, NETWORK.md section 9).
 name: lastorder
 
+# The Fabric versions in one place (T-062): the same compose variables feed the server
+# env below and the body build args, so the server and the clients cannot drift apart
+# (kept equal by tests/test_fabric_server.py). Loader 0.20.1 and launcher 1.1.2 are the
+# stable fabricmc.net meta picks for 1.21.11 (checked 2026-11-11), fabric-api is the
+# only server mod (ADR-045: no mods "for the future"). At start the image downloads the
+# mods from modrinth.com — the mc-server's only new egress (docker-topology.md).
+x-fabric-api: &fabric-api "${FABRIC_API:-0.140.0+1.21.11}"
+
 x-body: &body
-  build: ./body
+  build:
+    context: ./body
+    args:
+      # the same pin the server's MODRINTH_PROJECTS uses — one value for both sides
+      FABRIC_API: *fabric-api
   image: lastorder-body:dev
   restart: on-failure
   depends_on:
@@ -38,6 +50,9 @@ x-body: &body
     BODY_SIM_DISTANCE: "${BODY_SIM_DISTANCE:-5}"   # vanilla client minimum; lower falls back to 12
     BODY_MAX_FPS: "${BODY_MAX_FPS:-10}"
     MALLOC_ARENA_MAX: "2"   # glibc arenas: 8 per thread by default, 2 is plenty for a JVM body
+    # the server's loader pin rides the same variable (T-062): entrypoint turns it into
+    # HeadlessMC's fabric/<mc>/<loader> target, so the bodies' loader cannot float either
+    FABRIC_LOADER: "${FABRIC_LOADER:-0.20.1}"
 
 # The mind of a slot (NETWORK.md section 3): C1 plus the body MCP server on :8700 in the
 # body's network namespace (the py4j bridge stays localhost-only). The runner endpoints
@@ -165,8 +180,13 @@ services:
     image: itzg/minecraft-server:java21
     environment:
       EULA: "TRUE"
-      TYPE: "VANILLA"
+      # Fabric instead of vanilla (ADR-045, T-062): loader and launcher pinned, never
+      # "latest"; the world on the same volume survives the switch unchanged.
+      TYPE: "FABRIC"
       VERSION: "1.21.11"
+      FABRIC_LOADER_VERSION: "${FABRIC_LOADER:-0.20.1}"
+      FABRIC_LAUNCHER_VERSION: "${FABRIC_LAUNCHER:-1.1.2}"
+      MODRINTH_PROJECTS: "fabric-api:${FABRIC_API:-0.140.0+1.21.11}"
       ONLINE_MODE: "FALSE"
       ENFORCE_SECURE_PROFILE: "FALSE"   # offline clients cannot sign chat
       DIFFICULTY: "easy"
