@@ -146,7 +146,12 @@ def test_the_mind_and_its_body_are_peers_on_a_private_link():
         assert f"link-{n}" in body["networks"] and f"slot-{n}" not in body["networks"]
         assert f"link-{n}" not in node["networks"]          # a raw uc bridge never reaches a sandbox
         assert body["environment"]["MIND_LINK_IP"] == f"10.250.{n}.3"   # the relay admits the mind alone
-        assert mind["environment"]["BODY_HOST"] == f"body-{n}"
+        # fixed link addresses on both sides: a service name resolves to its default-network
+        # address and the relay refuses it (seen live, ADR-050)
+        assert body["networks"][f"link-{n}"]["ipv4_address"] == f"10.250.{n}.2"
+        assert body["environment"]["BODY_LINK_IP"] == f"10.250.{n}.2"
+        assert mind["environment"]["BODY_HOST"] == f"10.250.{n}.2"
+        assert body["environment"]["MIND_HOST"] == f"10.250.{n}.3"
         assert mind["environment"]["CALLBACK_ADDRESS"] == f"10.250.{n}.3"
         assert node["environment"]["BODY_BASE"].startswith(f"http://mind-{n}:8700")
         assert node["depends_on"][f"mind-{n}"]["condition"] == "service_healthy"

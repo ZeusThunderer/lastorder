@@ -269,13 +269,19 @@ services:
       # recorded move in .stand/servers.env or .env): the body rides the default network,
       # so an external address is reachable; its mind reconnects over the link.
       MC_SERVER: "${MC_SERVER_1:-mc-server:25565}"
-      MIND_HOST: mind-1        # the bridge relays (ADR-050): uc's callback goes here
+      MIND_HOST: 10.250.1.3   # the bridge relays (ADR-050): uc's callback goes to the mind on link-1
       MIND_LINK_IP: 10.250.1.3   # and only this address may reach uc's gateway
+      BODY_LINK_IP: 10.250.1.2   # the gateway relay listens on link-1 only
       # BODY_CAMERA_1=1 turns this slot's camera on (T-063): Xvfb + ffmpeg → media
       BODY_CAMERA: "${BODY_CAMERA_1:-}"
     volumes:
       - body-1:/data
-    networks: [default, link-1, media-net]   # link-1: the bridge to mind-1 alone (ADR-050); media-net only for the camera stream
+    # link-1: the bridge to mind-1 alone (ADR-050); media-net only for the camera stream
+    networks:
+      default: {}
+      link-1:
+        ipv4_address: 10.250.1.2
+      media-net: {}
 
   # The mind of slot 1: see the x-mind anchor.
   mind-1:
@@ -293,7 +299,7 @@ services:
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder01
-      BODY_HOST: body-1              # the body's relay on link-1 (ADR-050)
+      BODY_HOST: 10.250.1.2        # the body's relay on link-1 (ADR-050); a name would resolve off the link
       BODY_PORT: "25433"
       CALLBACK_ADDRESS: 10.250.1.3   # uc's callback arrives here, relayed by the body
       LLM_API_KEY: "${GATEWAY_KEY_MIND_1:-}"
@@ -344,12 +350,17 @@ services:
       # MC_SERVER_N moves this body to another server (T-057, the infra bridge's
       # slot_server): same override shape as slot 1, all slots alike
       MC_SERVER: "${MC_SERVER_2:-mc-server:25565}"
-      MIND_HOST: mind-2
+      MIND_HOST: 10.250.2.3   # the bridge relays (ADR-050): uc's callback goes to the mind on link-2
       MIND_LINK_IP: 10.250.2.3
+      BODY_LINK_IP: 10.250.2.2   # the gateway relay listens on link-2 only
       BODY_CAMERA: "${BODY_CAMERA_2:-}"
     volumes:
       - body-2:/data
-    networks: [default, link-2, media-net]
+    networks:
+      default: {}
+      link-2:
+        ipv4_address: 10.250.2.2
+      media-net: {}
 
   mind-2:
     <<: *mind
@@ -361,7 +372,7 @@ services:
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder02
-      BODY_HOST: body-2              # the body's relay on link-2 (ADR-050)
+      BODY_HOST: 10.250.2.2        # the body's relay on link-2 (ADR-050); a name would resolve off the link
       BODY_PORT: "25433"
       CALLBACK_ADDRESS: 10.250.2.3   # uc's callback arrives here, relayed by the body
       LLM_API_KEY: "${GATEWAY_KEY_MIND_2:-}"
@@ -405,12 +416,17 @@ services:
       <<: *body-env
       MC_USERNAME: LastOrder03
       MC_SERVER: "${MC_SERVER_3:-mc-server:25565}"
-      MIND_HOST: mind-3
+      MIND_HOST: 10.250.3.3   # the bridge relays (ADR-050): uc's callback goes to the mind on link-3
       MIND_LINK_IP: 10.250.3.3
+      BODY_LINK_IP: 10.250.3.2   # the gateway relay listens on link-3 only
       BODY_CAMERA: "${BODY_CAMERA_3:-}"
     volumes:
       - body-3:/data
-    networks: [default, link-3, media-net]
+    networks:
+      default: {}
+      link-3:
+        ipv4_address: 10.250.3.2
+      media-net: {}
 
   mind-3:
     <<: *mind
@@ -422,7 +438,7 @@ services:
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder03
-      BODY_HOST: body-3              # the body's relay on link-3 (ADR-050)
+      BODY_HOST: 10.250.3.2        # the body's relay on link-3 (ADR-050); a name would resolve off the link
       BODY_PORT: "25433"
       CALLBACK_ADDRESS: 10.250.3.3   # uc's callback arrives here, relayed by the body
       LLM_API_KEY: "${GATEWAY_KEY_MIND_3:-}"

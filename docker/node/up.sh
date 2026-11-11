@@ -44,6 +44,9 @@ if [ -z "${STAND_DAEMON_ROOT:-}" ]; then
   esac
 fi
 export STAND_DAEMON_ROOT
+# MSYS rewrites any POSIX-looking env value it hands a Windows program (/run/... ->
+# C:/Program Files/Git/run/...): keep this one verbatim for docker.exe
+export MSYS2_ENV_CONV_EXCL="${MSYS2_ENV_CONV_EXCL:+$MSYS2_ENV_CONV_EXCL;}STAND_DAEMON_ROOT"
 mkdir -p "$ROOT/.stand" 2>/dev/null || true   # the infra container's writable corner
 
 # A slot on another server: an address, not a secret (all slots, T-057). Last Order's

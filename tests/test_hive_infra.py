@@ -526,6 +526,15 @@ def test_run_steps_wires_the_captured_container_id() -> None:
     assert "$ " in transcript
 
 
+def test_status_hands_docker_its_go_template_intact() -> None:
+    # seen live: str.format turned {{.State}} into {.State}, and docker printed the
+    # literal template once per container instead of the states
+    runner, calls = fake_runner([{"out": "SERVICE  STATE"}])
+    ok, _ = bridge.run_steps(bridge.commands_for("status", {}), runner=runner)
+    assert ok
+    assert calls[0][-1] == "table {{.Service}}\t{{.State}}\t{{.Status}}"
+
+
 def test_run_steps_stops_at_the_first_failure() -> None:
     steps = bridge.commands_for("mc_restart", {})
     runner, calls = fake_runner([{"rc": 1, "err": "no such service: mc-server"}])

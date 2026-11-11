@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -195,6 +196,7 @@ def commands_for(action: str, args: dict[str, str], *, project: str = "") -> lis
 
 
 STATUS_FORMAT = "table {{.Service}}\t{{.State}}\t{{.Status}}"
+CAPTURE_SLOT = re.compile(r"\{(\w+)\}")  # a {cid} slot; a {{.Go}} template never matches
 
 
 def _world_gc(every: list[str]) -> Callable[..., tuple[bool, str]]:
@@ -241,7 +243,12 @@ def run_steps(
             if not ok:
                 return False, "\n".join(lines)
             continue
-        argv = [part.format_map(captures) for part in step.argv]
+        # only {name} slots of earlier captures: a docker Go template ({{.State}})
+        # passes through untouched (str.format collapsed it to {.State}, seen live)
+        argv = [
+            CAPTURE_SLOT.sub(lambda m: captures.get(m.group(1), m.group(0)), part)
+            for part in step.argv
+        ]
         env = {**os.environ, **step.env}
         lines.append("$ " + " ".join(argv))
         try:

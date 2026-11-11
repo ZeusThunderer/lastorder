@@ -78,10 +78,12 @@ if [ -n "${MIND_HOST:-}" ]; then
   RELAY_PORT="${BODY_RELAY_PORT:-25433}"
   RANGE=""
   if [ -n "${MIND_LINK_IP:-}" ]; then RANGE=",range=${MIND_LINK_IP}/32"; fi
+  BIND=""
+  if [ -n "${BODY_LINK_IP:-}" ]; then BIND="bind=${BODY_LINK_IP},"; fi   # the link only, never default/media
   (
     set +e
     while true; do
-      socat "TCP-LISTEN:${RELAY_PORT},reuseaddr,fork${RANGE}" TCP:127.0.0.1:25333
+      socat "TCP4-LISTEN:${RELAY_PORT},${BIND}reuseaddr,fork${RANGE}" TCP:127.0.0.1:25333
       echo "relay: gateway relay exited (rc=$?), restarting in 1 s" >&2
       sleep 1
     done
@@ -89,7 +91,7 @@ if [ -n "${MIND_HOST:-}" ]; then
   (
     set +e
     while true; do
-      socat TCP-LISTEN:25334,bind=127.0.0.1,reuseaddr,fork "TCP:${MIND_HOST}:25334"
+      socat TCP4-LISTEN:25334,bind=127.0.0.1,reuseaddr,fork "TCP:${MIND_HOST}:25334"
       echo "relay: callback relay exited (rc=$?), restarting in 1 s" >&2
       sleep 1
     done

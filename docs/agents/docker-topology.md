@@ -8,14 +8,33 @@
 |---|---|---|
 | `mc-server` | `itzg/minecraft-server` | 1.21.11, `ONLINE_MODE=FALSE`, survival, `DIFFICULTY=easy`, обычный мир, RCON. Мир на volume `world` — один постоянный мир на всех |
 | `body-N` (N=1..3) | свой `docker/body` | Java 21 + HeadlessMC + Fabric 1.21.11 + fabric-api + jar uc. Ник `LastOrder0N`, `autoConnectServer=mc-server` |
-| `mind-N` | свой `docker/mind` | Python 3.12 + uv. `network_mode: service:body-N`. Цикл узла, py4j-клиент и callback-сервер на localhost |
+| `mind-N` | свой `docker/mind` | Python 3.12 + uv. Сосед тела по частной сети `link-N` (ADR-050): py4j-клиент на `body-N:25433` (socat в теле), callback на `10.250.N.3:25334`. Исполнитель C1, детектор смерти, MCP тела `mind-N:8700`, сам просит своё тело |
+| `infra` | свой `docker/infra` | Исполнитель infra-запросов доски (ADR-050): docker CLI + compose, сокет Docker, репозиторий только на чтение |
 | `hive` | тот же `docker/mind` | FastAPI: реестр узлов (сквозной номер), общая база знаний (единственный писатель, git), каталог, сводки, ротация по сроку жизни |
 | `llm` | vLLM (профиль `local`) | Локальная модель на 5070 Ti, OpenAI-совместимый API. Облако подключается через переменные LiteLLM без этого сервиса |
 
 Volumes: `world`, `knowledge` (база сети под git), `body-N` (`.minecraft`, игровая папка, настройки uc).
 
+## Ярусы и автостарт (ADR-050)
+| Ярус | Сервисы | Кто поднимает | `restart` |
+|---|---|---|---|
+| ядро (без профиля) | `hive`, `last-order`, `hapi-hub`, `llm-gateway`, `gateway-db`, `zai-egress`, `egress`, `media`, `infra` | Docker при старте | `unless-stopped` |
+| слот (`slots`) | `mind-N`, затем `node-N` | Last Order или оператор: `slot_up` | `"no"` |
+| тело (`bodies`) | `body-N` | сам `mind-N`: `body_up` / `body_restart` | `"no"` |
+| мир (`world`) | `mc-server` | исполнитель перед телом, которое играет дома; стоп, когда тел нет | `"no"` |
+
+- `bash docker/node/up.sh` без аргументов: `up -d` ядра, затем `create` слотов, тел и мира
+  (остановлены, ключи внутри). С аргументами — `up -d` названных сервисов (так зовёт исполнитель).
+- `restart: "no"` у слотов намеренно: `on-failure` и `unless-stopped` воскрешают контейнер после
+  смерти демона (T-037), а слот без решения Last Order подниматься не должен.
+- После старта desk Last Order получает пробуждение `start` и решает, какие слоты поднять.
+- Кнопки ▲ ↻ ▼ слотов на странице доски — infra-запросы оператора, их выполняет тот же исполнитель.
+- `node-N` в `link-N` не входит: от сестры до py4j uc маршрута нет [проверено: test_stand_compose].
+- Автостарт после перезагрузки хоста [не проверено]: держится на `unless-stopped` и автозапуске
+  Docker Desktop.
+
 ## Слот и узел
-- Слот — это пара `body-N` + `mind-N`, она живёт постоянно. Имя в Minecraft — имя слота: `LastOrder01`.
+- Слот — это `node-N` + `mind-N`; тело `body-N` поднимает и меняет разум. Имя в Minecraft — имя слота: `LastOrder01`.
 - Узел живёт внутри `mind-N` и называется «Мисака 00007» (сквозной номер из hive, формат в конфиге).
 - Смерть узла:
   1. завещание;
@@ -183,6 +202,10 @@ bash dev/board_chat_run.sh up
 - Без GL (`-lwjgl`) клиент работает. Ошибки OpenAL, Realms и 401 на ключ профиля при старте — норма.
 
 ## Перезапуск слота (T-055)
+С ADR-050 перезапуск тела — дело разума (`body_restart` через доску), перезапуск разума — `slot_restart`
+исполнителя (сестра живёт дальше). Порядок ниже — исторический, скрипт остался ручным инструментом
+и описывает старую схему (`network_mode: service:body-N`).
+
 `bash dev/slot_restart.sh N` — одной командой, в порядке, который переживает мост: mind-N стоп
 (SIGTERM, `stop_grace_period: 20s`, мост закрывается `close()`), body-N recreate (свежий
 контейнер переподключается к серверу, `restart` изношенного — нет, T-053), ожидание healthcheck
@@ -195,8 +218,21 @@ mind-N теперь стартует только после healthcheck тел�
 
 ## Исполнитель инфраструктуры (T-057)
 Last Order управляет составом сети сама, без одобрения на каждое действие (ADR-044): она
-пишет на доску инфра-запрос (`slot_up/slot_down/slot_restart/slot_server/mc_restart/status/logs`,
-разбор — `runtime/hive/infra.py`), исполнитель на хосте выполняет его и пишет итог на доску.
+пишет на доску инфра-запрос (`slot_up/slot_down/slot_restart/slot_server/body_up/body_down/
+body_restart/mc_restart/status/logs`, разбор — `runtime/hive/infra.py`), исполнитель выполняет
+его и пишет итог на доску. С ADR-050 исполнитель — контейнер ядра `infra`; пункты ниже про
+запуск с хоста и `.stand-servers.env` — история T-057/T-072.
+
+- Контейнер `infra` (ADR-050): `docker/infra/Dockerfile` (docker 29.9.2 CLI + compose v5.6.1 со
+  сверкой sha256), сокет Docker, репозиторий на чтение по пути демона `STAND_DAEMON_ROOT`
+  (`up.sh` считает его: на Docker Desktop `/run/desktop/mnt/host/c/...`; Git Bash иначе
+  переписывает значение, поэтому `MSYS2_ENV_CONV_EXCL`), `.stand/` на запись — переезды слотов в
+  `.stand/servers.env`. `read_only`, `cap_drop: ALL`, 256 МБ, сеть `infra-net` только с hive,
+  здоровье — пульс `/tmp` цикла опроса. Код моста едет с репозитория: правка
+  `dev/infra_bridge.py` — `docker restart lastorder-infra-1`.
+- Права: Last Order и оператор — любые действия набора; раннер (и разум) слота N — только
+  `body_*` и `slot_restart` своего слота, через `POST /board/infra/slot`, не больше 3 перезапусков
+  за 10 мин (дальше 429 и тревога `stuck`).
 
 - Ключ: `HIVE_INFRA_KEY` в `.env` (отличен от всех прочих ключей стенда — hive с дубликатом
   не стартует; в песочницы не попадает, поднимается только в hive). На стенде создан в T-072;

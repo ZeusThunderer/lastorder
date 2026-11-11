@@ -14,8 +14,13 @@ Fabric-мод: altoclef (`src/main/java/adris/altoclef`) + tungsten (pathfinder,
 
 ## Управление
 - **Py4J** `:25333`, callback-порт +1. Если порт занят, мод сдвигает его на +2 и пишет в
-  `altoclef_settings.json`. Gateway создаётся без адреса и слушает только localhost →
-  мозг кладётся в сетевое пространство тела (`network_mode: service:body-N`).
+  `altoclef_settings.json`. Gateway создаётся без адреса и слушает только localhost. До
+  ADR-050 мозг жил в сетевом пространстве тела (`network_mode: service:body-N`); теперь в теле
+  socat: `:25433` на адресе `link-N` → `127.0.0.1:25333` (пускает только адрес разума), и
+  `127.0.0.1:25334` → `mind-N:25334` для обратных вызовов uc. Адреса py4j —
+  `BODY_HOST/BODY_PORT/CALLBACK_ADDRESS` (`runtime/game/py4j_body.py:bridge_addresses`).
+  `CallbackServerParameters` явно — только с `eager_load=False`, иначе сервер стартует в
+  конструкторе и проверка занятого порта ломается.
 - Точка входа — `Py4jEntryPoint.java`: ~6000 строк, 100+ методов. **Целиком не читать**, искать по имени.
 - **MCP** `:25350`: JSON-RPC `POST /mcp`, `Authorization: Bearer <mcpAuthToken>`, только опрос, ~60 инструментов.
   Документация: `docs/features/MCP_SERVER.md`, `docs/features/AGENT_PY4J_LEVERS.md`.
