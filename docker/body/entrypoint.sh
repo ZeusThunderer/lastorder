@@ -81,6 +81,13 @@ hmc.jline.enabled=false
 hmc.jvmargs=-Xmx${BODY_XMX} -Xms${BODY_XMS:-256M} -XX:MaxMetaspaceSize=256M -XX:ReservedCodeCacheSize=128M
 hmc.exit.on.failed.command=true
 PROPS
+# An OFFLINE account makes HeadlessMC force its no-op LWJGL ("You are offline, game
+# will start in headless mode!") unless it finds Xvfb in `ps aux` — and it only looks
+# when hmc.check.xvfb=true (default false). Without this the camera streams a black
+# screen [проверено: T-069, HMC 2.10.0 LaunchOptions/XvfbService bytecode, body-2].
+if [ "${BODY_CAMERA:-}" = "1" ] || [ "$BODY_RENDER" = "xvfb" ]; then
+  echo "hmc.check.xvfb=true" >> /data/HeadlessMC/config.properties
+fi
 
 cd /data
 # Java takes user.home from passwd, not $HOME: without this the 0.5 GB .minecraft lands outside the volume.

@@ -68,3 +68,16 @@ def test_entrypoint_streams_the_fixed_display_to_media():
     assert "BODY_CAMERA" in text and "Xvfb :99" in text
     # the stream survives a media restart: ffmpeg rides a restart loop
     assert "while true" in text and "sleep 3" in text
+
+
+def test_camera_turns_on_hmc_xvfb_check():
+    # T-069: an offline account makes HeadlessMC swap in its no-op LWJGL unless it
+    # finds Xvfb, and it only looks when hmc.check.xvfb=true — without the line the
+    # camera recorded a black screen (T-063 had checked the container, not the picture)
+    text = (ROOT / "docker" / "body" / "entrypoint.sh").read_text(encoding="utf-8")
+    props_end = text.index("\nPROPS\n") + len("\nPROPS\n")
+    after = text[props_end:]
+    assert 'echo "hmc.check.xvfb=true" >> /data/HeadlessMC/config.properties' in after
+    line = after.index('echo "hmc.check.xvfb=true"')
+    assert '"${BODY_CAMERA:-}" = "1"' in after[:line]
+    assert line < after.index("exec ")

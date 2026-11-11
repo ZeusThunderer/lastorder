@@ -239,6 +239,11 @@ compose-файла, не корневой `.env`); `up.sh` эти перемен
 `BODY_CAMERA_N` тело стартует как раньше (`headless`), `media` не обязателен. Параметры потока —
 `BODY_CAMERA_FPS` (10), `BODY_CAMERA_SIZE` (854x480), `BODY_CAMERA_BITRATE` (1M); дистанцию
 прорисовки для съёмки поднимают обычными `BODY_RENDER_DISTANCE`/`BODY_XMX` слота.
+HeadlessMC с офлайн-аккаунтом сам включает пустой LWJGL («You are offline, game will start in
+headless mode!»), если не видит Xvfb, а смотрит он только при `hmc.check.xvfb=true` — entrypoint
+пишет это свойство при камере. Без него поток шёл, но кадр был чёрный (~13 кбит/с). Признак
+рабочей камеры в логе тела: «running with xvfb, not using headless mode», `LWJGL version 3.3.3`
+[проверено: T-069, кадр из `/get` — вид от первого лица, 1 Мбит/с].
 
 `media` — MediaMTX `bluenviron/mediamtx:1.21.3` (конфиг `docker/media/mediamtx.yml`, только
 RTSP+запись+playback, остальное выключено). Пишет все потоки в кольцевой буфер: volume `footage`,
