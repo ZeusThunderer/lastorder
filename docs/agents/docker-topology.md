@@ -119,8 +119,14 @@ WSL2, 24 ГБ / 18 CPU. До T-003 (замер E1 и baseline T-003, серве�
 образом, думает по старым правилам (найдено в T-058: образ узла на стенде был двухдневной
 давности):
 
+    export BUILDX_BAKE_ENTITLEMENTS_FS=0
     docker compose -f docker/compose.yml build node-1 mind-1 && \
     docker compose -f docker/compose.yml up -d --force-recreate --no-deps node-1 mind-1
+
+Compose v5 собирает через bake, и на Windows bake требует право `fs.read` на собственный
+Dockerfile («additional privileges requested: pass --allow=fs.read=docker\body\Dockerfile»),
+`build` выходит с кодом 0 и ничего не собирает. `BUILDX_BAKE_ENTITLEMENTS_FS=0` снимает
+проверку; `COMPOSE_BAKE=false` в v5 не помогает [проверено: T-069, Compose v5.6.1, buildx 0.38.1].
 
 Подъём одной командой (поднимает ключи из `.env`, останавливает брошенные тела слотов
 2–3, ждёт сервер и рождение сестры, печатает её номер):

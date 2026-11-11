@@ -44,3 +44,5 @@ docker/run/
 /dev/video/trailer/film/.hyperframes/
 /dev/video/trailer/film/.media/
 /dev/video/trailer/film/renders/
+# raw camera-run measurements (dev/camera_run.sh, T-065)
+/.camera-run-data/

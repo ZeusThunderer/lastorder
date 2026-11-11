@@ -45,7 +45,8 @@ if [ "$dry" = 0 ]; then command -v docker >/dev/null || die "docker CLI not foun
 run() { if [ "$dry" = 1 ]; then printf '# %s\n' "$*"; else "$@"; fi; }
 
 SVC="media mc-server body-1 body-2 body-3 mind-1 mind-2 mind-3"
-cam_env=(MC_HOST_PORT="$port" BODY_RENDER_DISTANCE="$distance" NODE_DEV_OPEN=1)
+cam_env=(MC_HOST_PORT="$port" BODY_RENDER_DISTANCE="$distance" NODE_DEV_OPEN=1
+         BUILDX_BAKE_ENTITLEMENTS_FS=0)  # Compose v5 bake on Windows: see docker-topology.md
 if [ "$camera" = 1 ]; then cam_env+=(BODY_CAMERA_1=1 BODY_CAMERA_2=1 BODY_CAMERA_3=1); fi
 
 ovf="$(mktemp "${TMPDIR:-/tmp}/camera-run-XXXXXX.yml")"
