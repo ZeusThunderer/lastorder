@@ -10,7 +10,7 @@ ARG FABRIC_API=0.140.0+1.21.11
 ARG FABRIC_API_SHA256=db5f2884996adf54cb1a4a5e0c6348abeba2772d057ad89fd15c1c08336f736a
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl ca-certificates xvfb libgl1 libglx-mesa0 libxrender1 libxtst6 libxi6 \
+ && apt-get install -y --no-install-recommends curl ca-certificates xvfb libgl1 libglx-mesa0 libxrender1 libxtst6 libxi6 ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/body
