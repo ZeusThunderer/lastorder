@@ -30,3 +30,6 @@ docker/run/
 /task2.md
 /task3-4.md
 /agent/last_order/skin/src_*.png
+
+# world backups (dev/backup_world.sh writes ./backups where it runs)
+/backups/
