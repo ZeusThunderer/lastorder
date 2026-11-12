@@ -82,7 +82,7 @@ body {
 }
 .badge.open { background: #cfe2f5; }
 .badge.taken, .badge.needs_input { background: #f5e3c5; }
-.badge.done, .badge.approved, .badge.answered, .badge.acked { background: #cfe7d2; }
+.badge.done, .badge.approved, .badge.answered, .badge.acked, .badge.cleared { background: #cfe7d2; }
 .badge.failed, .badge.denied, .badge.canceled { background: #ecd3cd; }
 .badge.posted { background: #dfe6ed; }
 

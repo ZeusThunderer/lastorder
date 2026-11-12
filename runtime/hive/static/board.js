@@ -11,6 +11,7 @@ const state = { entries: [], alive: [], filter: "" };
 const KIND_LABEL = { task: "задача", request: "запрос", message: "сообщение", alarm: "тревога" };
 const TERMINAL = new Set([
   "done", "failed", "declined", "canceled", "approved", "denied", "answered", "acked",
+  "cleared",
 ]);
 
 // --- small DOM helpers -----------------------------------------------------------------

@@ -143,11 +143,17 @@ class BoardAlarms(BaseApi):
     alarms with the slot's runner key. One attempt per call — repeats fold into
     `count` on the hive, and an alarm must never stall the loop that raises it."""
 
-    def alarm(self, alarm_type: str, text: str, *, slot: str, serial: int | None) -> None:
+    def alarm(self, alarm_type: str, text: str, *, slot: str, serial: int | None) -> int | None:
         payload: dict[str, Any] = {"type": alarm_type, "text": text, "slot": slot}
         if serial is not None:
             payload["serial"] = serial
-        self._request("post", "/board/alarms", payload)
+        try:
+            return int(self._request("post", "/board/alarms", payload).json()["id"])
+        except (ValueError, KeyError, TypeError):
+            return None  # raised, but the id is lost: no auto-clear, the alarm stays
+
+    def clear(self, entry_id: int) -> None:
+        self._request("post", f"/board/alarms/{entry_id}/clear", {})
 
 
 class NodeRunner:
@@ -203,13 +209,14 @@ class NodeRunner:
         # report — the ids ride the exclusion set of boot_report (the will's 409)
         self._known_session_ids: list[str] = []
 
-    def _alarm(self, alarm_type: str, text: str, state: "LifeState | None" = None) -> None:
+    def _alarm(self, alarm_type: str, text: str, state: "LifeState | None" = None) -> int | None:
         """Raise a board alarm best-effort: a board that is down must not take
-        the runner down with it — the log keeps the attempt either way."""
+        the runner down with it — the log keeps the attempt either way. Returns
+        the entry id, for the caller that retracts the alarm when it clears."""
         if self._alarms is None:
-            return
+            return None
         try:
-            self._alarms.alarm(
+            entry_id = self._alarms.alarm(
                 alarm_type,
                 text,
                 slot=self.cfg.slot,
@@ -217,8 +224,21 @@ class NodeRunner:
             )
         except Exception as exc:
             self._log("alarm.post_failed", {"type": alarm_type, "error": f"{type(exc).__name__}: {exc}"})
+            return None
+        self._log("alarm.posted", {"type": alarm_type, "id": entry_id})
+        return entry_id
+
+    def _alarm_clear(self, entry_id: int | None, alarm_type: str) -> None:
+        """Retract a raised alarm best-effort — the log keeps the outcome either way."""
+        if self._alarms is None or entry_id is None:
             return
-        self._log("alarm.posted", {"type": alarm_type})
+        try:
+            self._alarms.clear(entry_id)
+        except Exception as exc:
+            self._log("alarm.clear_failed", {"type": alarm_type, "id": entry_id,
+                                             "error": f"{type(exc).__name__}: {exc}"})
+            return
+        self._log("alarm.cleared", {"type": alarm_type, "id": entry_id})
 
     # --- plumbing -----------------------------------------------------------------------
 
@@ -755,6 +775,7 @@ class NodeRunner:
         last_size = progress(state.session_id, sessions_dir) if watching else 0
         last_move = self._monotonic()
         stuck_raised = False
+        stuck_alarm_id: int | None = None
         output_of = getattr(adapter, "output_of", None) if adapter is not None else None
         probing = (
             getattr(adapter, "long_running", False)
@@ -772,9 +793,14 @@ class NodeRunner:
                 if size is not None and size != last_size:
                     last_size = size
                     last_move = now
+                    if stuck_raised:  # turns are back: the quiet alarm is stale
+                        self._alarm_clear(stuck_alarm_id, "stuck")
                     stuck_raised = False
+                    stuck_alarm_id = None
                 elif not stuck_raised:
-                    self._alarm("stuck", "no agent turns for a while: the session went quiet", state)
+                    stuck_alarm_id = self._alarm(
+                        "stuck", "no agent turns for a while: the session went quiet", state
+                    )
                     stuck_raised = True
                     last_move = now  # one alarm per quiet stretch, not per poll
             if now >= next_poll:

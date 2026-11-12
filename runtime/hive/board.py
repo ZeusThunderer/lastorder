@@ -82,7 +82,10 @@ ALARM_TYPES = (
     "quota",
     "emergency_will",
 )
-_TERMINAL = {"done", "failed", "declined", "canceled", "approved", "denied", "answered", "acked"}
+_TERMINAL = {
+    "done", "failed", "declined", "canceled", "approved", "denied", "answered", "acked",
+    "cleared",
+}
 
 # section 3.2: (from, to) -> who may, text mandatory. Missing pairs are `bad_transition`.
 # "may-take" and "claimer" are different rights (review R1-1): the first is about the
@@ -721,7 +724,13 @@ class Board:
             kind, status = row["kind"], row["status"]
             moves = _TASK_MOVES if kind == "task" else (
                 _REQUEST_MOVES if kind == "request" else (
-                    {("open", "acked"): "operator"} if kind == "alarm" else {}
+                    {
+                        ("open", "acked"): "operator",
+                        # the raiser retracts its own alarm when the condition is gone
+                        # (a stuck session making turns again) — the board stays the
+                        # operator's inbox, not a pile of stale opens
+                        ("open", "cleared"): "author",
+                    } if kind == "alarm" else {}
                 )
             )
             if kind == "request" and self._row_is_infra(row):

@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from runtime.hive.app import create_app
-from runtime.hive.board import AGENT_MUTATIONS_PER_LIFE, OPERATOR_MSGS_PER_LIFE
+from runtime.hive.board import AGENT_MUTATIONS_PER_LIFE, OPERATOR_MSGS_PER_LIFE, BoardError
 from runtime.hive.lifecycle import HiveLog
 from runtime.knowledge.store import KnowledgeStore
 from runtime.lastorder.traits import Traits
@@ -593,6 +593,35 @@ def test_alarm_rights(rstack: RunnerStack) -> None:
     assert no_key.status_code == 401
     alarm_id = ok.json()["id"]
     acked = rstack.board.transition("operator", alarm_id, "acked")
+    assert acked["status"] == "acked"
+
+
+def test_the_alarm_author_clears_its_own_open_alarm(rstack: RunnerStack) -> None:
+    """A stuck alarm that has gone stale (the session makes turns again) is
+    retracted by its raiser: `cleared`, not `acked` — the operator's ack stays
+    the operator's. Another runner's key may not clear it."""
+    rstack.birth()
+    raised = rstack.client.post(
+        "/board/alarms", json={"type": "stuck", "text": "тишина", "slot": "LastOrder01"},
+        headers={"X-Runner-Key": RKEY1},
+    )
+    assert raised.status_code == 200, raised.text
+    alarm_id = raised.json()["id"]
+    stranger = rstack.client.post(f"/board/alarms/{alarm_id}/clear", headers={"X-Node-Key": KEY1})
+    assert stranger.status_code == 403, stranger.text
+    cleared = rstack.client.post(f"/board/alarms/{alarm_id}/clear", headers={"X-Runner-Key": RKEY1})
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["status"] == "cleared"
+    # cleared is final: the operator's ack no longer applies, repeats need a new entry
+    with pytest.raises(BoardError) as caught:
+        rstack.board.transition("operator", alarm_id, "acked")
+    assert caught.value.status == 409
+    repeat = rstack.client.post(
+        "/board/alarms", json={"type": "stuck", "text": "тишина", "slot": "LastOrder01"},
+        headers={"X-Runner-Key": RKEY1},
+    )
+    assert repeat.json()["id"] != alarm_id
+    acked = rstack.board.transition("operator", repeat.json()["id"], "acked")
     assert acked["status"] == "acked"
 
 

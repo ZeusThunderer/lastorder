@@ -817,6 +817,12 @@ def create_app(
             slot=str(body.get("slot", "") or ""), serial=serial,
         )
 
+    @app.post("/board/alarms/{entry_id}/clear")
+    def board_alarm_clear(request: Request, entry_id: int) -> dict:
+        """The alarm's author retracts it (a stuck session that makes turns again);
+        the board's transition rights do the author check."""
+        return board.transition(_alarm_author(request), entry_id, "cleared")
+
     @app.post("/board/infra/slot")
     def board_infra_slot(request: Request, body: dict) -> dict:
         """A slot's own environment asks the executor for its body or its mind

@@ -243,19 +243,27 @@ class FakeAdapter:
 
 
 class FakeAlarms:
-    """The board alarms recorder: (type, text, slot, serial) of every raised alarm."""
+    """The board alarms recorder: (type, text, slot, serial) of every raised alarm,
+    plus the ids of the alarms the runner retracted (the stuck-clear, R1-1)."""
 
     def __init__(self, journal: list | None = None):
         self.calls: list[tuple[str, str, str, int | None]] = []
+        self.cleared: list[int] = []
         self.fail: Exception | None = None
         self._journal = journal
 
-    def alarm(self, alarm_type: str, text: str, *, slot: str, serial: int | None) -> None:
+    def alarm(self, alarm_type: str, text: str, *, slot: str, serial: int | None) -> int | None:
         if self.fail is not None:
             raise self.fail
         self.calls.append((alarm_type, text, slot, serial))
         if self._journal is not None:
             self._journal.append((f"alarm:{alarm_type}",))
+        return 700 + len(self.calls)  # a distinct id per raised alarm
+
+    def clear(self, entry_id: int) -> None:
+        if self.fail is not None:
+            raise self.fail
+        self.cleared.append(entry_id)
 
 
 class FakeHapiAdapter(FakeAdapter):
@@ -1699,6 +1707,25 @@ def test_hapi_stuck_alarm_when_the_session_goes_quiet(tmp_path: Path) -> None:
     kinds = [call[0] for call in rig.alarms.calls]
     assert "stuck" in kinds
     assert kinds.count("stuck") == 1  # one alarm per quiet stretch, not per poll
+
+
+def test_hapi_stuck_alarm_is_cleared_when_turns_resume(tmp_path: Path) -> None:
+    """The quiet alarm is the runner's own: when the session makes turns again,
+    the runner retracts it — the operator's board stays an inbox, not a pile."""
+    rig, hapi = _hapi_rig(tmp_path, stuck_s=0.05, poll_s=0.01)
+    state = rig.runner._birth()
+    rig.script(FakeProcess(hang=True))
+    rig.mind.kill_at_status = 60
+    # quiet for the first checks, then a turn lands and the session keeps moving
+    progress_values = iter([1000] * 4 + list(range(2000, 2000 + 500 * 80, 500)))
+
+    def moving_progress(session_id, sessions_dir):
+        return next(progress_values)
+
+    hapi.session_progress = moving_progress
+    rig.runner._life(state)
+    assert [call[0] for call in rig.alarms.calls] == ["stuck"]  # raised once, no re-raise
+    assert rig.alarms.cleared == [701]  # ...and retracted when turns came back
 
 
 def test_boardlink_is_off_for_the_pi_harness(tmp_path: Path) -> None:
