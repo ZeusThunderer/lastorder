@@ -917,6 +917,10 @@ def main() -> None:
     from runtime.ports import BirthRecord
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    # py4j at INFO is a "Received command" line per callback and a traceback stack per
+    # failed connect while a body boots (a thousand lines per boot measured): the
+    # reconnects are Py4jBody's own to report, one line each
+    logging.getLogger("py4j").setLevel(logging.WARNING)
     port = int(env("MCP_BODY_PORT", default="8700") or "8700")
     username = env("MC_USERNAME", default="LastOrder01") or "LastOrder01"
     log_path = env("MCP_LOG_PATH", default="") or None

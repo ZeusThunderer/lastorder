@@ -11,6 +11,7 @@ is_service_line, imported from runtime/perception/chat.py (T-009). Sources: the 
 
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import time
@@ -32,6 +33,8 @@ from py4j.protocol import Py4JNetworkError
 
 from runtime.perception.chat import is_service_line
 from runtime.ports import BlockInfo, EntityInfo, Event, GameState, ItemStack
+
+log = logging.getLogger("mind.py4j")
 
 # uc pins the gateway port in altoclef_settings.json; if it is busy uc shifts by +2,
 # and the mind cannot find it — so the compose stack never runs two bodies in one
@@ -482,7 +485,11 @@ class Py4jBody:
                     raise BodyUnavailable(
                         f"body bridge unreachable after {attempt + 1} attempts: {exc}"
                     ) from exc
-                self._sleep(min(self._base_delay * 2**attempt, self._max_delay))
+                pause = min(self._base_delay * 2**attempt, self._max_delay)
+                log.warning(
+                    "bridge reconnect attempt %d in %.1fs: %s", attempt + 1, pause, exc
+                )
+                self._sleep(pause)
                 attempt += 1
 
     def bind_callbacks(self) -> bool:
