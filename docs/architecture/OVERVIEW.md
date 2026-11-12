@@ -21,7 +21,7 @@ All of it runs in Docker. One compose project, `lastorder`.
 
 | Service | Image | Role |
 |---|---|---|
-| `mc-server` | `itzg/minecraft-server`, 1.21.11, offline mode | the one persistent world, RCON for forced deaths |
+| `mc-server` | `itzg/minecraft-server`, 1.21.11, offline mode | the one persistent world (RCON stays on for dev tooling) |
 | `body-N` (N = 1..3) | `docker/body` | HeadlessMC + Fabric + the [unionclef](https://github.com/3ndetz/unionclef) mod, player `LastOrder0N`; the mod's py4j gateway listens on localhost only |
 | `mind-N` | `docker/mind` | lives in the network namespace of `body-N`; C1 executor, death detector, body MCP server |
 | `node-N` | `docker/node` | the sandbox: runner, Pi harness, the sister's workplace, bash |
@@ -64,7 +64,6 @@ flowchart TB
     lo -- "desk MCP" --> hive
     lo --> zai
     lo -. "approved grants only" .-> eg
-    hive -- "RCON" --> mc
     zai -- "egress-out" --> out
     eg -- "egress-out" --> out
 ```
@@ -99,8 +98,8 @@ stateDiagram-v2
     Born --> Living: workplace agent/SERIAL/ made from the template
     Living --> Living: wait_events, act, say, messages, memory edits
     Living --> Dead: hp = 0 and the death line in chat
-    Living --> Dead: 45 min without death, RCON kill
-    Living --> Dead: stuck, retire_stuck after the idle signal
+    Living --> Term: 45 min clock or stuck retire_stuck (ADR-052)
+    Term --> Will: will session, submit_will
     Dead --> Will: will session, submit_will
     Dead --> Will: will timeout, emergency will from code
     Will --> Archived: retire, workplace to archive (read only)
@@ -114,10 +113,11 @@ stateDiagram-v2
 2. **Life.** One long harness session. She plays, talks, keeps notes and edits her own files:
    memory, goals, skills, tactic policy. The personality core (`agent/last_order/prompt_template.md`)
    is read only; only the operator changes it (ADR-034).
-3. **Death.** The mod's death callback is silent for deaths by mobs, falls and lava, so `mind-N`
-   watches for hp = 0 together with the vanilla death line in chat. The life clock is 45 minutes
-   (`runtime/hive/lifecycle.py`); after that hive kills the player over RCON.
-4. **Will.** A short session in the dead sister's workplace reads her memory and submits `will.md`.
+3. **Death and the term.** The mod's death callback is silent for deaths by mobs, falls and lava, so
+   `mind-N` watches for hp = 0 together with the vanilla death line in chat. The life clock is 45
+   minutes inside `mind-N` itself; at ttl_min — or on her own stuck retire — the life ends softly
+   (ADR-052): the mind changes, the body does not die, and only the game ever kills a body.
+4. **Will.** A short session in the closing sister's workplace reads her memory and submits `will.md`.
    No death goes without a will: if the session hangs or the quota runs out, the environment builds
    an emergency will from her memory, the cause and the last intent (`runtime/lastorder/will.py`,
    `emergency_will` in `runtime/knowledge/schema.py`). The order of the steps is fixed in

@@ -15,5 +15,8 @@ Life session — orient, then work:
 4. When the session window closes: rewrite `memory/state.md`, keep `GOALS.md` honest, make
    sure the will you want to leave is drafted (skills/write-will).
 
-Will session (you have just died): follow `skills/write-will/SKILL.md`, `submit_will`, stop.
-Do not play and do not plan: the body belongs to your heir.
+Will session — your life is over. The first message says which kind: you have just died, or your
+term is up, or you asked to retire. In the last two the body did not die — it stands where you
+left it and passes to your heir with everything on it. Either way: follow
+`skills/write-will/SKILL.md`, `submit_will`, stop. Do not play and do not plan: the body belongs
+to your heir.

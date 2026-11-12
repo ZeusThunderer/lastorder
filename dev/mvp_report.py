@@ -36,7 +36,8 @@ The item rules are this file's own reading of the criterion, kept visible:
 - wills: no death inside the window without will.md; the emergency share is reported
   (the criterion only forbids will-less deaths, emergency wills are wills);
 - sessions: no runner.error / spawn_failed / will.parked, no will session timeouts,
-  no session that ran > HANG_S without a death stop; restarts and waits are counted;
+  no session that ran > HANG_S without a death or term stop (ADR-052: the mind's own
+  clock ends the life at ttl_min); restarts and waits are counted;
 - cost: gateway money <= $0.35/h over the window; Hermes credits are reported (quota,
   not money — no published ceiling, the number is for the operator);
 - self-correction: every window birth has core memory or a workplace memory/ file, and
@@ -68,7 +69,7 @@ COST_CEILING_PER_H = 0.35
 MIN_GENERATIONS = 6
 REF_SHARE = 0.70
 FIRST_REPLIES = 3
-HANG_S = 2700.0  # ttl is 45 min; a life session ending beyond that without a death is a hang
+HANG_S = 2700.0  # ttl is 45 min; a life session ending beyond that without a death or a term is a hang
 TRAIT_KEYS = ("bravery", "greed", "talkativeness", "trust_in_chat_and_nodes", "superstition")
 SLOT_RE = re.compile(r"LastOrder0[1-3]")
 MIN_SLOT_RE = re.compile(r"(?:mind|runner)[-_](\d)")
@@ -561,7 +562,8 @@ def item_sessions(facts: Facts, start: float, end: float) -> Item:
         bucket = counts[slot]
         item.lines.append(
             f"- {slot}: сессий завершено {bucket.get('session.ended', 0)}, "
-            f"перезапущено по смерти {bucket.get('session.stopped_for_death', 0)}, "
+            f"снято по смерти/термину {bucket.get('session.stopped_for_death', 0)}/"
+            f"{bucket.get('session.stopped_for_term', 0)}, "
             f"ожидания ключей/квоты {bucket.get('harness.waits', 0)}/{bucket.get('quota.waits', 0)}, "
             f"воли {bucket.get('will.session', 0)} (таймаутов {bucket.get('will.session_timeout', 0)})"
         )
