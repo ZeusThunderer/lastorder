@@ -113,7 +113,7 @@ def test_the_bridge_addresses_make_the_mind_a_peer() -> None:
 def test_the_slot_route_takes_the_runner_key_and_its_own_slot(tmp_path: Path) -> None:
     store = KnowledgeStore(tmp_path / "kb", git=False)
     app = create_app(
-        store=store, rcon=None, log=HiveLog(tmp_path / "run" / "events.jsonl"),
+        store=store, log=HiveLog(tmp_path / "run" / "events.jsonl"),
         run_dir=tmp_path / "run", node_keys={}, lo_key="lo", operator_key="op",
         runner_keys={"rk-2": "LastOrder02"}, infra_key="infra", stream_poll_s=0.05,
     )

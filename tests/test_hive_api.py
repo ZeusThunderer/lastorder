@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from runtime.hive.app import create_app
-from runtime.hive.lifecycle import HiveLog
+from runtime.hive.lifecycle import HiveLog, Lifecycle
 from runtime.knowledge.store import KnowledgeStore
 from runtime.lastorder.traits import Traits
 
@@ -32,16 +32,6 @@ class FakeClock:
 
     def advance(self, minutes: float = 0, seconds: float = 0) -> None:
         self.now = self.now + timedelta(minutes=minutes, seconds=seconds)
-
-
-class FakeRcon:
-    def __init__(self, response: str = "Killed LastOrder01"):
-        self.kills: list[str] = []
-        self.response = response
-
-    def kill(self, player: str) -> str:
-        self.kills.append(player)
-        return self.response
 
 
 def traits(seed: int = 42) -> Traits:
@@ -78,15 +68,16 @@ def make_app_stack(tmp_path: Path, runner_keys: dict[str, str] | None = None):
     default is an EXPLICITLY empty key map: tests run open (review R2-6 allows exactly
     that), while create_app with no map argument would read the env and refuse."""
     clock = FakeClock()
-    rcon = FakeRcon()
     store = KnowledgeStore(tmp_path / "kb", git=False, now=lambda: clock().isoformat())
     log = HiveLog(tmp_path / "run" / "events.jsonl")
+    lifecycle = Lifecycle(store, log=log, run_dir=tmp_path / "run", clock=clock)
     app = create_app(
-        store=store, rcon=rcon, log=log, run_dir=tmp_path / "run", clock=clock,
+        store=store, lifecycle=lifecycle, log=log, run_dir=tmp_path / "run", clock=clock,
         runner_keys=runner_keys if runner_keys is not None else {},
     )
     return types.SimpleNamespace(
-        app=app, client=TestClient(app), store=store, log=log, clock=clock, rcon=rcon
+        app=app, client=TestClient(app), store=store, log=log, clock=clock,
+        lifecycle=lifecycle,
     )
 
 
@@ -231,13 +222,14 @@ def test_registry_second_birth_in_slot_marks_old_lost(stack) -> None:
     assert error_of(rejected)["kind"] == "already_retired"
 
 
-def test_registry_request_death_stuck_kills_now(stack) -> None:
+def test_registry_request_death_stuck_marks_now(stack) -> None:
     record = born(stack)
     ok = stack.client.post(
         "/registry/request_death", json={"serial": record["serial"], "cause": "stuck"}
     )
     assert ok.status_code == 200
-    assert stack.rcon.kills == ["LastOrder01"]  # immediately, no hive threshold (ADR-026)
+    # ADR-052: the ask marks and kills nothing — the mind terms itself
+    assert not stack.lifecycle.life_over(record["serial"])
     retire = stack.client.post(
         "/registry/retire",
         json={
@@ -380,7 +372,7 @@ def test_error_bad_death_cause_is_422(stack) -> None:
     )
     assert response.status_code == 422
     assert error_of(response)["kind"] == "lifecycle"
-    assert stack.rcon.kills == []  # nothing happened
+    assert not stack.lifecycle.life_over(record["serial"])  # nothing happened
 
 
 def test_error_unknown_route_uses_the_envelope(stack) -> None:
@@ -506,7 +498,6 @@ def test_empty_env_runner_keys_refuse_to_start(monkeypatch, tmp_path: Path) -> N
     def build():
         return create_app(
             store=KnowledgeStore(tmp_path / "kb", git=False),
-            rcon=FakeRcon(),
             log=HiveLog(tmp_path / "run" / "events.jsonl"),
             run_dir=tmp_path / "run",
             clock=FakeClock(),

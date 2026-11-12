@@ -6,7 +6,8 @@ in-memory Misaka-net inboxes into `HiveService` — one object implementing the
 
     POST /memory/inheritance | /memory/knowledge | /memory/core_memory
     POST /memory/store_core_memory | /memory/submit_candidate | /memory/submit_vote
-    POST /registry/birth | /registry/request_death | /registry/mark_dead | /registry/retire
+    POST /registry/birth | /registry/request_death | /registry/mark_dead |
+         /registry/mark_term | /registry/retire
     GET  /registry/alive
     POST /comms/inbox | /comms/send | /comms/chatter_turn
     GET  /health
@@ -70,7 +71,6 @@ from runtime.hive.grants import GrantError, Grants
 from runtime.hive.lifecycle import HiveLog, Lifecycle, LifecycleError, TTL_SCAN_S
 from runtime.hive.mcp import HiveMcp, build_mcp, parse_node_keys
 from runtime.hive.proposals import CommonLayers, ProposalBook
-from runtime.hive.rcon import RconClient, RconError
 from runtime.hive.relay import Relay
 from runtime.knowledge.store import (
     AlreadyRetiredError,
@@ -291,11 +291,17 @@ class HiveService:
         self.lifecycle.request_death(serial, cause)
 
     def mark_dead(self, serial: int) -> None:
-        """The death signal mind-N owes hive (T-028 review R1-3): the body died in-game,
-        no kill to confirm. Gates `submit_will`; idempotent — retries after a flaky
-        network land on an already-marked node without an error. The wiring of the
-        caller (the mind's death detector) is T-027."""
+        """The death signal mind-N owes hive (T-028 review R1-3): the body died in-game.
+        Gates `submit_will`; idempotent — retries after a flaky network land on an
+        already-marked node without an error. The wiring of the caller (the mind's
+        death detector) is T-027."""
         self.lifecycle.mark_dead(serial)
+
+    def mark_term(self, serial: int) -> None:
+        """The soft-term signal the runner sends instead (ADR-052): the life ended —
+        the clock ran out or the node asked to retire — and the body lives on.
+        Gates `submit_will` the same way; idempotent like mark_dead."""
+        self.lifecycle.mark_term(serial)
 
     def retire(self, serial: int, cause: str, will_text: str) -> None:
         self.lifecycle.retire(serial, cause, will_text)
@@ -320,7 +326,6 @@ def create_app(
     store: KnowledgeStore | None = None,
     lifecycle: Lifecycle | None = None,
     *,
-    rcon: RconClient | None = None,
     log: HiveLog | None = None,
     run_dir: Path | str | None = None,
     clock: Callable[[], datetime] | None = None,
@@ -339,10 +344,8 @@ def create_app(
     log = log or HiveLog(run_dir / "events.jsonl")
     if store is None:
         store = KnowledgeStore(Path(knowledge_dir if knowledge_dir is not None else (env("KNOWLEDGE_DIR") or "knowledge")))
-    if rcon is None:
-        rcon = RconClient.from_env()
     if lifecycle is None:
-        lifecycle = Lifecycle(store, rcon, log=log, run_dir=run_dir, clock=clock)
+        lifecycle = Lifecycle(store, log=log, run_dir=run_dir, clock=clock)
     service = HiveService(store, lifecycle, CommsBook(lifecycle, log=log, clock=clock))
     board = Board(
         run_dir / "board.sqlite", lifecycle=lifecycle, log=log, clock=clock
@@ -438,7 +441,7 @@ def create_app(
 
         async def scan_loop() -> None:
             while not stop.is_set():
-                try:  # blocking RCON and store calls stay off the event loop (P1-4)
+                try:  # blocking store calls stay off the event loop (P1-4)
                     await asyncio.to_thread(scan_once)
                 except Exception as exc:  # the loop outlives any single scan
                     log.event("scan.failed", {"error": str(exc)})
@@ -500,10 +503,6 @@ def create_app(
     @app.exception_handler(LifecycleError)
     async def _lifecycle_error(_: Any, exc: LifecycleError) -> JSONResponse:
         return envelope(422, "lifecycle", str(exc))
-
-    @app.exception_handler(RconError)
-    async def _rcon_error(_: Any, exc: RconError) -> JSONResponse:
-        return envelope(503, "rcon", str(exc))
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error(_: Any, exc: RequestValidationError) -> JSONResponse:
@@ -636,6 +635,12 @@ def create_app(
         _require_runner_key(request, lifecycle.require_node(serial).slot)
         service.mark_dead(serial)
 
+    @app.post("/registry/mark_term")
+    def registry_mark_term(request: Request, body: dict) -> None:
+        serial = _serial(body)
+        _require_runner_key(request, lifecycle.require_node(serial).slot)
+        service.mark_term(serial)
+
     @app.post("/registry/retire")
     def registry_retire(request: Request, body: dict) -> None:
         serial = _serial(body)
@@ -734,7 +739,7 @@ def create_app(
         if slot is None:
             raise ApiError(401, "node_key", "unknown node key")
         alive = [b for b in lifecycle.alive() if b.slot == slot]
-        live = [b for b in alive if not lifecycle.body_dead(b.serial)]
+        live = [b for b in alive if not lifecycle.life_over(b.serial)]
         if not live:
             raise ApiError(409, "no_live_node", f"slot {slot} has no live node")
         return str(max(b.serial for b in live))

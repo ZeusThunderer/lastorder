@@ -46,11 +46,6 @@ class FakeClock:
         return self.now
 
 
-class FakeRcon:
-    def kill(self, player: str) -> str:
-        return "Killed LastOrder01"
-
-
 def traits(seed: int = 42) -> Traits:
     return Traits(
         bravery=3, greed=7, talkativeness=5, trust_in_chat_and_nodes=4, superstition=9,
@@ -61,12 +56,11 @@ def traits(seed: int = 42) -> Traits:
 class Stack:
     def __init__(self, tmp_path: Path, *, infra_key: str | None = KEY_INFRA):
         self.clock = FakeClock()
-        self.rcon = FakeRcon()
         self.store = KnowledgeStore(tmp_path / "kb", git=False, now=lambda: self.clock().isoformat())
         self.run_dir = tmp_path / "run"
         self.log = HiveLog(self.run_dir / "events.jsonl")
         self.app = create_app(
-            store=self.store, rcon=self.rcon, log=self.log,
+            store=self.store, log=self.log,
             run_dir=self.run_dir, clock=self.clock,
             node_keys={KEY1: "LastOrder01"}, lo_key=KEY_LO, operator_key=KEY_OP,
             runner_keys={}, infra_key=infra_key, stream_poll_s=0.05,
@@ -391,7 +385,7 @@ def test_infra_state_tells_last_order_why_nothing_runs(
     from runtime.hive.lifecycle import Lifecycle
 
     lifecycle = Lifecycle(
-        stack.store, stack.rcon, log=stack.log, run_dir=stack.run_dir, clock=stack.clock
+        stack.store, log=stack.log, run_dir=stack.run_dir, clock=stack.clock
     )
     mcp = HiveMcp(
         stack.store, lifecycle,

@@ -44,11 +44,6 @@ class FakeClock:
         return self.now
 
 
-class FakeRcon:
-    def kill(self, player: str) -> str:
-        return "Killed LastOrder01"
-
-
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -64,7 +59,6 @@ class Stack:
         self.app = create_app(
             store=KnowledgeStore(tmp_path / "kb", git=False,
                                  now=lambda: self.clock().isoformat()),
-            rcon=FakeRcon(),
             log=HiveLog(self.run_dir / "events.jsonl"),
             run_dir=self.run_dir,
             clock=self.clock,

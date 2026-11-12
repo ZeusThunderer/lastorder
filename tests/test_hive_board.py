@@ -43,16 +43,6 @@ class FakeClock:
         self.now = self.now + timedelta(minutes=minutes)
 
 
-class FakeRcon:
-    def __init__(self, response: str = "Killed LastOrder01"):
-        self.kills: list[str] = []
-        self.response = response
-
-    def kill(self, player: str) -> str:
-        self.kills.append(player)
-        return self.response
-
-
 def traits(seed: int = 42) -> Traits:
     return Traits(
         bravery=3, greed=7, talkativeness=5, trust_in_chat_and_nodes=4, superstition=9,
@@ -63,13 +53,12 @@ def traits(seed: int = 42) -> Traits:
 class Stack:
     def __init__(self, tmp_path: Path, *, runner_keys: dict[str, str] | None = None):
         self.clock = FakeClock()
-        self.rcon = FakeRcon()
         self.store = KnowledgeStore(tmp_path / "kb", git=False, now=lambda: self.clock().isoformat())
         self.run_dir = tmp_path / "run"
         self.log = HiveLog(self.run_dir / "events.jsonl")
         self.runner_keys = runner_keys if runner_keys is not None else {}
         self.app = create_app(
-            store=self.store, rcon=self.rcon, log=self.log,
+            store=self.store, log=self.log,
             run_dir=self.run_dir, clock=self.clock,
             node_keys={KEY1: "LastOrder01", KEY2: "LastOrder02"},
             lo_key=KEY_LO, operator_key=KEY_OP, runner_keys=self.runner_keys,

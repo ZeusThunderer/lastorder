@@ -60,16 +60,6 @@ class FakeClock:
         self.now = self.now + timedelta(minutes=minutes)
 
 
-class FakeRcon:
-    def __init__(self, response: str = "Killed LastOrder01"):
-        self.kills: list[str] = []
-        self.response = response
-
-    def kill(self, player: str) -> str:
-        self.kills.append(player)
-        return self.response
-
-
 def traits(seed: int) -> Traits:
     return Traits(
         bravery=3,
@@ -106,18 +96,16 @@ class Stack:
 
     def __init__(self, tmp_path: Path, runner_keys: dict[str, str] | None = None):
         self.clock = FakeClock()
-        self.rcon = FakeRcon()
         self.store = KnowledgeStore(tmp_path / "kb", git=False, now=lambda: self.clock().isoformat())
         self.log = HiveLog(tmp_path / "run" / "events.jsonl")
         self.run_dir = tmp_path / "run"
         self.runner_key = (runner_keys or {}).get("rk-slot") or next(iter(runner_keys or {}), "")
         self.lifecycle = Lifecycle(
-            self.store, self.rcon, log=self.log, run_dir=self.run_dir, clock=self.clock
+            self.store, log=self.log, run_dir=self.run_dir, clock=self.clock
         )
         self.app = create_app(
             store=self.store,
             lifecycle=self.lifecycle,
-            rcon=self.rcon,
             log=self.log,
             run_dir=self.run_dir,
             clock=self.clock,
@@ -521,6 +509,25 @@ def test_mark_dead_endpoint_opens_the_will_path(stack: Stack) -> None:
     assert out == {"staged": True, "serial": serial}
     # unknown serial: the single error envelope
     response = stack.http("POST", "/registry/mark_dead", {"serial": 999})
+    assert response.status_code == 404
+    assert response.json()["error"]["kind"] == "unknown_node"
+
+
+def test_mark_term_endpoint_opens_the_will_path(stack: Stack) -> None:
+    """ADR-052: the soft term opens the will path exactly like a death — the
+    outgoing sister's will session must pass while her body still lives."""
+    serial = stack.birth("LastOrder01")
+    will = will_markdown(serial)
+    assert "not dead" in node_error(
+        stack, KEY1, "submit_will", {"text": will}, extra={"X-Runner-Session": "will"}
+    )
+    response = stack.http("POST", "/registry/mark_term", {"serial": serial})
+    assert response.status_code == 200
+    response = stack.http("POST", "/registry/mark_term", {"serial": serial})  # idempotent
+    assert response.status_code == 200
+    out = node_call(stack, KEY1, "submit_will", {"text": will}, extra={"X-Runner-Session": "will"})
+    assert out == {"staged": True, "serial": serial}
+    response = stack.http("POST", "/registry/mark_term", {"serial": 999})
     assert response.status_code == 404
     assert response.json()["error"]["kind"] == "unknown_node"
 

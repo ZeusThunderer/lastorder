@@ -321,8 +321,9 @@ class HiveMcp:
     def submit_will(self, ctx: Context, text: str) -> dict[str, Any]:
         """Your will: the 2-4 lines of text alone — the network fills the service
         fields (serial, dates, traits). A full will.md (frontmatter + body) is
-        accepted too: only its body is taken. Only in the will session of a dead
-        sister, once; the runner files it with your death."""
+        accepted too: only its body is taken. Only in the will session of a sister
+        whose life is over — dead (T-028) or softly termed (ADR-052) — once; the
+        runner files it with the closing."""
         serial = self._node_serial(ctx)
         headers = self._headers(ctx)
         if headers.get(RUNNER_SESSION_HEADER, "").strip().lower() != WILL_SESSION:
@@ -335,7 +336,7 @@ class HiveMcp:
             runner_key = headers.get(RUNNER_KEY_HEADER, "").strip()
             if self._runner_keys.get(runner_key) != node.slot:
                 _err("submit_will: X-Runner-Session needs the slot's runner key (X-Runner-Key)")
-        if not self._lifecycle.body_dead(serial):
+        if not self._lifecycle.life_over(serial):
             _err("submit_will: the node is not dead")
         if not isinstance(text, str) or not text.strip():
             _err("submit_will: text must be the will text (the 2-4 lines)")
@@ -461,13 +462,18 @@ class HiveMcp:
         }
 
     def http_request(
-        self, ctx: Context, method: Any, url: Any, headers: Any, body: Any
+        self, ctx: Context, method: Any, url: Any, headers: Any, body: Any,
+        save_to: Any = None, upload_file: Any = None, upload_part: Any = None,
+        fields: Any = None,
     ) -> dict[str, Any]:
         """Last Order's HTTPS call through the grant relay (runtime/hive/relay.py)."""
         self._require_last_order(ctx)
         if self._relay is None:
             _err("http_request: the relay is not configured")
-        return self._relay.fetch(LAST_ORDER, method, url, headers, body)
+        return self._relay.fetch(
+            LAST_ORDER, method, url, headers, body,
+            save_to=save_to, upload_file=upload_file, upload_part=upload_part, fields=fields,
+        )
 
     # --- the tool shelf (T-047, runtime/hive/tools.py) --------------------------------------
 
@@ -753,15 +759,31 @@ def build_mcp(
         url: str,
         headers: dict[str, str] | None = None,
         body: Any = None,
+        save_to: str | None = None,
+        upload_file: str | None = None,
+        upload_part: str | None = None,
+        fields: dict[str, str] | None = None,
         *,
         ctx: Context,
     ) -> dict[str, Any]:
         """One HTTPS request out of the network, to a domain with an active egress
         grant. Write `{{secret:NAME}}` where an approved secret goes (url, header
-        values, body) — hive fills it in and redacts it from the answer, you never see
-        the value. `body`: a string, or an object sent as JSON. Returns {status,
-        content_type, body}."""
-        return await _run(lambda: impl.http_request(ctx, method, url, headers, body))
+        values, body, fields) — hive fills it in and redacts it from the answer, you
+        never see the value. `body`: a string, or an object sent as JSON. Returns
+        {status, content_type, body}.
+
+        The file mode (ADR-052): `save_to="name.png"` writes the RESPONSE bytes to
+        `/artifacts/name.png` and returns {status, content_type, path, size} — the
+        body does not enter your context (b64 image answers and file downloads).
+        `upload_file="name.png"` (POST only, mutually exclusive with `body`) sends
+        `/artifacts/name.png` as a multipart part `upload_part` (default "photo")
+        with `fields` as the form fields — that is how a file rides to Telegram's
+        sendPhoto. The name is a bare A-Za-z0-9._- name in /artifacts; the volume
+        is mounted in your container too."""
+        return await _run(lambda: impl.http_request(
+            ctx, method, url, headers, body,
+            save_to=save_to, upload_file=upload_file, upload_part=upload_part, fields=fields,
+        ))
 
     async def publish_tool(name: str, why: str, *, ctx: Context) -> dict[str, Any]:
         """Publish your extension `workshop/<name>/` (index.ts or index.js plus helper

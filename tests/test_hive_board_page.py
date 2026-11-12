@@ -26,17 +26,11 @@ def basic(user: str, password: str) -> dict:
     return {"Authorization": f"Basic {raw}"}
 
 
-class FakeRcon:
-    def kill(self, player: str) -> str:
-        return "Killed LastOrder01"
-
-
 class Stack:
     def __init__(self, tmp_path: Path):
         clock = lambda: datetime(2026, 10, 31, 12, 0, 0, tzinfo=timezone.utc)  # noqa: E731
         self.app = create_app(
             store=KnowledgeStore(tmp_path / "kb", git=False, now=lambda: clock().isoformat()),
-            rcon=FakeRcon(),
             log=HiveLog(tmp_path / "run" / "events.jsonl"),
             run_dir=tmp_path / "run",
             clock=clock,
@@ -164,7 +158,6 @@ def test_non_ascii_key_is_a_calm_401(tmp_path: Path) -> None:
     home = tmp_path / "unicode"
     app = create_app(
         store=KnowledgeStore(home / "kb", git=False, now=lambda: clock().isoformat()),
-        rcon=FakeRcon(),
         log=HiveLog(home / "run" / "events.jsonl"),
         run_dir=home / "run",
         clock=clock,

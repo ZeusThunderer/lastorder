@@ -14,7 +14,9 @@ when is hers (ADR-032, ADR-041).
 from __future__ import annotations
 
 import json
+import os
 import re
+from pathlib import Path
 from typing import Any, Callable
 
 import httpx
@@ -26,6 +28,13 @@ SECRET_RE = re.compile(r"\{\{secret:([a-z][a-z0-9_]{0,63})\}\}")
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 BODY_MAX = 32_000  # chars of the answer handed back to the agent
 TIMEOUT_S = 20.0
+
+# The file mode (ADR-052): responses saved to and uploads read from one shared
+# volume both the hive and the Last Order container mount. Files are the agent's
+# data, never secrets — the vault value still only ever lives inside `fill()`.
+ARTIFACTS_ROOT = Path(os.environ.get("RELAY_ARTIFACTS_DIR") or "/artifacts")
+SAVE_MAX_BYTES = 25_000_000
+FILE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 
 
 def _placeholders(*texts: str) -> list[str]:
@@ -48,17 +57,32 @@ class Relay:
         proxy: str | None = None,
         transport: Callable[[], httpx.Client] | None = None,
         timeout_s: float = TIMEOUT_S,
+        artifacts_root: Path | None = None,
     ):
         self._grants = grants
         self._log = log
         self._proxy = proxy or None
         self._transport = transport
         self._timeout = timeout_s
+        self._artifacts = artifacts_root or ARTIFACTS_ROOT
 
     def _client(self) -> httpx.Client:
         if self._transport is not None:
             return self._transport()
         return httpx.Client(proxy=self._proxy, timeout=self._timeout, follow_redirects=False)
+
+    def _artifact_path(self, name: Any) -> Path:
+        """Validate an artifacts filename: a bare name under the shared root, no
+        directories, no traversal — the agent names files, the relay owns the tree."""
+        if not isinstance(name, str) or not FILE_NAME_RE.fullmatch(name):
+            raise GrantError(
+                422, "validation",
+                "file name must be 1..100 of A-Za-z0-9._- (a bare name in /artifacts)",
+            )
+        path = (self._artifacts / name).resolve()
+        if not path.is_relative_to(Path(self._artifacts).resolve()):
+            raise GrantError(422, "validation", "path escapes the artifacts volume")
+        return path
 
     def fetch(
         self,
@@ -67,6 +91,11 @@ class Relay:
         url: Any,
         headers: Any = None,
         body: Any = None,
+        *,
+        save_to: Any = None,
+        upload_file: Any = None,
+        upload_part: Any = None,
+        fields: Any = None,
     ) -> dict[str, Any]:
         if not isinstance(method, str) or method.upper() not in METHODS:
             raise GrantError(422, "validation", f"method must be one of {list(METHODS)}")
@@ -87,6 +116,25 @@ class Relay:
             content = json.dumps(body, ensure_ascii=False)
             if not any(k.lower() == "content-type" for k in headers):
                 headers = {**headers, "Content-Type": "application/json"}
+
+        # the file mode (ADR-052): exactly one of save/upload/plain per call
+        save_path = self._artifact_path(save_to) if save_to is not None else None
+        if upload_file is not None:
+            if content is not None:
+                raise GrantError(422, "validation", "body and upload_file are mutually exclusive")
+            upload_path = self._artifact_path(upload_file)
+            if not upload_path.is_file():
+                raise GrantError(422, "validation", f"no such artifacts file: {upload_file}")
+            if not isinstance(method, str) or method.upper() != "POST":
+                raise GrantError(422, "validation", "upload_file needs method POST")
+            if fields is not None and (
+                not isinstance(fields, dict)
+                or not all(isinstance(k, str) and isinstance(v, str) for k, v in fields.items())
+            ):
+                raise GrantError(422, "validation", "fields must be an object of strings")
+            part = upload_part if isinstance(upload_part, str) and upload_part else "photo"
+        else:
+            upload_path = None
 
         names = _placeholders(url, content or "", *headers.values())
         values = {name: self._grants.secret_of(name) for name in names}
@@ -114,24 +162,57 @@ class Relay:
                 f"{host} has no active egress grant (request_grant kind=egress)",
             )
         real_headers = {k: fill(v) for k, v in headers.items()}
+        real_fields = {k: fill(v) for k, v in (fields or {}).items()}
         real_body = fill(content) if content is not None else None
         try:
             with self._client() as client:
-                response = client.request(
-                    method, real_url, headers=real_headers,
-                    content=real_body.encode("utf-8") if real_body is not None else None,
-                )
+                if upload_path is not None:
+                    response = client.request(
+                        method, real_url, headers=real_headers,
+                        files={part: (upload_path.name, upload_path.read_bytes(), None)},
+                        data=real_fields,
+                    )
+                else:
+                    response = client.request(
+                        method, real_url, headers=real_headers,
+                        content=real_body.encode("utf-8") if real_body is not None else None,
+                    )
         except httpx.HTTPError as exc:
             self._log.event("relay.fetch", {
                 "actor": actor, "method": method, "host": host,
                 "error": type(exc).__name__, "secrets": names,
             })
             raise GrantError(502, "relay_failed", redact(f"{type(exc).__name__}: {exc}")) from None
+        if save_path is not None:
+            payload = response.content
+            if len(payload) > SAVE_MAX_BYTES:
+                raise GrantError(
+                    507, "too_large",
+                    f"response is {len(payload)} bytes, save_to caps at {SAVE_MAX_BYTES}",
+                )
+            try:
+                self._artifacts.mkdir(parents=True, exist_ok=True)
+                save_path.write_bytes(payload)
+            except OSError as exc:
+                raise GrantError(
+                    502, "relay_failed", redact(f"save failed: {type(exc).__name__}: {exc}")
+                ) from None
+            self._log.event("relay.fetch", {
+                "actor": actor, "method": method, "host": host,
+                "status": response.status_code, "secrets": names, "saved": len(payload),
+            })
+            return {
+                "status": response.status_code,
+                "content_type": response.headers.get("content-type", ""),
+                "path": str(save_path),
+                "size": len(payload),
+            }
         text = redact(response.text)
         truncated = len(text) > BODY_MAX
         self._log.event("relay.fetch", {
             "actor": actor, "method": method, "host": host,
             "status": response.status_code, "secrets": names,
+            **({"uploaded": part} if upload_path is not None else {}),
         })
         return {
             "status": response.status_code,

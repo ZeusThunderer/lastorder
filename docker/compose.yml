@@ -477,7 +477,8 @@ services:
     networks: [slot-3, svc-3]
 
   # The hive (NETWORK.md section 3): node registry, knowledge base under git (T-012 store),
-  # the lifetime scan and RCON deaths (T-022), the network MCP (T-028). Port 8000 stays
+  # the lifetime scan (T-022; ADR-052: the deadline observes only — the mind's own clock
+  # ends the life, no RCON deaths), the network MCP (T-028). Port 8000 stays
   # inside the docker network. Exactly one uvicorn worker: lifecycle.json, the inboxes
   # and the slot sequence are in-process state under locks (T-022 review P1-4). The key
   # maps are lifted by docker/node/up.sh; an empty HIVE_RUNNER_KEYS is a startup refusal
@@ -488,13 +489,11 @@ services:
       context: ..
       dockerfile: docker/mind/Dockerfile
     image: lastorder-mind:dev
-    # no depends_on mc-server (ADR-050): the world runs on demand; RCON deaths answer
-    # 503 and retry while it is down
+    # no depends_on mc-server (ADR-050): the world runs on demand and the lifetime
+    # bookkeeping never needs it anymore
     environment:
       KNOWLEDGE_DIR: /knowledge
       RUN_DIR: /hive-run
-      RCON_HOST: mc-server
-      RCON_PASSWORD: "${RCON_PASSWORD:-lastorder}"
       MAX_LIFE_MIN: "${MAX_LIFE_MIN:-45}"
       LLM_API_BASE: http://llm-gateway:4000
       LLM_API_KEY: "${GATEWAY_KEY_HIVE:-}"
@@ -520,6 +519,7 @@ services:
       - knowledge:/knowledge
       - hive-run:/hive-run   # not over the image's system /run (review R1-6)
       - hive-work:/lo-workplace:ro   # Last Order's workshop/, read by publish_tool (T-047)
+      - artifacts:/artifacts   # the relay's save_to/upload_file tree (ADR-052)
     networks: [default, svc-1, svc-2, svc-3, svc-lo, infra-net]   # infra-net: the executor alone
     restart: unless-stopped
     logging: *default-logging
@@ -605,6 +605,9 @@ services:
     volumes:
       - hive-work:/workplace
       - knowledge:/knowledge:ro
+      # the file mode of http_request (ADR-052): the same tree the relay writes —
+      # her files from save_to land here, her uploads for sendPhoto come from here
+      - artifacts:/artifacts
       # the network's journals, read-only (T-064): the desk cuts video by the journals'
       # timestamps; a write into them must fail. The whole hive-run rides along — the
       # administrator is the one agent trusted with every slot's record.
@@ -886,6 +889,10 @@ volumes:
   workplaces-2:
   workplaces-3:
   footage:
+  # the file mode of http_request (ADR-052): relay saves/uploads agent files here;
+  # mounted rw in hive (the relay writes) and last-order (she reads/writes), never
+  # in a sister sandbox (ADR-033 unchanged)
+  artifacts:
 
 networks:
   gateway-internal: {}

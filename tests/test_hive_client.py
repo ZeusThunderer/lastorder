@@ -115,8 +115,7 @@ def test_registry_over_the_wire(frontends) -> None:
     other = born_via_client(api, "LastOrder02", seed=7)
     assert other.serial == node.serial + 1 and other.ttl_min == 45
 
-    api.request_death(other.serial, "stuck")  # the node asked (ADR-026)
-    assert stack.rcon.kills == ["LastOrder02"]
+    api.request_death(other.serial, "stuck")  # the node asked (ADR-026); no kill (ADR-052)
     api.retire(other.serial, "game", will_text(other.serial, other.born_at))
     assert [b.serial for b in api.alive()] == [node.serial]
 

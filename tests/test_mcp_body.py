@@ -691,7 +691,10 @@ def test_retire_stuck_reaches_the_gated_hive_with_the_runner_key(tmp_path) -> No
         )
         result = stack.call(lambda c: c.call_tool("retire_stuck", {}))
         assert parse(result) == {"requested": True, "serial": serial, "cause": "stuck"}
-        assert keyed.rcon.kills == ["LastOrder01"]  # request_death killed in the hive
+        # ADR-052: the ask marked the node in the hive and killed nothing — the
+        # mind's own soft term carries the closing from here
+        assert keyed.lifecycle._nodes[serial].stuck is True
+        assert not keyed.lifecycle.life_over(serial)
     finally:
         stack.close()
 

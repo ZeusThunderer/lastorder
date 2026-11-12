@@ -320,7 +320,7 @@ class Board:
 
     def _live_serials(self) -> set[int]:
         alive = {brief.serial for brief in self._lifecycle.alive()}
-        return {s for s in alive if not self._lifecycle.body_dead(s)}
+        return {s for s in alive if not self._lifecycle.life_over(s)}
 
     def _require_live_node(self, actor: str) -> None:
         serial = actor_serial(actor)

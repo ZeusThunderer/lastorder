@@ -1,20 +1,25 @@
-"""Node lifetime bookkeeping of the hive (NETWORK.md section 7; ADR-018, ADR-026).
+"""Node lifetime bookkeeping of the hive (NETWORK.md section 7; ADR-018, ADR-026, ADR-052).
 
 The store of T-012 owns the durable facts (birth.json, will.md); this module owns
 the decisions on top of them:
 
-- the 45-minute deadline: a background scan marks expired nodes and RCON-kills
-  them, once per node, retrying while the kill stays unconfirmed;
-- `request_death(serial, "stuck")`: the node chose to remove itself, hive kills
-  immediately without a threshold of its own (ADR-026);
-- cause truth at `retire`: an RCON death looks like `game` to the mind, so hive
-  corrects the cause to `stuck` (asked) or `ttl` (confirmed deadline kill);
+- the 45-minute deadline: a background scan marks expired nodes for the event log
+  only — since ADR-052 the deadline does NOT kill: the mind's own life clock ends
+  the life (the soft term) and the runner closes the node; the body stays alive
+  for the heir. Only the game kills a body now;
+- `request_death(serial, "stuck")`: the node chose to remove itself (ADR-026) —
+  marked `stuck`; the mind terms itself, no kill either;
+- `mark_dead` (the body died in game) and `mark_term` (the soft term landed) both
+  gate `submit_will` and free the node's board holds: a will session belongs to a
+  node whose life is over, dead or not;
+- cause truth at `retire`: hive corrects the cause to `stuck` when the node asked;
+  `ttl` arrives honestly from the mind's own clock;
 - slot sequencing (ADR-018): a birth into a slot whose node is still alive means
   the old mind restarted without a will — the old node is marked `lost` and closed
   with an emergency will (there is no death without a will, CLAUDE.md; review
   P1-2), the serial is never reused (the store's counter).
 
-Marks (`lost`, `stuck`, pending kills) live in `lifecycle.json` in the run volume;
+Marks (`lost`, `stuck`, `dead`, `term`) live in `lifecycle.json` in the run volume;
 on startup they are reconciled with the store's living nodes, including slot
 duplicates left by a crash. The store offers no public born_at reader and
 `runtime/knowledge/` is untouchable from T-022, so reconciliation reads the
@@ -30,7 +35,7 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Mapping
@@ -42,9 +47,8 @@ from runtime.knowledge.store import AlreadyRetiredError, KnowledgeStore, Unknown
 from runtime.lastorder.naming import node_name, preset as naming_preset
 from runtime.lastorder.traits import Traits
 from runtime.ports import BirthRecord, NodeBrief
-from runtime.hive.rcon import RconClient, RconError, kill_confirmed
 
-MAX_LIFE_MIN = 45  # CLAUDE.md: forced death after this many minutes; env MAX_LIFE_MIN overrides
+MAX_LIFE_MIN = 45  # CLAUDE.md: the life's length in minutes; env MAX_LIFE_MIN overrides
 TTL_SCAN_S = 30  # background scan cadence (task T-022); env HIVE_TTL_SCAN_S overrides
 CAUSE_STUCK = "stuck"  # ADR-026: the only cause request_death accepts
 # The emergency will of a lost node needs an addressee; NamingPreset (ADR-018)
@@ -93,19 +97,17 @@ class NodeState:
     ttl_min: int
     lost: bool = False
     stuck: bool = False  # the node asked for its own death (ADR-026)
-    kill_reason: str | None = None  # "ttl" (deadline passed) | "stuck" (the node asked)
-    kill_confirmed: bool = False  # the server answered a real kill
-    kill_error: str | None = None  # last failure signature, to not spam the event log (R1-3)
-    dead: bool = False  # the body died (mark_dead or a confirmed kill); gates submit_will (T-028)
+    dead: bool = False  # the body died in game (mark_dead); gates submit_will (T-028)
+    term: bool = False  # the soft term landed (ADR-052): the life ended, the body lives
+    expired: bool = False  # the deadline passed the scan's way; an event-log mark, no action
 
 
 class Lifecycle:
-    """Who lives, who is due to die, and who died how — behind one lock (P1-4)."""
+    """Who lives, whose life is over, and how it ended — behind one lock (P1-4)."""
 
     def __init__(
         self,
         store: KnowledgeStore,
-        rcon: RconClient,
         *,
         log: HiveLog,
         run_dir: Path,
@@ -113,7 +115,6 @@ class Lifecycle:
         max_life_min: int | None = None,
     ):
         self._store = store
-        self._rcon = rcon
         self._log = log
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._max_life_min = int(
@@ -123,8 +124,8 @@ class Lifecycle:
         self._lock = threading.RLock()
         self._nodes: dict[int, NodeState] = {}
         # The board's death sweep (T-042, TASKBOARD.md 4.3): set by create_app. A node's
-        # board hold is freed at every closing point — body-death mark, confirmed kill,
-        # retire, lost-close — so a stuck or restarted mind cannot leave tasks dangling.
+        # board hold is freed at every closing point — dead mark, term mark, retire,
+        # lost-close — so a stuck or restarted mind cannot leave tasks dangling.
         self._on_death: Callable[[int], None] | None = None
         self._load_and_reconcile()
 
@@ -173,8 +174,11 @@ class Lifecycle:
         state: dict[int, NodeState] = {}
         if self._state_path.exists():
             raw = json.loads(self._state_path.read_text(encoding="utf-8"))
+            known = {f.name for f in fields(NodeState)}
             for item in raw.get("nodes", []):
-                node = NodeState(**item)
+                # a pre-ADR-052 state file still carries kill_* fields nobody reads;
+                # unknown keys drop out instead of breaking the startup
+                node = NodeState(**{k: v for k, v in item.items() if k in known})
                 state[node.serial] = node
         living = self._store_living()
         for serial, birth in living.items():
@@ -277,9 +281,9 @@ class Lifecycle:
 
     def mark_dead(self, serial: int) -> None:
         """Mark the node's body dead — the death signal mind-N/the runner owes hive
-        (NETWORK.md section 3: `MIND -> |смерть, срок| HIVE`). The wiring of the caller is
-        T-027; until then this is the only setter besides a confirmed RCON kill. The mark
-        gates `submit_will` (T-028): a will session starts only for a dead sister."""
+        (NETWORK.md section 3: `MIND -> |смерть, срок| HIVE`). The mark gates
+        `submit_will` (T-028): a will session starts only for a sister whose life
+        is over."""
         with self._lock:
             node = self.require_node(serial)
             if not node.dead:
@@ -288,8 +292,22 @@ class Lifecycle:
                 self._log.event("life.dead_mark", {"serial": serial, "slot": node.slot})
                 self._notify_death(serial)
 
-    def body_dead(self, serial: int) -> bool:
-        """True when hive knows this node's body is dead (the mark or a confirmed kill).
+    def mark_term(self, serial: int) -> None:
+        """Mark the node's soft term (ADR-052): the life ended — the clock ran out or
+        the node asked to retire — and the body lives on. The runner sends this in
+        place of `mark_dead` on the soft closing path; it gates `submit_will` the
+        same way: the outgoing sister's will session must pass."""
+        with self._lock:
+            node = self.require_node(serial)
+            if not node.term:
+                node.term = True
+                self._save()
+                self._log.event("life.term_mark", {"serial": serial, "slot": node.slot})
+                self._notify_death(serial)
+
+    def life_over(self, serial: int) -> bool:
+        """True when hive knows this node's life is over: the body died (`dead`) or
+        the soft term landed (`term`, ADR-052 — the body lives, the mind does not).
 
         Unknown, retired and lost nodes answer False: their refusal comes from
         `require_node`, not from a death ambiguity."""
@@ -298,7 +316,7 @@ class Lifecycle:
                 node = self.require_node(serial)
             except (UnknownNodeError, AlreadyRetiredError):
                 return False
-            return node.dead or node.kill_confirmed
+            return node.dead or node.term
 
     def request_death(self, serial: int, cause: str) -> None:
         if cause != CAUSE_STUCK:
@@ -308,21 +326,17 @@ class Lifecycle:
         with self._lock:
             node = self.require_node(serial)  # also refuses lost nodes (R1-8)
             node.stuck = True
-            if node.kill_reason is None:
-                node.kill_reason = CAUSE_STUCK
             self._log.event("life.stuck", {"serial": serial, "slot": node.slot})
             self._save()
-            self._try_kill(node)  # immediately, without a threshold of its own
+            # ADR-052: no kill — the mind terms itself (its own soft latch) and the
+            # runner's closing path takes it from here; the body stays for the heir
 
     def retire(self, serial: int, cause: str, will_text: str) -> None:
         with self._lock:
             node = self._nodes.get(serial)
             effective = cause
-            if node is not None:
-                if node.stuck:
-                    effective = CAUSE_STUCK  # the RCON death looked like `game` to the mind
-                elif node.kill_reason == "ttl" and node.kill_confirmed:
-                    effective = "ttl"
+            if node is not None and node.stuck:
+                effective = CAUSE_STUCK  # the ask rules the cause, whatever the mind said
             self._notify_death(serial)
             self._store.retire(serial, effective, will_text)
             self._nodes.pop(serial, None)
@@ -332,47 +346,20 @@ class Lifecycle:
     # --- the deadline scan ----------------------------------------------------------------
 
     def scan(self, now: datetime | None = None) -> None:
-        """Mark expired nodes and retry pending kills; called from the background loop."""
+        """Mark expired nodes for the event log; called from the background loop.
+        Since ADR-052 the deadline kills nothing: the mind's own life clock ends the
+        life (the soft term), the runner closes the node, and this mark is the
+        hive-side observation of the same fact — one `life.expired` line per node."""
         now = now or self._clock()
         with self._lock:
             for serial, node in sorted(self._nodes.items()):
-                if node.lost:
+                if node.lost or node.expired:
                     continue
                 deadline = parse_utc(node.born_at) + timedelta(minutes=node.ttl_min)
-                if node.kill_reason is None and now >= deadline:
-                    node.kill_reason = "ttl"
+                if now >= deadline:
+                    node.expired = True
                     self._log.event(
                         "life.expired",
                         {"serial": serial, "slot": node.slot, "ttl_min": node.ttl_min},
                     )
                     self._save()
-                if node.kill_reason is not None and not node.kill_confirmed:
-                    self._try_kill(node)
-
-    def _try_kill(self, node: NodeState) -> None:
-        try:
-            response = self._rcon.kill(node.slot)
-        except RconError as exc:
-            ok, detail_key, detail = False, "error", str(exc)
-        else:
-            ok, detail_key, detail = kill_confirmed(response), "response", response[:200]
-        if ok:
-            node.kill_confirmed = True
-            node.kill_error = None
-            self._save()
-            self._log.event(
-                "life.killed",
-                {"serial": node.serial, "slot": node.slot, "reason": node.kill_reason},
-            )
-            self._notify_death(node.serial)
-            return
-        # Retried every scan, but logged once per failure and again only when the
-        # failure changes — a 30-second event spam helps nobody (review R1-3).
-        signature = f"{detail_key}: {detail}"
-        if node.kill_error != signature:
-            node.kill_error = signature
-            self._save()
-            self._log.event(
-                "life.rcon_failed",
-                {"serial": node.serial, "slot": node.slot, detail_key: detail},
-            )
