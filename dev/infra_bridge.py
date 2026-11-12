@@ -7,7 +7,7 @@
 Runs on the HOST beside the stand — the operator starts it by hand; nothing inside
 the docker network can. It polls the hive board for open infra requests (created by
 Last Order alone), re-validates the closed action set of runtime/hive/infra.py — the
-network in between is not trusted — and runs `docker compose` / `dev/slot_restart.sh`
+network in between is not trusted — and runs `docker compose` / `dev/wait_for.sh` / `docker/node/up.sh`
 as plain argv lists: no shell strings, no docker beyond the seven verbs. The outcome
 returns to the board (`done`/`failed` with the command output truncated to 800
 characters), where Last Order and the operator read it.

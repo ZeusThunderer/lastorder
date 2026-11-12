@@ -203,20 +203,12 @@ bash dev/board_chat_run.sh up
   `user.home` из passwd, а не из `$HOME`, поэтому в entrypoint стоят `-Duser.home=/data` и `hmc.mcdir`.
 - Без GL (`-lwjgl`) клиент работает. Ошибки OpenAL, Realms и 401 на ключ профиля при старте — норма.
 
-## Перезапуск слота (T-055)
-С ADR-050 перезапуск тела — дело разума (`body_restart` через доску), перезапуск разума — `slot_restart`
-исполнителя (сестра живёт дальше). Порядок ниже — исторический, скрипт остался ручным инструментом
-и описывает старую схему (`network_mode: service:body-N`).
-
-`bash dev/slot_restart.sh N` — одной командой, в порядке, который переживает мост: mind-N стоп
-(SIGTERM, `stop_grace_period: 20s`, мост закрывается `close()`), body-N recreate (свежий
-контейнер переподключается к серверу, `restart` изношенного — нет, T-053), ожидание healthcheck
-(шлюз uc слушает 25333, compose `service_healthy`), mind-N старт в новом netns тела. Опции:
-`--dry-run` (печатать команды), `--project NAME` (параллельный стенд), `all` (все слоты).
-При живом `node-N` скрипт откажется без `--force`: перезапуск ума среди жизни теряет
-вооружённый life clock и створ stale-dead из T-054 (заметка надзора в T-055).
-mind-N теперь стартует только после healthcheck тела (`depends_on: service_healthy`), поэтому
-порядок «тело → ум» у compose получается сам.
+## Перезапуск слота (T-055, устарело с ADR-050)
+С ADR-050 всё через доску и исполнителя: `body_restart {slot}` (тело, просит сам разум или
+кнопка оператора), `slot_restart {slot}` (пересоздаёт только mind-N — `up.sh
+--force-recreate --no-deps mind-N`, сестра и часы жизни живут дальше), полный цикл —
+`slot_down` + `slot_up`. `dev/slot_restart.sh` (старая схема `network_mode: service:body-N`)
+удалён как инструмент: скрипт теперь отказывает и печатает эти пути.
 
 ## Исполнитель инфраструктуры (T-057)
 Last Order управляет составом сети сама, без одобрения на каждое действие (ADR-044): она
@@ -254,8 +246,8 @@ body_restart/mc_restart/status/logs`, разбор — `runtime/hive/infra.py`),
   раньше `.env`, так что переезд держится и после `slot_restart` и полного подъёма.
   `mc-server:25565` — домой, строка уходит. Пароль чужого сервера — `MC_LOGIN_PASSWORD_N`
   в `.env` (секрет оператора), команда скина — `MC_SKIN_COMMAND_N`.
-- `slot_restart` идёт через `dev/slot_restart.sh` (порядок T-055, отказ при живом `node-N`
-  без `--force` уходит на доску как `failed` — это честный ответ Last Order).
+- `slot_restart` идёт через `up.sh --force-recreate --no-deps mind-N` прямо из исполнителя
+  (dev/slot_restart.sh устарел и отказывает при вызове).
 
 ## Сервер Fabric (T-062, ADR-045)
 `mc-server` — `itzg/minecraft-server:java21` с `TYPE: FABRIC`, `VERSION: 1.21.11`. Версии

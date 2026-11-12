@@ -180,25 +180,17 @@ def test_the_executor_container_is_the_only_socket_holder():
     assert "infra-net" in services["hive"]["networks"]
 
 
-def test_slot_restart_dry_run_prints_the_sequence():
-    # The acceptance command itself: the dry run prints every step without
-    # touching docker (mind stop → body recreate → health wait → mind start).
+def test_slot_restart_is_deprecated_and_refuses():
+    # ADR-050 retired the old choreography: the script must refuse loudly and
+    # point at the board's infra verbs, never run the old mind/body dance.
     out = subprocess.run(
         ["bash", "dev/slot_restart.sh", "1", "--dry-run"],
         capture_output=True,
         text=True,
-        check=True,
-    ).stdout
-    assert "stop mind-1" in out
-    # `up` goes through docker/node/up.sh, which lifts the slot keys from .env (T-058)
-    assert "docker/node/up.sh --force-recreate --no-deps body-1" in out
-    assert "--healthy" in out and "ps -q body-1" in out
-    assert "docker/node/up.sh --no-deps mind-1" in out
-    other = subprocess.run(
-        ["bash", "dev/slot_restart.sh", "1", "--dry-run", "-p", "t999"],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    assert "COMPOSE_PROJECT_NAME=t999 bash docker/node/up.sh --no-deps mind-1" in other
+    )
+    assert out.returncode == 2
+    assert "deprecated" in out.stderr
+    assert "body_restart" in out.stderr and "slot_restart" in out.stderr
 
 
 # --- the infra bridge surface (T-057) --------------------------------------------------------
