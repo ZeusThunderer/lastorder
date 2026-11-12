@@ -40,6 +40,9 @@ Anything else is a plain request the operator answers — not infrastructure.
 - Do not take down a slot whose sister is mid-task — above all an operator's task —
   unless the slot is broken and staying broken costs more.
 - Prefer `status` and `logs` over any move: look before you change.
+- After a `start` wake, run `status` before concluding anything: a slot reading
+  `created` or `exited` is simply not raised (nobody asked `slot_up`), not broken —
+  and a slot cycling deaths is the 45-minute life, not a birth loop.
 - One move at a time, then read the result on the board (`board` with the entry
   id). The output is truncated — if it is not enough, `logs` the service.
 
