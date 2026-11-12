@@ -795,6 +795,13 @@ services:
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 512m
+    # the operator's OBS on this host alone (ADR-051): rtsp://127.0.0.1:8554/<slot>;
+    # loopback only — the playback API and the agent access stay internal (T-063).
+    # media-host carries the publish the hapi-web way: a container on internal-only
+    # networks cannot publish at all (the mapping silently goes inert, T-044) — the
+    # empty non-internal network gives media a NAT route it never initiates anything on
+    ports:
+      - "127.0.0.1:8554:8554"
     environment:
       # the ring depth (ADR-045: write always, decide later); 1d = 24h. MEDIA_SEGMENT
       # only shortens the pieces for a stand check — production keeps the 1h default.
@@ -803,7 +810,7 @@ services:
     volumes:
       - ${STAND_DAEMON_ROOT:-..}/docker/media/mediamtx.yml:/mediamtx.yml:ro
       - footage:/recordings
-    networks: [media-net]
+    networks: [media-net, media-host]
 
   # The infra executor (ADR-050; it replaces the host-side bridge of ADR-044): polls the
   # board for infra requests — Last Order's, the operator's buttons, a slot's own body
@@ -909,6 +916,9 @@ networks:
   # the only network with a route out: zai-egress alone sits on it
   egress-out: {}
   # body cameras → media (T-063, ADR-045 §9): bodies publish RTSP, media records and
-  # serves clips; internal — no route out, no host ports, and node-N never joins it
-  # (a sister sandbox cannot reach the footage; last-order joins in T-064)
+  # serves clips; internal — no route out, and node-N never joins it (a sister
+  # sandbox cannot reach the footage; last-order joins in T-064)
   media-net: {internal: true}
+  # media's publish carrier alone (ADR-051, the hapi-web pattern): empty, the NAT
+  # route exists but media initiates nothing outward — the loopback RTSP only
+  media-host: {}
