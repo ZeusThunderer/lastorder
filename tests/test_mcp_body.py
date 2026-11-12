@@ -594,6 +594,36 @@ def test_runner_birth_endpoint_arms_the_life_clock(stack: Stack) -> None:
     assert stack.runner("POST", "/runner/birth", {"serial": "x"}).status_code == 400
 
 
+def test_runner_term_endpoint_acknowledges_the_soft_term(stack: Stack) -> None:
+    """ADR-052: a life whose deadline passed terms on C1's own clock; the status
+    carries it next to `dead`, the ack resets the life without touching the living
+    body, and the heir arms onto the same body."""
+    from datetime import datetime, timedelta, timezone
+
+    late = (datetime.now(timezone.utc) - timedelta(minutes=50)).isoformat()
+    assert (
+        stack.runner("POST", "/runner/birth", {"serial": 8, "born_at": late, "ttl_min": 45}).status_code
+        == 200
+    )
+    stack.wait_until(lambda: stack.executor.termed())
+    status = stack.runner("GET", "/runner/status").json()
+    assert status["term"] is True and status["term_cause"] == "ttl"
+    assert status["dead"] is False  # the soft sibling of a death, not one
+    time.sleep(0.3)
+    assert stack.body.respawn_calls == 0  # the body lives on, untouched
+
+    assert stack.runner("POST", "/runner/term").status_code == 200
+    assert stack.runner("GET", "/runner/status").json()["term"] is False
+    assert stack.runner("POST", "/runner/term").status_code == 409  # nothing left to ack
+    time.sleep(0.3)
+    assert stack.body.respawn_calls == 0  # a refusal never touches the body
+    fresh = datetime.now(timezone.utc).isoformat()
+    assert (
+        stack.runner("POST", "/runner/birth", {"serial": 9, "born_at": fresh, "ttl_min": 45}).status_code
+        == 200
+    )
+
+
 # --- retire_stuck ------------------------------------------------------------------------
 
 
@@ -721,7 +751,7 @@ def test_call_log_records_calls_and_rejections(stack: Stack) -> None:
 
 
 def test_runner_commands_need_the_runner_key() -> None:
-    """With MIND_RUNNER_KEY set, respawn and birth answer 401 to a keyless caller
+    """With MIND_RUNNER_KEY set, respawn, term and birth answer 401 to a keyless caller
     (a sister with bash must not respawn her dead body under the runner's will
     session), and the status stays open: the death cause is the agent's own data."""
     s = Stack(runner_key="rk-mind-one")
@@ -732,6 +762,7 @@ def test_runner_commands_need_the_runner_key() -> None:
         assert s.runner("GET", "/runner/status").status_code == 200
         assert s.runner("POST", "/runner/respawn").status_code == 401
         assert s.runner("POST", "/runner/respawn", key="rk-wrong").status_code == 401
+        assert s.runner("POST", "/runner/term").status_code == 401
         assert s.body.respawn_calls == 0
         assert (
             s.runner("POST", "/runner/birth", {"serial": 8, "born_at": "2026-10-21T00:00:00+00:00", "ttl_min": 45}).status_code

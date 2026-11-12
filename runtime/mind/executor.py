@@ -7,7 +7,10 @@ with the no-LLM rule fallback (flee under low hp, strike a hostile in reach, oth
 keep the intent; after the threat calms down it returns to the intent), detects death on
 every tick (hp = 0 plus the vanilla line — onDeath is silent for mob deaths), stops the
 body and hands the death to the runner; respawn happens ONLY by the runner's command.
-The idle watchdog arms `retire_stuck`, and the life clock warns 3 minutes before ttl_min.
+The idle watchdog arms `retire_stuck`, and the life clock warns 3 minutes before ttl_min
+and ends the life AT ttl_min without a body death (ADR-052): the term latch hands hive
+and the runner the same closing path a death starts, but the body lives on for the heir
+— only the game kills a body now.
 
 Threat maneuvers are C1's own: while one runs, the agent's intent is suspended and busy
 transitions belong to the maneuver, never to the intent — the intent's verdict is counted
@@ -39,7 +42,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from runtime.lastorder.death import DeathDetector, classify_death
+from runtime.lastorder.death import CAUSE_STUCK, CAUSE_TTL, DeathDetector, classify_death
 from runtime.mind.jev import JevGate
 from runtime.perception.chat import is_service_line, parse_speaker, strip_formatting
 from runtime.perception.topics import TopicFilter
@@ -72,6 +75,9 @@ RESPAWN_MAX_ATTEMPTS = 3  # bounded respawn retries, then the body stays dead (s
 TARGET_LEVERS = ("goto", "goto_far", "bridge_to", "pillar_to")  # arrival by position
 GET_LEVER = "get"  # arrival by inventory count
 DEAD_ACT_ERROR = "the body is dead: the runner decides the respawn, the intent is not accepted"
+TERM_ACT_ERROR = (
+    "the life term is over: the runner owns the handover, the intent is not accepted"
+)
 
 # What counts as a threat source: uc's getEntitiesInfo reports the entity TYPE id
 # ("zombie", "cow", "item"…, Py4jEntryPoint.getEntitiesInfo), never a hostility flag,
@@ -385,6 +391,10 @@ class Executor:
         self._dead_since_wall: datetime | None = None
         self._death_cause = ""
         self._death_text = ""
+        # ADR-052: the life ended without a body death (the clock ran out or the node
+        # asked to retire). The body lives on for the heir; this mind is closing.
+        self._term = False
+        self._term_cause = ""
         self._respawn_attempts = 0
         self._idle_flag = False
         self._idle_fired_at = -1e9
@@ -647,7 +657,7 @@ class Executor:
     def _stale_dead(self) -> None:
         """The stale-corpse branch of the tick (T-054): one `body.stale_dead` record
         per episode, then a respawn every tick until the body lives — a flaky bridge
-        retries on the next tick, and `_after_respawn` re-arms the episode flag for
+        retries on the next tick, and `_reset_life` re-arms the episode flag for
         the next life. No game.death, no will: this node never lived in this body."""
         if not self._stale_dead_marked:
             self._stale_dead_marked = True
@@ -689,6 +699,37 @@ class Executor:
         )
         self.events.put("game.death", text=text or "game.death", cause=cause)
 
+    def _on_term(self, cause: str) -> None:
+        """The soft end of a life (ADR-052): the clock ran out or the node asked to
+        retire, and the body does NOT die. Everything of THIS mind stops — the intent
+        is cleared, new submits are refused — while C1 keeps ticking and protecting
+        the standing body for the heir. The runner reads the latch in
+        `death_status()`, runs the closing path (will, retire, archive) and acks it
+        with POST /runner/term; a death that lands anyway (a mob mid-handover) is
+        still a death and owns the respawn."""
+        if self._term:
+            return  # a latch, not a log line per tick
+        self._term = True
+        self._term_cause = cause
+        self._threat = None
+        self._jev_mode = None  # the pick dies with the node, like a death's does
+        self._evading = False
+        if self._current is not None and not self._current.finished:
+            self._log.record(
+                "intent", phase="cleared", intent_id=self._current.id, lever=self._current.lever
+            )
+            self._current.state = Intent.CLEARED
+        self._current = None
+        self._pending_act = None
+        try:
+            self._body.stop()  # the body stands still; the rules keep guarding it
+        except Exception as exc:
+            self._log.record("error", scope="term_stop", error=f"{type(exc).__name__}: {exc}")
+        self._log.record(
+            "term", event="life.ended", cause=cause, username=self._username
+        )
+        self.events.put("life.ended", cause=cause)
+
     def _rule_cause(self, text: str) -> str:
         if self._birth is None:
             # No life clock configured: the honest default is `game` — unless this life asked
@@ -703,14 +744,23 @@ class Executor:
     def dead(self) -> bool:
         return self._dead
 
+    def termed(self) -> bool:
+        """True between the soft term and the runner's ack: the life is over, the
+        body is not (ADR-052)."""
+        return self._term
+
     def death_status(self) -> dict[str, Any]:
-        """The runner's poll of the death state (GET /runner/status, review P1-1)."""
+        """The runner's poll of the death state (GET /runner/status, review P1-1).
+        `term` is the soft sibling of `dead` (ADR-052): the life ended, the body
+        lives — the runner's closing path reads it the same way."""
         return {
             "alive": not self._dead,
             "dead": self._dead,
             "dead_since": self._dead_since_wall.isoformat() if self._dead_since_wall else None,
             "cause": self._death_cause or None,
             "death_text": self._death_text or None,
+            "term": self._term,
+            "term_cause": self._term_cause or None,
             "serial": self._birth.serial if self._birth else None,
         }
 
@@ -740,19 +790,39 @@ class Executor:
                 )
                 raise
             self._log.record("event", event="respawn.ok", attempt=self._respawn_attempts + 1)
-            self._after_respawn()
+            self._reset_life()
         return {"respawned": True}
 
-    def _after_respawn(self) -> None:
+    def runner_term_ack(self) -> dict[str, Any]:
+        """The runner's ack of the soft term (POST /runner/term, ADR-052): the closing
+        path is done (will, retire, archive) and the body lives — reset the life for
+        the heir WITHOUT touching the body. A body that died anyway mid-handover is
+        still the respawn's case: the ack refuses and the runner's tolerant retry
+        order (respawn first, then ack) keeps the two resets from overlapping."""
+        with self.body_lock:
+            if not self._term:
+                raise RuntimeError("term refused: no term is set")
+            if self._dead:
+                raise RuntimeError("term refused: the body is dead — the respawn owns this reset")
+            self._reset_life()
+            self._log.record("event", event="term.acked", username=self._username)
+        return {"term_ack": True}
+
+    def _reset_life(self) -> None:
+        """The shared end-of-life reset: everything the death path's respawn and the
+        soft term's ack (ADR-052) both clear. The caller owns what differs — the
+        body itself."""
         self._dead = False
         self._dead_since_mono = 0.0
         self._dead_since_wall = None
         self._death_cause = ""
         self._death_text = ""
+        self._term = False
+        self._term_cause = ""
         self._respawn_attempts = 0
-        self._hp = -1.0  # the first poll after respawn re-baselines hp
+        self._hp = -1.0  # the first poll after the reset re-baselines hp
         # T-054: the new life has not seen this body alive yet — a body still dead
-        # right after the respawn is again a stale corpse, not the newborn's death.
+        # right after the handover is a stale corpse, not the newborn's death.
         self._saw_alive = False
         self._stale_dead_marked = False
         self._idle_flag = False
@@ -761,11 +831,11 @@ class Executor:
         self._jev_mode = None
         self._evading = False
         self._stuck_requested = False  # the cause flag belongs to the life that asked (R1-4)
-        # Whatever intent object survived into this moment (a submit racing the death tick,
+        # Whatever intent object survived into this moment (a submit racing the closing,
         # review R1-3) dies with the old node: the new life starts with no intent.
         self._current = None
         self.events.clear()  # a new life does not replay the old one's events
-        # The life clock belongs to the node that died; the runner arms the next one
+        # The life clock belongs to the node that ended; the runner arms the next one
         # with POST /runner/birth. Until then life.expiring stays silent.
         self._birth = None
         self._life_warned = False
@@ -794,10 +864,10 @@ class Executor:
             )
         return {"armed": True, "serial": int(serial)}
 
-    # -- the life clock (life.expiring, 3 min before ttl_min) ------------------------------
+    # -- the life clock (life.expiring at 3 min, the soft term at ttl_min; ADR-052) --------
 
     def _life_clock(self) -> None:
-        if self._birth is None or self._life_warned:
+        if self._birth is None or self._term:
             return
         try:
             born = datetime.fromisoformat(self._birth.born_at)
@@ -809,7 +879,13 @@ class Executor:
             born = born.replace(tzinfo=timezone.utc)
         deadline = born + timedelta(minutes=self._birth.ttl_min)
         remaining_s = (deadline - self._wall_clock()).total_seconds()
-        if remaining_s <= LIFE_WARN_S:
+        if remaining_s <= 0.0:
+            # The deadline itself: the mind change starts here, the body does not die
+            # (ADR-052). No expiring warning is honest anymore — the term is the news.
+            self._life_warned = True
+            self._on_term(CAUSE_TTL)
+            return
+        if not self._life_warned and remaining_s <= LIFE_WARN_S:
             self._life_warned = True
             self._emit("life.expiring", remaining_min=round(remaining_s / 60.0, 1))
 
@@ -982,9 +1058,13 @@ class Executor:
     def submit(self, lever: str, args: Mapping[str, Any]) -> Intent:
         with self.body_lock:  # intent state changes never race the C1 tick (checker C-2);
             # the dead check is inside the same critical section, so a death landing between
-            # the check and the swap cannot arm an intent for the next node's body (R1-3)
+            # the check and the swap cannot arm an intent for the next node's body (R1-3).
+            # The term check is its soft sibling (ADR-052): an outgoing mind must not
+            # walk the heir's living body either.
             if self._dead:
                 raise RuntimeError(DEAD_ACT_ERROR)
+            if self._term:
+                raise RuntimeError(TERM_ACT_ERROR)
             if self._current is not None and not self._current.finished:
                 self._log.record(
                     "intent", phase="cleared", intent_id=self._current.id, lever=self._current.lever
@@ -1134,7 +1214,11 @@ class Executor:
         except HiveRejected as exc:
             raise RuntimeError(f"retire_stuck: hive rejected the request ({exc})") from exc
         self._idle_flag = False  # one signal retires one node; a refusal keeps the signal armed
-        self._stuck_requested = True  # this death is self-chosen: the cause rules as stuck (R1-4)
+        self._stuck_requested = True  # a death landing anyway rules as stuck (R1-4)
+        # ADR-052: the ask no longer waits for an RCON kill — the soft term starts here,
+        # under the lock so it cannot interleave a concurrent C1 tick.
+        with self.body_lock:
+            self._on_term(CAUSE_STUCK)
         self._log.record("event", event="retire.requested", serial=serial, cause="stuck")
         return {"requested": True, "serial": serial, "cause": "stuck"}
 

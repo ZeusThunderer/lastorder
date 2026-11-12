@@ -4,7 +4,8 @@ Every test drives `_tick()` by hand with a fake clock and a fake body — no sle
 wall time (one test runs the real loop thread briefly). Covers the acceptance items: the
 intent lifecycle (done/failed, the 1 s arbitration), the no-LLM threat rules and the
 return to the intent after calm, the death path (stop, runner-only respawn, no second
-death), the idle watchdog with retire_stuck, life.expiring, the event queue
+death), the idle watchdog with retire_stuck, life.expiring, the soft term of ADR-052
+(the life ends at ttl_min or on a stuck retire without a body death), the event queue
 collapse/limit, and the log.jsonl format.
 """
 
@@ -23,6 +24,7 @@ from runtime.mind.executor import (
     DEAD_ACT_ERROR,
     LIFE_WARN_S,
     QUEUE_LIMIT,
+    TERM_ACT_ERROR,
     EventQueue,
     Executor,
     Intent,
@@ -635,6 +637,123 @@ def test_life_expiring_silent_until_the_window() -> None:
     try:
         rig.tick(dt=LIFE_WARN_S)  # 15 minutes left
         assert not rig.events_of("life.expiring")
+    finally:
+        rig.close()
+
+
+# --- the soft term (ADR-052: the life ends, the body does not die) ----------------------------
+
+
+def test_term_at_ttl_latches_without_a_death() -> None:
+    rig = Rig(birth=BirthRecord(serial=7, born_at="2026-10-18T11:18:00+00:00", ttl_min=45))
+    try:
+        intent = rig.x.submit("goto", {"x": 5, "y": 64, "z": 5})
+        rig.tick()
+        rig.body.busy_flag = True
+        rig.tick()
+        assert rig.events_of("life.expiring")  # 12:00, three minutes left
+
+        rig.tick(dt=200.0)  # 12:03:20, past the deadline
+        status = rig.x.death_status()
+        assert status["term"] is True and status["term_cause"] == "ttl"
+        assert status["dead"] is False  # the body did not die
+        assert status["serial"] == 7  # the runner still sees whose life ended
+        assert rig.body.stops == 1  # the term stops the body like a death does
+        assert intent.state == Intent.CLEARED
+        ended = rig.events_of("life.ended")
+        assert ended and ended[0]["cause"] == "ttl"
+        assert rig.events_of("game.death") == []
+        assert rig.body.respawn_calls == 0
+
+        rig.tick()
+        assert len(rig.events_of("life.ended")) == 1  # a latch, not a line per tick
+        with pytest.raises(RuntimeError, match=TERM_ACT_ERROR):
+            rig.x.submit("look_at", {"x": 1.0, "y": 64.0, "z": 1.0})
+    finally:
+        rig.close()
+
+
+def test_term_fires_immediately_when_the_deadline_already_passed() -> None:
+    # the T-072 shape: a restarted mind re-armed a life born before it — the first
+    # tick past the deadline terms with no expiring warning (nothing honest to warn)
+    rig = Rig()
+    try:
+        rig.tick()  # a living state first
+        rig.x.runner_birth(7, "2026-10-18T11:10:00+00:00", 45)  # deadline was 11:55
+        rig.tick()  # wall now is 12:00
+        assert rig.events_of("life.ended") and not rig.events_of("life.expiring")
+        assert rig.x.death_status()["term_cause"] == "ttl"
+    finally:
+        rig.close()
+
+
+def test_term_ack_resets_the_life_for_the_heir() -> None:
+    rig = Rig(birth=BirthRecord(serial=7, born_at="2026-10-18T11:10:00+00:00", ttl_min=45))
+    try:
+        rig.tick()
+        assert rig.x.termed()
+        assert rig.x.runner_term_ack() == {"term_ack": True}
+        assert not rig.x.termed()
+        status = rig.x.death_status()
+        assert status["term"] is False and status["term_cause"] is None
+        assert rig.body.respawn_calls == 0  # the living body was never touched
+        # the heir arms onto the same living body
+        assert rig.x.runner_birth(8, FakeWall().now.isoformat(), 45)["armed"] is True
+        assert not rig.x.events.pending()  # the old life's events do not replay
+    finally:
+        rig.close()
+
+
+def test_term_ack_refusals() -> None:
+    rig = Rig()
+    try:
+        rig.tick()
+        with pytest.raises(RuntimeError, match="no term is set"):
+            rig.x.runner_term_ack()  # nothing to ack on a living unarmed life
+
+        rig.x._birth = BirthRecord(serial=7, born_at="2026-10-18T11:10:00+00:00", ttl_min=45)
+        rig.tick()  # the deadline is past: the term latches
+        rig.body.set_state(hp=0.0)  # a mob killed the body mid-handover
+        rig.body.chat = ["LastOrder01 was slain by Zombie"]
+        rig.tick()
+        assert rig.x.dead() and rig.x.termed()
+        with pytest.raises(RuntimeError, match="the respawn owns this reset"):
+            rig.x.runner_term_ack()
+        # the respawn path still works and clears both flags
+        assert rig.x.runner_respawn() == {"respawned": True}
+        assert not rig.x.dead() and not rig.x.termed()
+    finally:
+        rig.close()
+
+
+def test_death_after_term_is_still_a_death() -> None:
+    rig = Rig(birth=BirthRecord(serial=7, born_at="2026-10-18T11:10:00+00:00", ttl_min=45))
+    try:
+        rig.tick()
+        assert rig.x.termed()
+        rig.body.set_state(hp=0.0)
+        rig.body.chat = ["LastOrder01 was killed"]
+        rig.tick()
+        status = rig.x.death_status()
+        assert status["dead"] is True and status["cause"] == "ttl"  # by the mind's clock
+        assert rig.x.runner_respawn() == {"respawned": True}  # the death path owns the body
+    finally:
+        rig.close()
+
+
+def test_retire_stuck_terms_softly() -> None:
+    hive = FakeHive()
+    rig = Rig(hive=hive)
+    try:
+        rig.tick(dt=5.1)  # the watchdog fires
+        rig.x.runner_birth(7, FakeWall().now.isoformat(), 45)
+        assert rig.x.retire_stuck() == {"requested": True, "serial": 7, "cause": "stuck"}
+        assert hive.requests == [(7, "stuck")]
+        status = rig.x.death_status()
+        assert status["term"] is True and status["term_cause"] == "stuck"
+        assert status["dead"] is False
+        assert rig.events_of("life.ended")[0]["cause"] == "stuck"
+        assert rig.body.respawn_calls == 0 and rig.body.stops == 1
     finally:
         rig.close()
 

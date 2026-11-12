@@ -751,6 +751,22 @@ def build_server(
             return JSONResponse({"error": str(exc)}, status_code=500)
         return JSONResponse(result)
 
+    @server.custom_route("/runner/term", methods=["POST"])
+    async def runner_term(request: Request) -> Response:
+        """The soft term's ack (ADR-052): the closing path is done, reset the life for
+        the heir — the body itself is not touched. A refusal (no term, or a body that
+        died anyway mid-handover) is a 409 the runner treats like respawn's `not
+        dead`: nothing to ack, carry on."""
+        if not _runner_key_ok(request):
+            return JSONResponse({"error": "missing or wrong X-Runner-Key"}, status_code=401)
+        if not executor.termed():
+            return JSONResponse({"error": "no term is set"}, status_code=409)
+        try:
+            result = await asyncio.to_thread(executor.runner_term_ack)
+        except RuntimeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return JSONResponse(result)
+
     @server.custom_route("/runner/birth", methods=["POST"])
     async def runner_birth(request: Request) -> Response:
         if not _runner_key_ok(request):
