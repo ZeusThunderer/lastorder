@@ -102,6 +102,11 @@ class FakeMind:
         self.dead = False
         self.cause: str | None = None
         self.text: str | None = None
+        self.term = False  # ADR-052: the soft sibling of dead
+        self.term_cause: str | None = None
+        self.term_at_status = 0
+        self.term_calls = 0
+        self.term_error: Exception | None = None
         self.arm_calls: list[tuple[int, str, int]] = []
         self.respawn_calls = 0
         self.respawn_error: Exception | None = None
@@ -114,12 +119,21 @@ class FakeMind:
             self.dead = True
             self.cause = self.cause or "game"
             self.text = self.text or "LastOrder01 was slain"
+        if (
+            not self.dead
+            and self.term_at_status
+            and self.status_calls >= self.term_at_status
+        ):
+            self.term = True
+            self.term_cause = self.term_cause or "ttl"
         return {
             "alive": not self.dead,
             "dead": self.dead,
             "dead_since": None,
             "cause": self.cause,
             "death_text": self.text,
+            "term": self.term,
+            "term_cause": self.term_cause,
             "serial": self.armed[0] if self.armed else None,
         }
 
@@ -132,12 +146,27 @@ class FakeMind:
         if self.respawn_error is not None:
             raise self.respawn_error
         self.respawn_calls += 1
-        # the real _after_respawn clears the life clock: the runner arms the next one
+        # the real _reset_life clears the life clock and both end flags: the runner
+        # arms the next one
         self.dead = False
         self.armed = None
         self.cause = None
         self.text = None
+        self.term = False
+        self.term_cause = None
         return {"respawned": True}
+
+    def term_ack(self) -> dict:
+        if self.term_error is not None:
+            raise self.term_error
+        if not self.term:
+            raise HiveRejected(409, "http", '{"error":"no term is set"}')
+        self.term_calls += 1
+        # the real runner_term_ack resets the life for the heir without a respawn
+        self.term = False
+        self.term_cause = None
+        self.armed = None
+        return {"term_ack": True}
 
     def kill(self, cause: str = "game", text: str = "LastOrder01 was slain") -> None:
         self.dead = True
@@ -152,6 +181,7 @@ class FakeHive:
         self.serial = 0
         self.births: list[tuple[str, Traits]] = []
         self.marks: list[int] = []
+        self.term_marks: list[int] = []
         self.retires: list[tuple[int, str, str]] = []
         self.retire_error: Exception | None = None
         self.birth_error: Exception | None = None
@@ -165,6 +195,9 @@ class FakeHive:
 
     def mark_dead(self, serial: int) -> None:
         self.marks.append(serial)
+
+    def mark_term(self, serial: int) -> None:
+        self.term_marks.append(serial)
 
     def retire(self, serial: int, cause: str, will_text: str) -> None:
         if self.retire_error is not None:
@@ -610,6 +643,95 @@ def test_dead_at_startup_walks_the_death_path(tmp_path: Path) -> None:
     assert len(rig.hive.births) == 2
     assert rig.hive.births[1][0] == "LastOrder01"
     assert len(rig.hive.retires) == 2  # two full lives, two wills
+
+
+# --- the soft term (ADR-052): the life ends, the body lives on ---------------------------
+
+
+def test_term_at_startup_walks_the_soft_closing_path(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    rig.mind.term = True  # the clock ran out before any session ran
+    rig.mind.term_cause = "ttl"
+    # the body lives: the real mind answers the respawn attempt with "not dead"
+    rig.mind.respawn_error = HiveRejected(409, "http", '{"error":"the body is not dead"}')
+    rig.script(FakeProcess(code=0, output="will written"))
+    rig.run_generation()
+    assert rig.hive.term_marks == [state.serial]  # the soft mark, not the dead one
+    assert rig.hive.marks == []
+    assert len(rig.hive.retires) == 1
+    assert rig.hive.retires[0][:2] == (state.serial, "ttl")
+    assert rig.mind.respawn_calls == 0  # the living body was never touched
+    assert rig.mind.term_calls == 1  # the ack handed the body to the heir
+    assert any(type == "term.closing" for type, _ in rig.logs)
+    # the will prompt speaks of a handover, not a death
+    will_entries = [e for e in rig.journal if e[0] == "zcode:will"]
+    assert will_entries and "term is over" in will_entries[0][1]
+    # the next generation births the heir INTO THE SAME BODY: no respawn needed
+    rig.mind.respawn_error = None
+    rig.script(FakeProcess(hang=True))
+    rig.mind.kill_at_status = rig.mind.status_calls + 3
+    rig.run_generation()
+    assert len(rig.hive.births) == 2
+    # the only respawn of the whole script is the heir's own in-game death
+    assert rig.mind.respawn_calls == 1
+
+
+def test_term_mid_session_stops_the_harness_softly(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    rig.script(FakeProcess(hang=True))
+    rig.mind.term_at_status = 3  # the clock runs out inside the hanging session
+    death, adapter = rig.runner._life(state)
+    assert death.soft is True and death.cause == "ttl"
+    assert adapter == "zcode"
+    assert any(type == "session.stopped_for_term" for type, _ in rig.logs)
+    assert ("sweep",) in rig.journal  # detached sisters still die with the node
+
+
+def test_stuck_term_uses_the_stuck_will_prompt(tmp_path: Path) -> None:
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    rig.mind.term = True
+    rig.mind.term_cause = "stuck"
+    rig.mind.respawn_error = HiveRejected(409, "http", '{"error":"the body is not dead"}')
+    rig.script(FakeProcess(code=0, output="will written"))
+    rig.runner._death_path(state, "stuck", "", "zcode", soft=True)
+    assert rig.hive.retires[0][:2] == (state.serial, "stuck")
+    will_entries = [e for e in rig.journal if e[0] == "zcode:will"]
+    assert will_entries and "asked to retire" in will_entries[0][1]
+
+
+def test_term_ack_refusal_still_completes_the_generation(tmp_path: Path) -> None:
+    """An older mind without the route, or a raced death that already reset it: the
+    refusal leaves the latch set, the closing is done, and the next generation's
+    early term branch retries — the loop self-heals."""
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    rig.mind.term = True
+    rig.mind.term_cause = "ttl"
+    rig.mind.respawn_error = HiveRejected(409, "http", '{"error":"the body is not dead"}')
+    rig.mind.term_error = HiveRejected(404, "http", '{"error":"not found"}')
+    rig.script(FakeProcess(code=0, output="will written"))
+    rig.run_generation()  # does not loop forever
+    assert rig.mind.term_calls == 0
+    assert len(rig.hive.retires) == 1
+
+
+def test_death_overrides_a_pending_term(tmp_path: Path) -> None:
+    """A mob killed the body between the term and the poll: the death owns the body,
+    the respawn runs, and the ack finds nothing to reset — the healthy idempotence."""
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    rig.script(FakeProcess(code=0, output="will written"))
+    rig.mind.term = True
+    rig.mind.term_cause = "ttl"
+    rig.mind.kill(cause="ttl", text="LastOrder01 was killed")  # both flags now
+    rig.run_generation()
+    assert rig.hive.marks == [state.serial]  # the death path, not the term one
+    assert rig.hive.term_marks == []
+    assert rig.mind.respawn_calls == 1
+    assert rig.mind.term is False  # the respawn's reset cleared both flags
 
 
 def test_retire_unavailable_retries_then_lands(tmp_path: Path) -> None:

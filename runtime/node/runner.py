@@ -15,7 +15,11 @@ The strict order (NETWORK.md sections 3 and 6, plan reviews P1-1/P1-4):
   will (`will.py`) → `retire` (a 409 `already_retired` is a hive-side close: the will
   stays staged; any other 4xx is parked for the operator; unavailability retries with
   a capped pause — nothing overtakes an unsettled will) → the read-only archive →
-  `respawn` (a "not dead" refusal counts as already respawned) → the next birth.
+  `respawn` (a "not dead" refusal counts as already respawned) → the next birth;
+- the soft term (ADR-052): the mind's own clock (or her stuck ask) ended the life
+  while the body lives — the same closing path with `mark_term`, a handover will
+  prompt, and the term ack instead of a respawn that owns the body; the body, its
+  inventory and its place in the world pass to the heir untouched.
 
 The runner is service-grade: any exception logs and restarts the generation loop; it
 never sets the agent's rhythm and never decides for her (ADR-035).
@@ -55,6 +59,16 @@ from runtime.node.willproxy import WillProxy
 
 LIFE_PREFIX = "Life session."
 WILL_PREFIX = "Will session (you have just died)."
+# ADR-052: the soft handover will sessions — the life ended (the clock or her own
+# ask), the body did not. The heir finds it standing where her predecessor left it.
+WILL_PREFIX_TERM_TTL = (
+    "Will session (your life term is over; the body did not die — it passes to your heir"
+    " as it stands)."
+)
+WILL_PREFIX_TERM_STUCK = (
+    "Will session (you asked to retire; the body did not die — it passes to your heir"
+    " as it stands)."
+)
 # the sister's own will draft in memory/ (skills/reflect keeps it, T-071): the
 # runner's second choice after a submitted will, before the emergency template
 WILL_DRAFT_FILE = "will-draft.md"
@@ -78,6 +92,7 @@ PARKED = "parked"  # undelivered, the retry loop owns it
 class Death:
     cause: str
     text: str
+    soft: bool = False  # ADR-052: the term, not a death — the body lives on
 
 
 @dataclass
@@ -353,7 +368,7 @@ class NodeRunner:
     def _generation(self) -> None:
         status = self._wait_for_mind()
         state = self._load_state()
-        if status.get("dead"):
+        if status.get("dead"):  # a death beats a term: the body's state rules
             serial = int(status.get("serial") or (state.serial if state else 0) or 0)
             if serial <= 0:
                 self._log("death.unknown_serial", {"status": status})
@@ -370,6 +385,23 @@ class NodeRunner:
                 self.cfg.harness,
             )
             return
+        if status.get("term"):  # ADR-052: the term landed before any session ran
+            serial = int(status.get("serial") or (state.serial if state else 0) or 0)
+            if serial <= 0:
+                self._log("term.unknown_serial", {"status": status})
+                self._sleep(self.cfg.restart_pause_max_s)
+                return
+            if state is None or state.serial != serial:
+                state = LifeState(serial=serial, born_at=self._now().isoformat(), ttl_min=0, traits={})
+                self._log("term.state_reconstructed", {"serial": serial})
+            self._death_path(
+                state,
+                str(status.get("term_cause") or "ttl"),
+                "",
+                self.cfg.harness,
+                soft=True,
+            )
+            return
         armed = status.get("serial")
         if not armed and self._live_unarmed(state):
             # T-072: the mind restarted mid-life (a server move, a slot restart) and
@@ -379,7 +411,7 @@ class NodeRunner:
             self._rearm(state)
             self._log("life.reattached", {"serial": state.serial, "rearmed": True})
             death, adapter_name = self._life(state)
-            self._death_path(state, death.cause, death.text, adapter_name)
+            self._death_path(state, death.cause, death.text, adapter_name, soft=death.soft)
             return
         if not armed:
             if self._keys_missing():
@@ -407,7 +439,7 @@ class NodeRunner:
             else:
                 self._log("life.reattached", {"serial": armed})
         death, adapter_name = self._life(state)
-        self._death_path(state, death.cause, death.text, adapter_name)
+        self._death_path(state, death.cause, death.text, adapter_name, soft=death.soft)
 
     def _wait_for_mind(self) -> dict[str, Any]:
         attempt = 0
@@ -817,7 +849,10 @@ class NodeRunner:
                     if process.poll() is None:
                         process.wait(self.cfg.kill_grace_s)
                     process.kill()
-                    self._log("session.stopped_for_death", {"serial": state.serial})
+                    self._log(
+                        "session.stopped_for_term" if death.soft else "session.stopped_for_death",
+                        {"serial": state.serial},
+                    )
                     self._sweep()  # detached sisters die with their node (R2-4)
                     return death
                 next_poll = now + self.cfg.poll_s
@@ -858,6 +893,10 @@ class NodeRunner:
         if not status.get("dead"):
             if state is not None and not status.get("serial") and self._live_unarmed(state):
                 self._rearm(state)  # the mind came back without her clock (T-072)
+            if status.get("term"):  # ADR-052: the soft sibling of a death
+                return Death(
+                    str(status.get("term_cause") or "ttl"), "", soft=True
+                )
             return None
         return Death(str(status.get("cause") or "game"), str(status.get("death_text") or ""))
 
@@ -867,15 +906,27 @@ class NodeRunner:
 
     # --- death --------------------------------------------------------------------------
 
-    def _death_path(self, state: LifeState, cause: str, text: str, adapter_name: str) -> None:
+    def _death_path(
+        self, state: LifeState, cause: str, text: str, adapter_name: str, *, soft: bool = False
+    ) -> None:
+        """The closing path one life always gets — will, retire, archive, next body.
+        `soft` is ADR-052's term: the body did not die, so the mark is `mark_term`,
+        the will prompt speaks of a handover, and the respawn's "not dead" answer is
+        the expected healthy case — the term ack hands the body to the heir."""
         serial = state.serial
         cause = cause if cause in CAUSES else "game"
         died_at = self._now().isoformat()
-        self._mark_dead_bounded(serial)
+        if soft:
+            self._log("term.closing", {"serial": serial, "cause": cause})
+            self._mark_term_bounded(serial)
+            prefix = WILL_PREFIX_TERM_STUCK if cause == "stuck" else WILL_PREFIX_TERM_TTL
+        else:
+            self._mark_dead_bounded(serial)
+            prefix = WILL_PREFIX
         # the will session: the agent reads her memory and calls submit_will through the
         # proxy; a timeout (or a hung session) leaves the stage to the emergency will
         if self._adapter_ready(adapter_name):
-            self.run_will_session(state, adapter_name)
+            self.run_will_session(state, adapter_name, prefix=prefix)
         else:
             self._log("will.session_skipped", {"serial": serial, "harness": adapter_name})
         will_text, will_origin = self._will_of(state, cause, text, died_at, self._harness_model(adapter_name))
@@ -894,6 +945,8 @@ class NodeRunner:
             self._log("life.archived", {"serial": serial, "path": str(archive)})
         self._clear_state()
         self._respawn(serial)
+        if soft:
+            self._term_ack(serial)
 
     def _mark_dead_bounded(self, serial: int) -> None:
         for attempt in range(self.cfg.hive_retry_rounds):
@@ -909,6 +962,22 @@ class NodeRunner:
                 self._sleep(self._hive_pause(attempt))
         # the will session still runs: submit_will would fail with hive down, and the
         # emergency will below covers exactly that (section 9)
+
+    def _mark_term_bounded(self, serial: int) -> None:
+        """mark_term with the same bounded retry shape as mark_dead (ADR-052)."""
+        for attempt in range(self.cfg.hive_retry_rounds):
+            try:
+                self._hive.mark_term(serial)
+                return
+            except HiveRejected as exc:
+                # 404/409: the node is already closed or unknown to hive — nothing to mark
+                self._log("mark_term.rejected", {"serial": serial, "error": str(exc)})
+                return
+            except HiveUnavailable as exc:
+                self._log("mark_term.retry", {"serial": serial, "attempt": attempt + 1, "error": str(exc)})
+                self._sleep(self._hive_pause(attempt))
+        # like mark_dead: an unmarked term keeps the node alive in hive's books — the
+        # emergency will still speaks, and the next birth's lost-close is the backstop
 
     def _will_of(
         self, state: LifeState, cause: str, text: str, died_at: str, model: str
@@ -1081,11 +1150,32 @@ class NodeRunner:
             self._sleep(self._hive_pause(attempt))
             attempt += 1
 
+    def _term_ack(self, serial: int) -> None:
+        """Ack the mind's soft term (ADR-052): the closing path is done and the living
+        body passes to the heir. Any permanent refusal (the healthy "no term" — the
+        respawn of a raced death reset it — or an older mind without the route) just
+        returns: the latch stays and the next generation's early term branch retries
+        the whole close, so nothing is lost."""
+        attempt = 0
+        while True:
+            try:
+                self._mind.term_ack()
+                self._log("mind.term_acked", {"serial": serial})
+                return
+            except HiveRejected as exc:
+                self._log("mind.term_ack_refused", {"serial": serial, "error": str(exc)})
+                return
+            except HiveUnavailable as exc:
+                self._log("mind.term_ack_retry", {"serial": serial, "attempt": attempt + 1, "error": str(exc)})
+            self._sleep(self._hive_pause(attempt))
+            attempt += 1
+
     # --- the will session ---------------------------------------------------------------
 
-    def run_will_session(self, state: LifeState, adapter_name: str) -> str:
+    def run_will_session(self, state: LifeState, adapter_name: str, *, prefix: str = WILL_PREFIX) -> str:
         """The will session behind a timeout; returns the harness output. Used by the
-        death path through `_will_session` and directly by tests. A long-running
+        death path through `_will_session` and directly by tests; `prefix` tells a
+        soft termed sister (ADR-052) her body lives on for the heir. A long-running
         (console) session never ends its turn: the timeout stays the backstop, but
         the staged will file ends it early — the agent said her piece."""
         adapter = self._adapters[adapter_name]
@@ -1099,7 +1189,7 @@ class NodeRunner:
             prepare()  # pi: the full config set, so set_will_mode has params to override
         workplace.set_will_mode(root, adapter_name, url, serial=state.serial)
         self._log("will.session", {"serial": state.serial, "harness": adapter_name, "proxy": url})
-        prompt = self._session_prompt(WILL_PREFIX)
+        prompt = self._session_prompt(prefix)
         command = adapter.will_session(prompt)
         process = self._safe_spawn(command, root)
         output = ""

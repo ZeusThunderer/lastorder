@@ -101,6 +101,11 @@ class MindApi(BaseApi):
     def respawn(self) -> dict[str, Any]:
         return self._request("post", "/runner/respawn", {}).json()
 
+    def term_ack(self) -> dict[str, Any]:
+        """Ack the mind's soft term (ADR-052): the closing path is done, the living
+        body passes to the heir."""
+        return self._request("post", "/runner/term", {}).json()
+
 
 class HiveApi(BaseApi):
     """The registry writes the runner owns (X-Runner-Key, HIVE_RUNNER_KEYS on the hive)."""
@@ -112,6 +117,9 @@ class HiveApi(BaseApi):
 
     def mark_dead(self, serial: int) -> None:
         self._request("post", "/registry/mark_dead", {"serial": serial})
+
+    def mark_term(self, serial: int) -> None:
+        self._request("post", "/registry/mark_term", {"serial": serial})
 
     def retire(self, serial: int, cause: str, will_text: str) -> None:
         self._request(
