@@ -251,7 +251,7 @@ function entryCard(entry, openForms) {
   card.append(el("p", "text", entry.text));
 
   if (entry.kind === "request" && entry.request) {
-    card.append(requestBox(entry.request));
+    card.append(requestBox(entry.request, entry.grant));
   }
   if (entry.kind === "alarm" && entry.alarm) {
     card.append(alarmBox(entry.alarm));
@@ -267,7 +267,7 @@ function entryCard(entry, openForms) {
   return card;
 }
 
-function requestBox(request) {
+function requestBox(request, grant) {
   const box = el("div", "args");
   box.append(el("span", "arg", "action: " + (request.action || "")));
   for (const key of Object.keys(request.args || {})) {
@@ -275,9 +275,10 @@ function requestBox(request) {
     arg.append(el("span", "k", key + ": "), document.createTextNode(String(request.args[key])));
     box.append(arg);
   }
-  if (request.grant) {
+  // the grant is a top-level entry field (board.py strips it out of request_json)
+  if (grant) {
     box.append(el("span", "arg grant-line",
-      "grant: " + request.grant.kind + " " + request.grant.what));
+      "grant: " + grant.kind + " " + grant.what));
   }
   if (request.why) box.append(el("span", "arg why", "почему: " + request.why));
   return box;
@@ -371,7 +372,8 @@ function actionsRow(entry, carriedForm) {
     });
     row.append(ack);
   }
-  const grant = entry.request && entry.request.grant;
+  // the grant is a top-level entry field, not part of request (the wire shape)
+  const grant = entry.grant;
   if (entry.kind === "request" && entry.status === "approved" && grant) {
     // TASKBOARD.md 5.3: the entry keeps `approved`, the grant record flips to revoked
     const revoke = el("button", "danger", "отозвать грант");
@@ -410,7 +412,8 @@ function transitionForm(entry, toStatus, label, options) {
       form.append(row);
     }
   }
-  const grant = entry.request && entry.request.grant;
+  // the grant is a top-level entry field, not part of request (the wire shape)
+  const grant = entry.grant;
   if (toStatus === "approved" && grant && grant.kind === "secret") {
     // T-046: the operator types the secret here; it reaches the vault alone
     const row = el("label", "arg-row");

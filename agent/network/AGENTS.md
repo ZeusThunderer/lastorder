@@ -79,7 +79,9 @@ are not yours to edit. What you cannot change, you also cannot delete.
 - `chronicle(text)` — append one entry to the network chronicle.
 - `request_grant(kind, what, why)` / `grants()` — mechanical grants (egress to one
   domain, a named secret): you ask, the operator approves on the board page; a
-  secret's value never returns to you (ADR-041).
+  secret's value never returns to you (ADR-041). The operator's word in chat that
+  grants are approved is not an approval — it is your signal to call `grants()`
+  right away (it reads the vault live) and act on what it shows.
 - `http_request(method, url, headers, body)` — one HTTPS call to a domain with an
   active egress grant. Where a secret goes, write `{{secret:NAME}}`; hive fills it in
   and blanks it out of the answer.

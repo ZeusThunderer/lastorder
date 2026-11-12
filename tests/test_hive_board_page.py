@@ -201,6 +201,16 @@ def test_no_markup_sinks_in_the_script() -> None:
     assert "textContent" in script
 
 
+def test_the_script_reads_the_grant_wire_shape() -> None:
+    # The API carries a request's grant as the TOP-LEVEL entry field (board.py
+    # strips it out of request_json at post time); the page once read
+    # `entry.request.grant`, the secret input never rendered and approving a
+    # secret grant failed 422 with no way to type the value (found 12.11).
+    script = (STATIC / "board.js").read_text(encoding="utf-8")
+    assert "request.grant" not in script
+    assert "entry.grant" in script
+
+
 def test_the_infra_switch_panel_is_in_the_shell():
     # T-057: the operator's one control over the executor rides the page shell;
     # its calls go through the same api() helper (X-Operator-Key), never a sink.
