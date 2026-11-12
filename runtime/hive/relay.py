@@ -29,7 +29,7 @@ METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 BODY_MAX = 32_000  # chars of the answer handed back to the agent
 TIMEOUT_S = 20.0
 
-# The file mode (ADR-052): responses saved to and uploads read from one shared
+# The file mode (ADR-053): responses saved to and uploads read from one shared
 # volume both the hive and the Last Order container mount. Files are the agent's
 # data, never secrets — the vault value still only ever lives inside `fill()`.
 ARTIFACTS_ROOT = Path(os.environ.get("RELAY_ARTIFACTS_DIR") or "/artifacts")
@@ -117,7 +117,7 @@ class Relay:
             if not any(k.lower() == "content-type" for k in headers):
                 headers = {**headers, "Content-Type": "application/json"}
 
-        # the file mode (ADR-052): exactly one of save/upload/plain per call
+        # the file mode (ADR-053): exactly one of save/upload/plain per call
         save_path = self._artifact_path(save_to) if save_to is not None else None
         if upload_file is not None:
             if content is not None:

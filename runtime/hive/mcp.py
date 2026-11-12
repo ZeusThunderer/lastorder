@@ -772,7 +772,7 @@ def build_mcp(
         never see the value. `body`: a string, or an object sent as JSON. Returns
         {status, content_type, body}.
 
-        The file mode (ADR-052): `save_to="name.png"` writes the RESPONSE bytes to
+        The file mode (ADR-053): `save_to="name.png"` writes the RESPONSE bytes to
         `/artifacts/name.png` and returns {status, content_type, path, size} — the
         body does not enter your context (b64 image answers and file downloads).
         `upload_file="name.png"` (POST only, mutually exclusive with `body`) sends

@@ -29,7 +29,7 @@ def vault(tmp_path):
     grants.close()
 
 
-def _relay(grants, log, handler):
+def _relay(grants, log, handler, tmp_path=None):
     seen: list[httpx.Request] = []
 
     def wrapped(request: httpx.Request) -> httpx.Response:
@@ -38,6 +38,7 @@ def _relay(grants, log, handler):
 
     relay = Relay(
         grants, log=log,
+        artifacts_root=tmp_path / "artifacts" if tmp_path is not None else None,
         transport=lambda: httpx.Client(transport=httpx.MockTransport(wrapped)),
     )
     return relay, seen
@@ -130,3 +131,88 @@ def test_transport_error_is_redacted(vault):
         )
     assert err.value.status == 502
     assert TOKEN not in err.value.message
+
+
+# --- the file mode (ADR-053) ---------------------------------------------------------
+
+
+def test_save_to_writes_response_bytes_under_the_root(vault, tmp_path):
+    grants, log, _ = vault
+    payload = b"\x89PNG\r\n\x1a\n" + b"0" * 1024
+
+    def handler(request):
+        return httpx.Response(200, content=payload, headers={"content-type": "image/png"})
+
+    relay, _ = _relay(grants, log, handler, tmp_path)
+    out = relay.fetch("last-order", "GET", "https://api.telegram.org/file.png", save_to="shot.png")
+    saved = tmp_path / "artifacts" / "shot.png"
+    assert out["status"] == 200 and out["size"] == len(payload)
+    assert out["path"] == str(saved) and out["content_type"] == "image/png"
+    assert saved.read_bytes() == payload
+    assert "body" not in out  # the point: bytes never ride into the agent context
+
+
+def test_save_to_rejects_bad_names_and_paths(vault, tmp_path):
+    grants, log, _ = vault
+    relay, _ = _relay(grants, log, lambda r: httpx.Response(200), tmp_path)
+    for bad in ("../etc/passwd", "sub/dir.png", "", "x" * 101, "спутник.png", 42):
+        with pytest.raises(GrantError) as err:
+            relay.fetch("last-order", "GET", "https://api.telegram.org/x", save_to=bad)
+        assert err.value.status == 422
+
+
+def test_save_to_caps_the_size(vault, tmp_path):
+    import runtime.hive.relay as relay_mod
+
+    grants, log, _ = vault
+    big = b"0" * (relay_mod.SAVE_MAX_BYTES + 1)
+    relay, _ = _relay(grants, log, lambda r: httpx.Response(200, content=big), tmp_path)
+    with pytest.raises(GrantError) as err:
+        relay.fetch("last-order", "GET", "https://api.telegram.org/big", save_to="big.bin")
+    assert err.value.status == 507
+    assert not (tmp_path / "artifacts" / "big.bin").exists()
+
+
+def test_upload_file_sends_multipart_with_fields_and_secrets(vault, tmp_path):
+    grants, log, _ = vault
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "shot.png").write_bytes(b"\x89PNG-fake")
+
+    def handler(request):
+        body = request.content.decode("utf-8", "replace")
+        return httpx.Response(200, json={"ok": True, "seen": body[:200]})
+
+    relay, seen = _relay(grants, log, handler, tmp_path)
+    out = relay.fetch(
+        "last-order", "POST",
+        "https://api.telegram.org/bot{{secret:telegram_bot_token}}/sendPhoto",
+        fields={"chat_id": "@lastorder", "caption": "пост сети"},
+        upload_file="shot.png", upload_part="photo",
+    )
+    sent = seen[0]
+    assert out["status"] == 200
+    assert b"\x89PNG-fake" in sent.content
+    assert b'name="photo"' in sent.content and b'name="chat_id"' in sent.content
+    assert TOKEN in str(sent.url)                  # filled server-side, in the url path
+    assert TOKEN.encode() not in sent.content      # ...and never inside the multipart fields
+    assert TOKEN not in out["body"] and "{{secret:" not in out["body"]  # redacted back
+
+
+def test_upload_file_refuses_body_and_missing_or_escaped_files(vault, tmp_path):
+    grants, log, _ = vault
+    relay, _ = _relay(grants, log, lambda r: httpx.Response(200), tmp_path)
+    with pytest.raises(GrantError) as err:  # body and upload_file are exclusive
+        relay.fetch("last-order", "POST", "https://api.telegram.org/sendPhoto",
+                    body={"x": "1"}, upload_file="shot.png")
+    assert err.value.status == 422
+    with pytest.raises(GrantError) as err:  # the file must exist in /artifacts
+        relay.fetch("last-order", "POST", "https://api.telegram.org/sendPhoto",
+                    upload_file="missing.png")
+    assert err.value.status == 422
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"x")
+    with pytest.raises(GrantError) as err:  # a path outside the volume is refused
+        relay.fetch("last-order", "POST", "https://api.telegram.org/sendPhoto",
+                    upload_file=str(outside))
+    assert err.value.status == 422

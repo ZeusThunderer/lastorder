@@ -519,7 +519,7 @@ services:
       - knowledge:/knowledge
       - hive-run:/hive-run   # not over the image's system /run (review R1-6)
       - hive-work:/lo-workplace:ro   # Last Order's workshop/, read by publish_tool (T-047)
-      - artifacts:/artifacts   # the relay's save_to/upload_file tree (ADR-052)
+      - artifacts:/artifacts   # the relay's save_to/upload_file tree (ADR-053)
     networks: [default, svc-1, svc-2, svc-3, svc-lo, infra-net]   # infra-net: the executor alone
     restart: unless-stopped
     logging: *default-logging
@@ -605,7 +605,7 @@ services:
     volumes:
       - hive-work:/workplace
       - knowledge:/knowledge:ro
-      # the file mode of http_request (ADR-052): the same tree the relay writes —
+      # the file mode of http_request (ADR-053): the same tree the relay writes —
       # her files from save_to land here, her uploads for sendPhoto come from here
       - artifacts:/artifacts
       # the network's journals, read-only (T-064): the desk cuts video by the journals'
@@ -889,7 +889,7 @@ volumes:
   workplaces-2:
   workplaces-3:
   footage:
-  # the file mode of http_request (ADR-052): relay saves/uploads agent files here;
+  # the file mode of http_request (ADR-053): relay saves/uploads agent files here;
   # mounted rw in hive (the relay writes) and last-order (she reads/writes), never
   # in a sister sandbox (ADR-033 unchanged)
   artifacts:

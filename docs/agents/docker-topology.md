@@ -195,6 +195,10 @@ bash dev/board_chat_run.sh up
   из `ZAI_API_KEY` в `.env`, compose отдаёт в `last-order`, entrypoint материализует
   root-only копию в tmpfs (`ZAI_KEY_FILE`) и вычищает из окружения. В env процесса
   агента ключа нет.
+- Файловый режим `http_request` (ADR-053): `save_to`/`upload_file` работают с общим
+  томом `artifacts:/artifacts` — rw в `hive` (там живёт реле) и `last-order` (её файлы),
+  сёстрам не монтируется. Имя файла — плоское `A-Za-z0-9._-` до 100 символов, лимит
+  25 МБ; значений секретов на диске нет — vault подставляет серверной стороной.
 
 ## Запуск (E1)
 - `docker compose -f docker/compose.yml up -d mc-server body-1`, затем `up mind-1` — проба `tools/body_probe.py`.
