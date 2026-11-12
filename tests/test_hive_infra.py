@@ -543,6 +543,24 @@ def test_run_steps_stops_at_the_first_failure() -> None:
     assert "no such service" in transcript and "(exit 1)" in transcript
 
 
+def test_mc_restart_ends_with_the_world_gc() -> None:
+    """The world runs on demand (ADR-050): a restart with no body playing ends by
+    stopping the world again, like every body stop does — not a world left alone."""
+    steps = bridge.commands_for("mc_restart", {})
+    assert len(steps) == 2  # restart, then the gc step
+    # the restart succeeds; the gc's ps shows the world up and no body -> it stops
+    runner, calls = fake_runner([
+        {"out": ""},
+        {"out": "mc-server"},
+        {"out": ""},
+    ])
+    ok, transcript = bridge.run_steps(steps, runner=runner)
+    assert ok
+    assert "no body left: the home world stopped" in transcript
+    assert calls[0][-2:] == ["restart", "mc-server"]
+    assert calls[-1][-2:] == ["stop", "mc-server"]
+
+
 def test_process_reports_done_and_failed_with_the_tail() -> None:
     hive = FakeHive(pending=[request_of(41, "status", {})])
     runner, _ = fake_runner([{"out": "Name  State\nmc-server  running"}])

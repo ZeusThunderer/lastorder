@@ -140,7 +140,9 @@ def commands_for(action: str, args: dict[str, str], *, project: str = "") -> lis
         return Step(["(stop the home world when no body is left)"], fn=_world_gc(every))
 
     if action == "mc_restart":
-        return [Step(compose + ["restart", "mc-server"])]
+        # the world runs on demand (ADR-050): a restart that finds no body playing
+        # ends with the same gc as every body stop — not a world left running alone
+        return [Step(compose + ["restart", "mc-server"]), world_gc()]
     if action == "status":
         return [Step(every + ["ps", "-a", "--format", STATUS_FORMAT])]
     if action == "logs":
