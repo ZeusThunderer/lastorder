@@ -8,6 +8,9 @@
 set -uo pipefail
 . "$(dirname "$0")/_common.sh"
 
+# The stand lock is taken by task ids and by free-form holders (e.g. "zcode"), unlike check_id.
+stand_id() { [[ "$1" =~ ^[a-zA-Z0-9._-]+$ ]] || die "bad stand id '$1'"; }
+
 LOCKF="$COMMON/lo-stand.lock"
 STALE="${STAND_LOCK_STALE_MIN:-120}"
 cmd="${1:-status}"; id="${2:-}"
@@ -19,7 +22,7 @@ case "$cmd" in
   status)
     if [ -f "$LOCKF" ]; then echo "$(holder) $(age_min) min"; else echo free; fi ;;
   lock)
-    check_id "$id"
+    stand_id "$id"
     if [ -f "$LOCKF" ] && [ "$(holder)" != "$id" ]; then
       if [ "$(age_min)" -ge "$STALE" ]; then
         echo "stand: removing stale lock of $(holder) ($(age_min) min)" >&2
@@ -30,7 +33,7 @@ case "$cmd" in
     fi
     echo "$id $(date +%s)" > "$LOCKF" && echo "stand: locked by $id" ;;
   unlock)
-    check_id "$id"
+    stand_id "$id"
     if [ "$(holder)" = "$id" ]; then rm -f "$LOCKF" && echo "stand: released by $id"
     else echo "stand: not held by $id ($(holder || echo free))" >&2; fi ;;
   *) die "usage: dev/stand.sh lock|unlock T-NNN | status" ;;
