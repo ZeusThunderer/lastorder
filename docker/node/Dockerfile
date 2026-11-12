@@ -108,3 +108,7 @@ FROM base AS lo
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+# the shared artifacts volume (ADR-053): a named volume inherits the image's
+# dir on first mount — pre-seed the owner so the desk's bash (sister, 1001)
+# can write there from the start; the relay (hive, root) reads anything
+RUN mkdir -p /artifacts && chown 1001:1001 /artifacts
