@@ -42,6 +42,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from runtime.hive.infra import (  # noqa: E402  (dev/ is not a package; same trick as tests)
     BODY_KINDS,
+    BODY_NONE,
     DEFAULT_BODY_KIND,
     INFRA_ACTIONS,
     LINES_DEFAULT,
@@ -58,6 +59,10 @@ GRACE_S = 420  # the body healthcheck budget, same number as dev/slot_restart.sh
 # In .stand/ — the one repo directory the infra container may write (ADR-050).
 SERVERS_FILE = ROOT / ".stand" / "servers.env"
 HOME_SERVER = "mc-server:25565"
+# Whether a slot wears a body (ADR-054): Last Order's body_up/body_down, recorded here
+# the same way — up.sh lifts BODY_KIND_N into the slot's mind; no line means .env,
+# and nothing at all means a bodiless mind.
+BODIES_FILE = ROOT / ".stand" / "bodies.env"
 # the poll loop touches it every round; the infra container's healthcheck reads its age
 HEARTBEAT_FILE = Path(os.environ.get("INFRA_HEARTBEAT", "") or (ROOT / ".stand" / "heartbeat"))
 
@@ -86,6 +91,35 @@ def server_of(slot: str, *, servers: Path | None = None, env_file: Path | None =
     return env_file_value(key, env_file) or HOME_SERVER
 
 
+def body_of(slot: str, *, bodies: Path | None = None, env_file: Path | None = None) -> str:
+    """The body slot N wears: Last Order's recorded choice, else BODY_KIND_N of the
+    root .env, else none (ADR-054) — the same order docker/node/up.sh reads them."""
+    key = f"BODY_KIND_{slot}"
+    try:
+        for line in (bodies or BODIES_FILE).read_text(encoding="utf-8").splitlines():
+            if line.startswith(f"{key}="):
+                return line.split("=", 1)[1].strip() or BODY_NONE
+    except OSError:
+        pass
+    return env_file_value(key, env_file) or BODY_NONE
+
+
+def record_body(slot: str, kind: str, path: Path | None = None) -> None:
+    """Keep the network's choice for later restarts: one BODY_KIND_N line per slot,
+    `none` included (it must outvote a .env default)."""
+    path = path or BODIES_FILE
+    key = f"BODY_KIND_{slot}"
+    lines = []
+    if path.exists():
+        lines = [
+            line for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith(f"{key}=")
+        ]
+    lines.append(f"{key}={kind}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(sorted(lines)) + "\n", encoding="utf-8", newline="\n")
+
+
 def bash_argv(script: Path, *rest: str) -> list[str]:
     """`bash <script> …` with a bash that can read the script's path.
 
@@ -106,12 +140,17 @@ def bash_argv(script: Path, *rest: str) -> list[str]:
     return [exe, script.as_posix(), *rest]
 
 
-def commands_for(action: str, args: dict[str, str], *, project: str = "") -> list[Step]:
+def commands_for(
+    action: str, args: dict[str, str], *, project: str = "", actor: str = ""
+) -> list[Step]:
     """The argv sequence of one action — the whole docker surface of the bridge.
 
-    ADR-050: a slot is node-N + mind-N; the body is the mind's (it asks for body_up /
-    body_restart itself); the home world `mc-server` runs on demand — raised before a
-    body that plays there, stopped when no body is left."""
+    ADR-050: a slot is node-N + mind-N; a mind with a body asks for body_up /
+    body_restart itself; the home world `mc-server` runs on demand — raised before a
+    body that plays there, stopped when no body is left. ADR-054: whether a slot wears
+    a body at all is the network's choice — Last Order's (or the operator's) body_up
+    and body_down are recorded and the mind is restarted to match; a slot's own mind
+    (`actor` runner:…) never re-attaches a body the network took away."""
     if action not in INFRA_ACTIONS:
         raise InfraError(f"unknown action {action!r}")
     # posix paths throughout: `bash` and `docker` both take forward slashes, while
@@ -150,6 +189,41 @@ def commands_for(action: str, args: dict[str, str], *, project: str = "") -> lis
         return [Step(every + ["logs", "--tail", lines, args["service"]])]
     slot = args["slot"]
     bodies = [service.format(slot=slot) for service in BODY_KINDS.values()]
+    by_runner = actor.startswith("runner:")
+    wears = body_of(slot)
+
+    def mind_wears(kind: str) -> Step:
+        """Record what slot N wears; restart its mind when that changed (ADR-054) —
+        a mind restart keeps the sister alive (T-072: her runner re-arms the clock)."""
+        mind = f"mind-{slot}"
+
+        def run(runner: Callable[..., subprocess.CompletedProcess]) -> tuple[bool, str]:
+            record_body(slot, kind)
+            note = f"slot {slot} wears: {kind}"
+            if kind == wears:
+                return True, note + " (as before)"
+            ps = runner(
+                every + ["ps", "--status", "running", "--services"],
+                cwd=str(ROOT), env=dict(os.environ), capture_output=True, text=True,
+                timeout=STEP_TIMEOUT_S,
+            )
+            if ps.returncode != 0:
+                return False, note + "\n" + ((ps.stdout or "") + (ps.stderr or "")).strip()
+            if mind not in (ps.stdout or "").split():
+                return True, note + f"; {mind} is down — it starts with this at the next slot_up"
+            proc = runner(
+                up + ["--force-recreate", "--no-deps", mind],
+                cwd=str(ROOT), env={**os.environ, **up_env, f"BODY_KIND_{slot}": kind},
+                capture_output=True, text=True, timeout=STEP_TIMEOUT_S,
+            )
+            out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+            if proc.returncode != 0:
+                return False, note + f"; {mind} restart failed (exit {proc.returncode})\n" + out
+            return True, note + f"; {mind} restarted to match, the sister lives on" + (
+                "\n" + out if out else ""
+            )
+
+        return Step([f"(slot {slot} wears {kind}: record it, restart {mind} if it changed)"], fn=run)
     if action == "slot_up":
         # the mind first (healthy), then the sister; the mind raises its own body
         return [
@@ -169,11 +243,27 @@ def commands_for(action: str, args: dict[str, str], *, project: str = "") -> lis
         # re-arms the life clock (T-072) and the mind reconnects to its body
         return [Step(up + ["--force-recreate", "--no-deps", f"mind-{slot}"], env=up_env)]
     if action == "body_up":
-        service = body_service(slot, args.get("kind") or DEFAULT_BODY_KIND)
-        return [*world_up(server_of(slot)), Step(up + ["--no-deps", service], env=up_env)]
+        kind = args.get("kind") or DEFAULT_BODY_KIND
+        if by_runner and wears == BODY_NONE:
+            raise InfraError(
+                f"slot {slot} wears no body (the network's choice): only Last Order or the "
+                "operator attaches one"
+            )
+        service = body_service(slot, kind)
+        return [
+            *world_up(server_of(slot)),
+            Step(up + ["--no-deps", service], env=up_env),
+            mind_wears(kind),
+        ]
     if action == "body_down":
-        return [Step(every + ["stop", *bodies]), world_gc()]
+        steps = [Step(every + ["stop", *bodies]), world_gc()]
+        # the network's detach is recorded; a slot's own runner only stops the body
+        return steps if by_runner else [*steps, mind_wears(BODY_NONE)]
     if action == "body_restart":
+        if wears == BODY_NONE:
+            raise InfraError(
+                f"slot {slot} wears no body: body_up {{slot, kind}} attaches one"
+            )
         # the T-053 recreate: a fresh body connects at once, a restarted worn one may not
         return [
             *world_up(server_of(slot)),
@@ -186,6 +276,10 @@ def commands_for(action: str, args: dict[str, str], *, project: str = "") -> lis
         # it; the login password a foreign server asks for stays the operator's
         # MC_LOGIN_PASSWORD_N in .env (a secret, ADR-041).
         host = args["server"]
+        if wears == BODY_NONE:
+            # no body to move: the address waits for the slot's next body_up
+            note = f"slot {slot} wears no body: {host} is recorded for its next body_up"
+            return [Step([f"(record {host} for slot {slot})"], fn=lambda runner: (True, note))]
         return [
             *world_up(host),
             Step(
@@ -323,7 +417,7 @@ def process(
     action, args = payload.get("action", ""), payload.get("args") or {}
     try:
         cleaned = check_infra(action, args)
-        steps = commands_for(action, cleaned, project=project)
+        steps = commands_for(action, cleaned, project=project, actor=str(request.get("from") or ""))
     except InfraError as exc:
         note = f"refused by the closed set: {exc}"
         echo(f"#{entry_id} {action}: {note}")

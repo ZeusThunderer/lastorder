@@ -299,6 +299,10 @@ services:
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder01
+      # ADR-054: whether this slot wears a body is the network's decision — the
+      # executor records Last Order's body_up/body_down in .stand/bodies.env and
+      # up.sh lifts it; a slot nobody gave a body runs a bodiless mind
+      BODY_KIND: "${BODY_KIND_1:-none}"
       BODY_HOST: 10.250.1.2        # the body's relay on link-1 (ADR-050); a name would resolve off the link
       BODY_PORT: "25433"
       CALLBACK_ADDRESS: 10.250.1.3   # uc's callback arrives here, relayed by the body
@@ -372,6 +376,10 @@ services:
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder02
+      # ADR-054: whether this slot wears a body is the network's decision — the
+      # executor records Last Order's body_up/body_down in .stand/bodies.env and
+      # up.sh lifts it; a slot nobody gave a body runs a bodiless mind
+      BODY_KIND: "${BODY_KIND_2:-none}"
       BODY_HOST: 10.250.2.2        # the body's relay on link-2 (ADR-050); a name would resolve off the link
       BODY_PORT: "25433"
       CALLBACK_ADDRESS: 10.250.2.3   # uc's callback arrives here, relayed by the body
@@ -438,6 +446,10 @@ services:
     environment:
       <<: *mind-env
       MC_USERNAME: LastOrder03
+      # ADR-054: whether this slot wears a body is the network's decision — the
+      # executor records Last Order's body_up/body_down in .stand/bodies.env and
+      # up.sh lifts it; a slot nobody gave a body runs a bodiless mind
+      BODY_KIND: "${BODY_KIND_3:-none}"
       BODY_HOST: 10.250.3.2        # the body's relay on link-3 (ADR-050); a name would resolve off the link
       BODY_PORT: "25433"
       CALLBACK_ADDRESS: 10.250.3.3   # uc's callback arrives here, relayed by the body

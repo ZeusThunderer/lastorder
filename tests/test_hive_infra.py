@@ -419,6 +419,16 @@ sys.modules["infra_bridge"] = bridge
 SPEC.loader.exec_module(bridge)
 
 
+@pytest.fixture(autouse=True)
+def worn_bodies(tmp_path, monkeypatch):
+    """Every slot wears a minecraft body unless a test says otherwise (ADR-054): the
+    bridge never reads the real stand's .stand/bodies.env from a test."""
+    path = tmp_path / "bodies.env"
+    path.write_text("BODY_KIND_1=minecraft\nBODY_KIND_2=minecraft\nBODY_KIND_3=minecraft\n", encoding="utf-8")
+    monkeypatch.setattr(bridge, "BODIES_FILE", path)
+    return path
+
+
 def fake_runner(results):
     """Returns queued CompletedProcess-like results; records every argv it got."""
     calls = []
@@ -490,7 +500,8 @@ def test_a_body_at_home_raises_the_world_first_and_a_foreign_one_does_not(tmp_pa
     monkeypatch.setattr(bridge, "SERVERS_FILE", servers)
     monkeypatch.setattr(bridge, "env_file_value", lambda name, path=None: "")
     home = bridge.commands_for("body_up", {"slot": "2", "kind": "minecraft"})
-    assert home[0].argv[-2:] == ["--no-deps", "mc-server"] and home[-1].argv[-2:] == ["--no-deps", "body-2"]
+    assert home[0].argv[-2:] == ["--no-deps", "mc-server"] and home[-2].argv[-2:] == ["--no-deps", "body-2"]
+    assert home[-1].fn is not None  # then the slot's choice is recorded (ADR-054)
     servers.write_text("MC_SERVER_2=raid.example:25565\n", encoding="utf-8")
     away = bridge.commands_for("body_restart", {"slot": "2"})
     assert [s.argv[-3:] for s in away] == [["--force-recreate", "--no-deps", "body-2"]]
@@ -663,6 +674,85 @@ def test_a_move_is_recorded_and_home_clears_it(tmp_path: Path) -> None:
     assert not f.exists()
 
 
+# --- ADR-054: whether a slot wears a body is the network's choice ---------------------------
+
+
+def test_body_of_reads_the_record_then_env_then_none(tmp_path: Path, monkeypatch) -> None:
+    bodies, env = tmp_path / "b.env", tmp_path / ".env"
+    assert bridge.body_of("1", bodies=bodies, env_file=env) == "none"  # nothing anywhere
+    env.write_text("BODY_KIND_1=minecraft\n", encoding="utf-8")
+    assert bridge.body_of("1", bodies=bodies, env_file=env) == "minecraft"
+    bridge.record_body("1", "none", bodies)  # the network's detach outvotes .env
+    bridge.record_body("2", "minecraft", bodies)
+    assert bridge.body_of("1", bodies=bodies, env_file=env) == "none"
+    assert bodies.read_text(encoding="utf-8").splitlines() == ["BODY_KIND_1=none", "BODY_KIND_2=minecraft"]
+
+
+def test_body_down_detaches_and_restarts_a_running_mind(worn_bodies) -> None:
+    steps = bridge.commands_for("body_down", {"slot": "2"}, actor="last-order")
+    assert steps[0].argv[-2:] == ["stop", "body-2"] and steps[-1].fn is not None
+    runner, calls = fake_runner([
+        {"out": ""},                         # stop body-2
+        {"out": "hive\nmind-2\nnode-2\n"},   # world gc: no world running
+        {"out": "hive\nmind-2\nnode-2\n"},   # the mind is running ...
+        {"out": ""},                         # ... so it is recreated bodiless
+    ])
+    ok, transcript = bridge.run_steps(steps, runner=runner)
+    assert ok, transcript
+    assert "BODY_KIND_2=none" in worn_bodies.read_text(encoding="utf-8")
+    assert calls[-1][-3:] == ["--force-recreate", "--no-deps", "mind-2"]
+    assert "the sister lives on" in transcript
+
+
+def test_body_up_on_a_bodiless_slot_attaches_and_a_down_mind_waits(worn_bodies, monkeypatch) -> None:
+    monkeypatch.setattr(bridge, "server_of", lambda slot, **kw: bridge.HOME_SERVER)
+    bridge.record_body("3", "none")
+    steps = bridge.commands_for("body_up", {"slot": "3", "kind": "minecraft"}, actor="last-order")
+    runner, calls = fake_runner([
+        {"out": ""}, {"out": "wcid\n"}, {"out": "healthy"},  # the home world
+        {"out": ""},                                         # body-3 up
+        {"out": "hive\nmc-server\nbody-3\n"},                # mind-3 not running
+    ])
+    ok, transcript = bridge.run_steps(steps, runner=runner)
+    assert ok, transcript
+    assert "BODY_KIND_3=minecraft" in worn_bodies.read_text(encoding="utf-8")
+    assert "next slot_up" in transcript and not any("mind-3" in c for c in calls)
+
+
+def test_a_slots_own_mind_never_reattaches_a_detached_body() -> None:
+    bridge.record_body("1", "none")
+    with pytest.raises(bridge.InfraError, match="network's choice"):
+        bridge.commands_for("body_up", {"slot": "1", "kind": "minecraft"}, actor="runner:LastOrder01")
+    with pytest.raises(bridge.InfraError, match="body_up"):
+        bridge.commands_for("body_restart", {"slot": "1"}, actor="last-order")
+    # a runner's body_down only stops the body: the choice stays the network's
+    steps = bridge.commands_for("body_down", {"slot": "2"}, actor="runner:LastOrder02")
+    assert all(s.fn is None or "world" in s.argv[0] for s in steps)
+    # a bodiless slot's server move is a record for its next body, no container moves
+    move = bridge.commands_for("slot_server", {"slot": "1", "server": "raid.example"})
+    assert len(move) == 1 and move[0].fn is not None
+    ok, text = bridge.run_steps(move, runner=fake_runner([])[0])
+    assert ok and "next body_up" in text
+
+
+def test_process_hands_the_requester_to_the_bridge(monkeypatch) -> None:
+    bridge.record_body("2", "none")
+    hive = FakeHive(pending=[{"id": 51, "from": "runner:LastOrder02",
+                              "request": {"action": "body_up", "args": {"slot": "2", "kind": "minecraft"}}}])
+    runner, calls = fake_runner([])
+    bridge.process(hive, hive.pending[0], project="", dry=False, runner=runner)
+    assert calls == [] and hive.posts[-1][1]["ok"] is False
+    assert "network's choice" in hive.posts[-1][1]["text"]
+
+
+def test_up_sh_lifts_the_recorded_bodies_before_env() -> None:
+    text = (Path(__file__).resolve().parent.parent / "docker" / "node" / "up.sh").read_text(encoding="utf-8")
+    assert text.index(".stand/bodies.env") < text.index("lift BODY_KIND_1")
+    compose = (Path(__file__).resolve().parent.parent / "docker" / "compose.yml").read_text(encoding="utf-8")
+    for n in (1, 2, 3):
+        assert f'BODY_KIND: "${{BODY_KIND_{n}:-none}}"' in compose  # bodiless by default
+
+
 def test_the_key_comes_from_the_root_env_file(tmp_path: Path) -> None:
     env = tmp_path / ".env"
     env.write_text('OTHER=1\nHIVE_INFRA_KEY="k-123"\n', encoding="utf-8")
@@ -689,3 +779,31 @@ def test_the_desk_gets_every_dir_its_manual_points_at() -> None:
     for path in set(re.findall(r"`(reference|skills)/[^`]+`", manual)):
         assert path in admin.CORE_DIRS, path
     assert (admin.WORKPLACE_TEMPLATE / "reference" / "video-tools.md").exists()
+
+
+def test_life_rule_is_last_orders_and_bounded(stack: Stack) -> None:
+    """ADR-054: the length of a life is the network's rule — Last Order sets it per
+    slot within the stand's bounds; a sister's key opens nothing."""
+    from runtime.hive.app import CommsBook, HiveService
+    from runtime.hive.lifecycle import Lifecycle
+
+    lifecycle = Lifecycle(stack.store, log=stack.log, run_dir=stack.run_dir, clock=stack.clock)
+    mcp = HiveMcp(
+        stack.store, lifecycle,
+        HiveService(stack.store, lifecycle, CommsBook(lifecycle, log=stack.log, clock=stack.clock)),
+        ProposalBook(stack.store, now=lambda: stack.clock().isoformat()),
+        CommonLayers(stack.store, now=lambda: stack.clock().isoformat()),
+        node_keys={KEY1: "LastOrder01"}, lo_key=KEY_LO,
+        run_dir=stack.run_dir, log=stack.log, board=stack.board,
+    )
+    view = mcp.life_rule(fake_ctx(KEY_LO))
+    assert view["ttl_min"] == {} and view["default_min"] == 45 and view["bounds_min"] == [5, 90]
+    assert mcp.life_rule(fake_ctx(KEY_LO), 2, 20)["ttl_min"] == {"LastOrder02": 20}
+    assert lifecycle.birth("LastOrder02", traits()).ttl_min == 20
+    with pytest.raises(Exception, match="bounds"):
+        mcp.life_rule(fake_ctx(KEY_LO), 2, 500)
+    with pytest.raises(Exception, match="slot"):
+        mcp.life_rule(fake_ctx(KEY_LO), 7, 20)
+    assert mcp.life_rule(fake_ctx(KEY_LO), 2, 0)["ttl_min"] == {}  # back to the default
+    with pytest.raises(Exception):
+        mcp.life_rule(fake_ctx(KEY1), 2, 20)

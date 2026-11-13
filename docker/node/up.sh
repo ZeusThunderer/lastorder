@@ -65,6 +65,21 @@ fi
 lift MC_SERVER_1
 lift MC_SERVER_2
 lift MC_SERVER_3
+# Whether a slot wears a body (ADR-054): the network's decision, recorded by the
+# executor in $ROOT/.stand/bodies.env on Last Order's body_up/body_down — it wins over
+# .env, env wins over both; nothing anywhere means a bodiless mind (compose default).
+if [ -f "$ROOT/.stand/bodies.env" ]; then
+  for n in 1 2 3; do
+    eval "cur=\"\${BODY_KIND_${n}:-}\""
+    if [ -z "$cur" ]; then
+      val="$(sed -n "s/^BODY_KIND_${n}=//p" "$ROOT/.stand/bodies.env" | head -1 | tr -d '\r')"
+      [ -n "$val" ] && export "BODY_KIND_${n}=$val"
+    fi
+  done
+fi
+lift BODY_KIND_1
+lift BODY_KIND_2
+lift BODY_KIND_3
 # per-slot stand switches compose reads only from this process (it never sees the root
 # .env): the camera (T-063) and the post-login skin command (T-061); the chat topics
 # path (ADR-048) — empty in .env turns the filter off
