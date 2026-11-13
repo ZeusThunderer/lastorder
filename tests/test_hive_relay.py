@@ -187,7 +187,7 @@ def test_upload_file_sends_multipart_with_fields_and_secrets(vault, tmp_path):
     out = relay.fetch(
         "last-order", "POST",
         "https://api.telegram.org/bot{{secret:telegram_bot_token}}/sendPhoto",
-        fields={"chat_id": "@lastorder", "caption": "пост сети"},
+        fields={"chat_id": "{{secret:telegram_bot_token}}", "caption": "пост сети"},
         upload_file="shot.png", upload_part="photo",
     )
     sent = seen[0]
@@ -195,8 +195,8 @@ def test_upload_file_sends_multipart_with_fields_and_secrets(vault, tmp_path):
     assert b"\x89PNG-fake" in sent.content
     assert b'name="photo"' in sent.content and b'name="chat_id"' in sent.content
     assert TOKEN in str(sent.url)                  # filled server-side, in the url path
-    assert TOKEN.encode() not in sent.content      # ...and never inside the multipart fields
-    assert TOKEN not in out["body"] and "{{secret:" not in out["body"]  # redacted back
+    assert TOKEN.encode() in sent.content          # ...and in a field (a secret chat_id)
+    assert TOKEN not in out["body"]                # the echo is redacted back
 
 
 def test_upload_file_refuses_body_and_missing_or_escaped_files(vault, tmp_path):

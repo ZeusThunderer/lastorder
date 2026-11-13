@@ -136,7 +136,9 @@ class Relay:
         else:
             upload_path = None
 
-        names = _placeholders(url, content or "", *headers.values())
+        # fields too: a multipart chat_id rides as {{secret:…}} (2026-11-13: a KeyError)
+        names = _placeholders(url, content or "", *headers.values(),
+                              *(fields.values() if isinstance(fields, dict) else ()))
         values = {name: self._grants.secret_of(name) for name in names}
 
         def fill(text: str) -> str:
