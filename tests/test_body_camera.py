@@ -32,9 +32,12 @@ def test_media_service_is_pinned_and_internal():
     svc = COMPOSE["services"]["media"]
     assert svc["image"] == "bluenviron/mediamtx:1.21.3"   # pinned, never latest
     assert svc["restart"] == "unless-stopped"   # the core (ADR-050)
-    assert svc["networks"] == ["media-net"]
-    assert "ports" not in svc   # nothing reaches media from the host
+    # ADR-051: media-host is the empty carrier of the loopback RTSP publish; the
+    # playback API and the agent access stay on the internal media-net only
+    assert svc["networks"] == ["media-net", "media-host"]
     assert COMPOSE["networks"]["media-net"]["internal"] is True
+    assert COMPOSE["networks"]["media-host"] == {}
+    assert svc["ports"] == ["127.0.0.1:8554:8554"]   # loopback RTSP only (ADR-051)
     assert "footage" in COMPOSE["volumes"]
 
 

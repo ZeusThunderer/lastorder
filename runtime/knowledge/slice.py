@@ -24,6 +24,7 @@ from runtime.knowledge.budget import (
     INHERITANCE_TERMS,
     INHERITANCE_TERMS_TOKENS,
     INHERITANCE_WILLS,
+    INHERITANCE_WILL_TOKENS,
     PREDECESSOR_LINES,
     VOTE_CANDIDATES,
     estimate_tokens,
@@ -197,8 +198,27 @@ def build_inheritance(
                 break
     predecessors = "\n".join(predecessor_block(older))
 
-    # K latest wills; each body is capped at WILL_BODY_MAX_TOKENS at write time (schema)
-    notes = "\n\n".join(will.body for _, will in dead_sorted[:INHERITANCE_WILLS])
+    # K latest wills, each trimmed to its head: a stored will carries up to
+    # WILL_BODY_MAX_TOKENS (operator 2026-11-13: 1000-1500 characters), the birth
+    # slice still binds B_INHERITANCE — the KB-side construction is to be refined
+    # later (operator), until then the heir reads the head; the full text is in
+    # the registry (nodes/<serial>/will.md)
+    trimmed: list[str] = []
+    for _, will in dead_sorted[:INHERITANCE_WILLS]:
+        kept: list[str] = []
+        for line in will.body.split("\n"):
+            if estimate_tokens("\n".join(kept + [line])) > INHERITANCE_WILL_TOKENS:
+                if kept:  # the head ends here, the marker says it is a head
+                    kept[-1] += " …"
+                else:  # a single line over the budget: hard char cut
+                    cut = len(line)
+                    while cut > 1 and estimate_tokens(line[:cut]) > INHERITANCE_WILL_TOKENS:
+                        cut = int(cut * 0.9)
+                    kept.append(line[:cut].rstrip() + " …")
+                break
+            kept.append(line)
+        trimmed.append("\n".join(kept))
+    notes = "\n\n".join(trimmed)
 
     term_lines = [f"{claim} — {key}" for claim, key in terms[:INHERITANCE_TERMS]]
     while term_lines and not _fits(term_lines, INHERITANCE_TERMS_TOKENS):

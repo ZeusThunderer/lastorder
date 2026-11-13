@@ -8,8 +8,9 @@ budgets of the step prompt, each bound to its real source (tests pin the binding
   across presets and perception modes after T-011 added the knowledge-rule variants, step
   rules and the reply format; both presets and both rules must fit);
 - B_PRIMER — PRIMER_MAX_ENTRIES records of primer/<topic>.json;
-- B_INHERITANCE — INHERITANCE_WILLS wills of at most WILL_BODY_MAX_TOKENS each, plus the
-  summaries and terms quotas;
+- B_INHERITANCE — INHERITANCE_WILLS wills of at most INHERITANCE_WILL_TOKENS each (the head
+  of a stored will; the stored cap is WILL_BODY_MAX_TOKENS), plus the summaries and terms
+  quotas;
 - B_CORE — CORE_MEMORY_LIMIT_BYTES of pure Cyrillic (the byte-heaviest case).
 
 The honest sum of the ten blocks is 4160, under STEP_INPUT_BUDGET = 4500. The ceiling was
@@ -74,10 +75,14 @@ CORE_MEMORY_LIMIT_BYTES = 1536  # core.md; hive trims on a line boundary
 
 # --- slice quotas (what hive puts into a KnowledgeSlice / Inheritance) ------------------
 
-WILL_BODY_MAX_TOKENS = 220  # any will body, LLM or emergency; bound for B_INHERITANCE
-# the length that fits whatever the letters: 0.6 tokens per char is the estimate's worst case
-WILL_BODY_SAFE_CHARS = int(WILL_BODY_MAX_TOKENS / 0.6)  # 366
-INHERITANCE_WILLS = 3  # full texts of the latest wills (K)
+WILL_BODY_MAX_TOKENS = 900  # any will body, LLM or emergency; the operator's call of 2026-11-13
+# (wills of 1000-1500 characters of text) — 0.6 tokens per Cyrillic char makes 900 ≈ 1500 chars
+WILL_BODY_SAFE_CHARS = int(WILL_BODY_MAX_TOKENS / 0.6)  # 1500
+INHERITANCE_WILLS = 3  # texts of the latest wills (K), each trimmed to INHERITANCE_WILL_TOKENS
+# The head of one will the birth slice takes, while the inheritance construction still binds
+# B_INHERITANCE. The full text lives in the registry; the KB-side slicing is to be refined
+# later (operator, 2026-11-13).
+INHERITANCE_WILL_TOKENS = 220
 INHERITANCE_SUMMARY_TOKENS = 160  # predecessors (<=10 lines) plus active nodes
 INHERITANCE_TERMS_TOKENS = 100  # collective terms, <= 10 of them
 INHERITANCE_TERMS = 10

@@ -17,7 +17,7 @@ that is the signal to compress — not to add another paragraph on top.
 
 ## will-draft.md
 
-The will you would leave if you died now: 2-4 lines, at most 366 characters, by the rules of
+The will you would leave if you died now: 3-10 lines, 1000-1500 characters, by the rules of
 skills/write-will — in Russian, the one file here that is not English, since it IS the will
 text. Rewritten at every reflection. If the will session cannot speak (a hang, a refusal),
 the runner leaves this draft as your will instead of its own template.

@@ -129,7 +129,8 @@ def test_no_name_preset_or_game_commands_baked_in():
 def test_write_will_skill_carries_the_hard_rules():
     skill = read("skills/write-will/SKILL.md")
     for needle in (
-        "2 to 4 lines",
+        "3 to 10 lines",  # the operator's 2026-11-13 call: 1000-1500 characters
+        "1000–1500 characters",
         "lesson",
         "joke",
         "submit_will",

@@ -45,7 +45,7 @@ CLAIM_MAX_CHARS = 280
 MAX_ABOUT_KEYS = 4
 MAX_CANDIDATES = 3
 WILL_MIN_LINES = 2
-WILL_MAX_LINES = 4
+WILL_MAX_LINES = 10  # the operator's call of 2026-11-13: wills of 1000-1500 characters
 
 TRIGGER_IMPORTANCE: dict[str, int] = {
     "first.seen": 3,

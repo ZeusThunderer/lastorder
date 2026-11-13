@@ -526,13 +526,14 @@ def test_staged_full_will_markdown_still_yields_its_body(tmp_path: Path) -> None
 
 
 def test_staged_body_failing_the_checks_falls_back_to_emergency(tmp_path: Path) -> None:
-    """A stage that no longer passes the body checks (here: five lines) must not
-    reach the base — the emergency will covers it, no death without a will."""
+    """A stage that no longer passes the body checks (here: eleven lines, over the
+    2-10 shape) must not reach the base — the emergency will covers it, no death
+    without a will."""
     rig = Rig(tmp_path)
     state = rig.runner._birth()
     staged = rig.cfg.pending_wills / f"{state.serial:05d}.md"
     staged.parent.mkdir(parents=True)
-    staged.write_text("раз\nдва\nтри\nчетыре\nпять", encoding="utf-8")
+    staged.write_text("\n".join(f"строка {i}" for i in range(11)), encoding="utf-8")
     rig.script(FakeProcess(code=0, output="silent"))
     rig.mind.kill()
     rig.runner._death_path(state, "game", "x", "zcode")
@@ -2115,7 +2116,7 @@ def _draft(rig: "Rig", serial: int, text: str) -> None:
 def test_the_draft_speaks_when_the_will_session_gives_up(tmp_path: Path) -> None:
     rig = Rig(tmp_path)
     state = rig.runner._birth()
-    long_tail = "Третья строка, слишком длинная для квоты наследства, " * 8
+    long_tail = "Третья строка, слишком длинная для квоты наследства, " * 32  # >900 tokens: the tail drops, the bullets stay
     _draft(rig, state.serial, "# Will draft (черновик)\n\n- Следующий узел: у воды целься на четыре блока раньше.\n"
            "- Шутка: считала дважды, второй счёт честнее.\n" + long_tail + "\n")
     rig.script(FakeProcess(code=0, output="silent"))

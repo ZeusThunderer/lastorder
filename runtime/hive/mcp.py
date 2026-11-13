@@ -319,11 +319,12 @@ class HiveMcp:
         return {"messages": [message_to_json(m) for m in self._service.comms.inbox(LO_SERIAL)]}
 
     def submit_will(self, ctx: Context, text: str) -> dict[str, Any]:
-        """Your will: the 2-4 lines of text alone — the network fills the service
-        fields (serial, dates, traits). A full will.md (frontmatter + body) is
-        accepted too: only its body is taken. Only in the will session of a sister
-        whose life is over — dead (T-028) or softly termed (ADR-052) — once; the
-        runner files it with the closing."""
+        """Your will: 2-10 lines of text (1000-1500 characters), nothing but the
+        text — the network fills the service fields (serial, dates, traits). A
+        full will.md (frontmatter + body) is accepted too: only its body is
+        taken. Only in the will session of a sister whose life is over — dead
+        (T-028) or softly termed (ADR-052) — once; the runner files it with the
+        closing."""
         serial = self._node_serial(ctx)
         headers = self._headers(ctx)
         if headers.get(RUNNER_SESSION_HEADER, "").strip().lower() != WILL_SESSION:
@@ -339,7 +340,7 @@ class HiveMcp:
         if not self._lifecycle.life_over(serial):
             _err("submit_will: the node is not dead")
         if not isinstance(text, str) or not text.strip():
-            _err("submit_will: text must be the will text (the 2-4 lines)")
+            _err("submit_will: text must be the will text (2-10 lines)")
         body = text.strip()
         if body.startswith("---"):
             # a full will.md still works (T-040 keeps the old call shape valid): only

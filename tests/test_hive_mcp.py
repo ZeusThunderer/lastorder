@@ -443,7 +443,7 @@ def test_submit_will_refuses_broken_bodies_in_one_sentence(stack: Stack) -> None
         )
 
     assert "trait numbers" in err("Урок: не ходить в горы ночью.\nШутка: жадность 7, я не просил.")
-    assert "2-4 lines" in err("один\nдва\nтри\nчетыре\nпять")
+    assert "2-10 lines" in err("\n".join(f"строка {i}" for i in range(11)))
     assert "blank lines" in err("Урок: не ходить в горы ночью.\n\nШутка: молчу.")
     out = node_call(stack, KEY1, "submit_will", {"text": WILL_BODY}, extra={"X-Runner-Session": "will"})
     assert out == {"staged": True, "serial": serial}

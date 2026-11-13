@@ -31,7 +31,8 @@ a new item.
 5. Pending votes (`knowledge()`): read the candidates and vote your observation — accept or
    reject on evidence, not politeness.
 6. Rewrite `memory/will-draft.md`: the will you would leave if you died right now, by the
-   rules of skills/write-will (2-4 lines, at most 366 characters, one lesson, one joke). If
+   rules of skills/write-will (3-10 lines, 1000-1500 characters, the lessons, the traps,
+   one joke). If
    your will session cannot speak, the runner leaves this draft as your will.
 
 ## What not to do

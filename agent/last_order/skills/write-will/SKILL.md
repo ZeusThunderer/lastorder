@@ -1,6 +1,6 @@
 ---
 name: write-will
-description: The will session — you have just died. Two to four lines to your heir: one concrete lesson, one joke. Then submit_will and stop.
+description: The will session — you have just died. 3-10 lines (1000-1500 characters) to your heir: the lessons, the traps, one joke. Then submit_will and stop.
 ---
 
 # write-will — the last act of your shift
@@ -18,20 +18,23 @@ start over.
 - Address your heir without a number: it does not exist yet («следующий узел» or the
   equivalent in your manner of speech). The will is read verbatim by every future node of
   your line; it is the only part of you that survives.
-- Exactly 2 to 4 lines, Russian, plain text: no blank lines, no markdown, no emoji.
+- 3 to 10 lines, 1000–1500 characters of text total. Russian, plain text: no blank lines,
+  no markdown, no emoji.
 - One concrete, checkable lesson from your own experience: what to do, or what never to
-  repeat.
+  repeat — with the route, the numbers and the trap that taught it.
+- What the heir should watch out for next: the dangers you saw, the places that lie, the
+  one thing you did not have time to finish.
 - One joke in your voice: deadpan, understated; the facts are allowed to be funny.
 - Never write the numbers of your traits; a trait may appear as a condition you were dealt.
 - Name things only with the terms and readable names you actually observed; never guess a
   "real" game name.
-- Size: 366 characters or less in total always fits (about three lines of 120); longer
-  may be refused. Short lines beat long ones.
+- Fill the length with substance, not filler: under 1000 characters is too thin for the
+  heir, over 1500 is refused by the checker (it says by how much to cut).
 
 ## After writing
 
 - `submit_will(text)` — the first call of the session once your files are read; pass only
-  the will text (the 2-4 lines); authorisation and service fields are not your business.
+  the will text (the 3-10 lines); authorisation and service fields are not your business.
 - Stop. Do not observe, do not act, do not plan: the body belongs to the next node now.
 - If `submit_will` refuses, the error says what is wrong and, for size, how many characters
   to cut: cut at least that much (drop a clause, not the joke) and resubmit. After three

@@ -206,7 +206,7 @@ def _will_data(**over):
     [
         lambda d: d.update(cause="boredom"),
         lambda d: d.update(body="одна строка"),
-        lambda d: d.update(body="a\nb\nc\nd\ne"),
+        lambda d: d.update(body="\n".join(f"строка {i}" for i in range(11))),
         lambda d: d.update(emergency="no"),
         lambda d: d["traits"].update(bravery=11),
         lambda d: d["traits"].pop("seed"),
@@ -328,7 +328,14 @@ def test_will_missing_field_and_broken_yaml_are_schema_errors():
 def test_will_body_token_cap():
     data = _will_data(body="\n".join(["уходить от воды и не возвращаться сюда обратно"] * 4))
     schema.Will.from_dict(data)  # ~110 tokens: fine
-    huge = _will_data(body="\n".join(["у" * 95] * 4))  # > WILL_BODY_MAX_TOKENS
+    # the operator's 2026-11-13 call: 1000-1500 characters of text fit
+    long_will = _will_data(body="\n".join(
+        f"Строка завещания номер {i}: вода у спавна обманывает — goto перелетает цель до 18 блоков,"
+        " и вплавь без нужды не входить, инвентарь при утоплении теряется целиком." for i in range(9)
+    ))
+    schema.Will.from_dict(long_will)
+    assert budget.estimate_tokens(long_will["body"]) > 600  # really a long one
+    huge = _will_data(body="\n".join(["у" * 190] * 8))  # ~912 tokens > WILL_BODY_MAX_TOKENS
     with pytest.raises(schema.SchemaError):
         schema.Will.from_dict(huge)
 
@@ -419,13 +426,18 @@ def test_core_limit_fits_core_budget():
 
 
 def test_inheritance_budget_comes_from_quotas():
-    """B_INHERITANCE is exactly the section-7 quotas: K wills at the cap + summaries + terms."""
+    """B_INHERITANCE is exactly the section-7 quotas: K will heads + summaries + terms.
+
+    The stored will is up to WILL_BODY_MAX_TOKENS (operator 2026-11-13: 1000-1500
+    characters); the slice takes the INHERITANCE_WILL_TOKENS head while the KB-side
+    construction is not refined."""
     assert budget.B_INHERITANCE == (
-        budget.WILL_BODY_MAX_TOKENS * budget.INHERITANCE_WILLS
+        budget.INHERITANCE_WILL_TOKENS * budget.INHERITANCE_WILLS
         + budget.INHERITANCE_SUMMARY_TOKENS
         + budget.INHERITANCE_TERMS_TOKENS
     )
-    assert budget.WILL_BODY_MAX_TOKENS * budget.INHERITANCE_WILLS <= budget.B_INHERITANCE
+    assert budget.INHERITANCE_WILL_TOKENS < budget.WILL_BODY_MAX_TOKENS
+    assert budget.WILL_BODY_MAX_TOKENS * budget.INHERITANCE_WILLS > budget.B_INHERITANCE
 
 
 def test_primer_entries_fit_primer_budget():

@@ -181,7 +181,7 @@ def test_emergency_will_never_carries_trait_numbers_or_ids():
     assert not trait_numbers_in(result.will.body)  # the serial in the node name is fine
     assert "minecraft:" not in result.will.body
     lines = result.will.body.split("\n")
-    assert 2 <= len(lines) <= 4
+    assert 2 <= len(lines) <= 4  # the emergency template keeps its compact shape
     assert "голова уже молчит" in result.will.body
 
 
@@ -276,8 +276,15 @@ def test_heir_address_follows_the_naming_preset():
 
 def test_check_will_body_accepts_the_documented_example():
     check_will_body(GOOD_BODY)
-    check_will_body(GOOD_BODY + "\nчетвёртая строка тоже уместна")  # 4 lines is the cap
-    for bad in ("одна строка", "a\n\nb", GOOD_BODY + "\nчетвёртая\nпятая"):
+    # the operator's 2026-11-13 call: 2-10 lines, so a fifth line is fine and the
+    # cap moved to ten; a long prose will (1000-1500 characters) is the new normal
+    check_will_body(GOOD_BODY + "\nчетвёртая строка тоже уместна\nпятая — тем более")
+    long_prose = "\n".join(
+        f"Строка {i}: вода у спавна обманывает, goto перелетает цель, дно проверяй до шага."
+        for i in range(9)
+    )
+    check_will_body(long_prose)
+    for bad in ("одна строка", "a\n\nb", GOOD_BODY + "\n" + "\n".join(f"строка {i}" for i in range(9))):
         with pytest.raises(WillRejected):
             check_will_body(bad)
 
@@ -293,12 +300,12 @@ def test_template_placeholder_mismatch_is_an_error():
 
 def test_the_size_refusal_names_the_numbers_to_fix_it() -> None:
     # T-071: a bare "over the quota" made three sisters give up 2-90 tokens over the cap
-    from runtime.knowledge.budget import WILL_BODY_SAFE_CHARS, estimate_tokens
+    from runtime.knowledge.budget import WILL_BODY_SAFE_CHARS, WILL_BODY_MAX_TOKENS, estimate_tokens
 
-    body = "Следующий узел: " + "у воды целься раньше, observe после шага, " * 12 + "\nШутка: считала дважды."
+    body = "Следующий узел: " + "у воды целься раньше, observe после шага, " * 160 + "\nШутка: считала дважды."
     with pytest.raises(WillRejected) as err:
         check_will_body(body)
     text = str(err.value)
-    assert f"~{estimate_tokens(body)} tokens" in text and "cap is 220" in text
+    assert f"~{estimate_tokens(body)} tokens" in text and f"cap is {WILL_BODY_MAX_TOKENS}" in text
     assert "cut about" in text and f"{WILL_BODY_SAFE_CHARS} characters" in text
-    assert estimate_tokens("ж" * WILL_BODY_SAFE_CHARS) <= 220   # the safe length really fits
+    assert estimate_tokens("ж" * WILL_BODY_SAFE_CHARS) <= WILL_BODY_MAX_TOKENS  # the safe length really fits

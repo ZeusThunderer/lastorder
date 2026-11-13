@@ -326,8 +326,8 @@ def check_will_body(body: str) -> None:
     lines = body.split("\n")
     if any(not line.strip() for line in lines):
         raise WillRejected("blank lines are not allowed")
-    if not 2 <= len(lines) <= 4:
-        raise WillRejected(f"expected 2-4 lines, got {len(lines)}")
+    if not 2 <= len(lines) <= 10:
+        raise WillRejected(f"expected 2-10 lines, got {len(lines)}")
     if trait_numbers_in(body):
         raise WillRejected("trait numbers in the will body")
     if NAMESPACED.findall(body):

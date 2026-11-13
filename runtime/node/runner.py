@@ -1054,7 +1054,7 @@ class NodeRunner:
                 line = line[2:].strip()
             if line:
                 lines.append(line)
-        lines = lines[:4]
+        lines = lines[:10]  # the will shape of 2026-11-13: 2-10 lines, 1000-1500 characters
         while len(lines) >= 2:
             body = "\n".join(lines)
             try:

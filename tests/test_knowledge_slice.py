@@ -321,3 +321,26 @@ def test_store_goals_read_as_network_goals(tmp_path: Path):
     )
     slice_ = store.knowledge_slice(serial, [])
     assert slice_.network_goals == (NetworkGoal(text="проверить болото", why="нужна глина"),)
+
+
+def test_a_long_will_is_trimmed_to_the_inheritance_head():
+    # The operator's 2026-11-13 call: a stored will carries 1000-1500 characters,
+    # the birth slice still binds B_INHERITANCE — the heir reads the head, the full
+    # text lives in the registry (the KB-side construction is refined later).
+    lines = [f"Строка {i}: вода у спавна обманывает, проверяй дно перед каждым шагом." for i in range(9)]
+    long_will = a_will(9, died_at="2026-10-19T09:00:00+00:00", body="\n".join(lines))
+    assert budget.estimate_tokens(long_will.body) > budget.INHERITANCE_WILL_TOKENS
+    assert budget.estimate_tokens(long_will.body) <= budget.WILL_BODY_MAX_TOKENS
+
+    inheritance = build_inheritance(dead=[(9, long_will)], alive=[], terms=[], catalog="")
+    notes = inheritance.inherited_notes
+    assert notes.startswith("Строка 0")  # the head keeps the first lines
+    assert "…" in notes  # ...and marks the cut
+    assert budget.estimate_tokens(notes) <= budget.INHERITANCE_WILL_TOKENS
+
+
+def test_a_single_long_line_is_cut_hard():
+    one_line = a_will(4, died_at="2026-10-19T09:00:00+00:00", body="у" * 1500)
+    inheritance = build_inheritance(dead=[(4, one_line)], alive=[], terms=[], catalog="")
+    assert budget.estimate_tokens(inheritance.inherited_notes) <= budget.INHERITANCE_WILL_TOKENS
+    assert inheritance.inherited_notes.endswith("…")
