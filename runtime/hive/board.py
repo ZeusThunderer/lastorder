@@ -1268,7 +1268,7 @@ class Board:
             "SELECT l.*, e.from_ AS e_from, e.to_ AS e_to, e.claimed_by AS e_claimed_by,"
             " e.kind AS e_kind, e.status AS e_status, e.text AS e_text"
             " FROM board_log l JOIN board_entry e ON e.id=l.entry_id"
-            f" WHERE l.seq>? AND {where} ORDER BY l.seq LIMIT ?",
+            f" WHERE l.seq>? AND ({where}) ORDER BY l.seq LIMIT ?",
             (since, *params, FEED_LIMIT),
         ).fetchall()
         events = []

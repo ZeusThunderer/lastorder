@@ -680,6 +680,9 @@ def test_feed_delivers_own_and_net_not_own_actions(stack: Stack) -> None:
     assert not [e for e in events if e["op"] == "transition" and e["entry_id"] == stranger["id"]]
     # the cancel of the task she claimed reaches her
     assert any(e["op"] == "transition" and e["entry_id"] == net_task["id"] for e in events)
+    # ...once: acked, it never returns (2026-11-13: an unparenthesized OR ignored the cursor)
+    stack.node("POST", "/board/ack", {"seq": max(e["seq"] for e in events)}, key=KEY1)
+    assert stack.node("GET", "/board/feed", key=KEY1).json()["events"] == []
 
 
 def test_new_life_gets_open_net_tasks_once(stack: Stack) -> None:

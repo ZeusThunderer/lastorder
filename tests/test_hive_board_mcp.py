@@ -215,6 +215,16 @@ def test_mcp_board_roundtrip(stack: Stack) -> None:
     full = node_call(stack, KEY1, "board", {"filter": str(entry_id)})
     assert full["entry"]["from"] == str(author)  # the key stamped the serial, not a body field
 
+    # her cursor appears only after she acks the first snapshot (R1-6)
+    first = httpx.get(f"http://127.0.0.1:{stack.port}/board/feed",
+                      headers={"X-Node-Key": KEY1}, timeout=30.0)
+    assert first.status_code == 200, first.text
+    assert first.json()["snapshot"] is True and first.json()["events"] == []
+    acked = httpx.post(f"http://127.0.0.1:{stack.port}/board/ack",
+                       json={"seq": first.json()["cursor"]},
+                       headers={"X-Node-Key": KEY1}, timeout=30.0)
+    assert acked.status_code == 200
+
     claimed = node_call(stack, KEY2, "claim", {"id": entry_id})
     assert claimed["status"] == "taken" and claimed["claimed_by"] == str(taker)
 
@@ -225,16 +235,7 @@ def test_mcp_board_roundtrip(stack: Stack) -> None:
                      {"id": entry_id, "status": "done", "text": "собрано два стака"})
     assert done["status"] == "done"
 
-    # the author's feed carries the claim and the done move: her cursor appears only
-    # after she acks the first snapshot (R1-6) — the ack is the cursor move
-    first = httpx.get(f"http://127.0.0.1:{stack.port}/board/feed",
-                      headers={"X-Node-Key": KEY1}, timeout=30.0)
-    assert first.status_code == 200, first.text
-    assert first.json()["snapshot"] is True and first.json()["events"] == []
-    acked = httpx.post(f"http://127.0.0.1:{stack.port}/board/ack",
-                       json={"seq": first.json()["cursor"]},
-                       headers={"X-Node-Key": KEY1}, timeout=30.0)
-    assert acked.status_code == 200
+    # the author's feed carries the claim and the done move
     feed = httpx.get(f"http://127.0.0.1:{stack.port}/board/feed",
                      headers={"X-Node-Key": KEY1}, timeout=30.0)
     ops = [e["op"] for e in feed.json()["events"] if e["entry_id"] == entry_id]
