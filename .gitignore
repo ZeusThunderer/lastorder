@@ -18,6 +18,8 @@ docker/run/
 .zcode/skills/lo-plan
 .zcode/skills/lo-review
 .zcode/skills/lo-direct-edit
+# ZCode session plan drafts (plan mode) — session-local, not for the history
+.zcode/plans/
 .worktrees/
 
 # Local skin experiments
