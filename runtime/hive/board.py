@@ -81,6 +81,7 @@ ALARM_TYPES = (
     "delivery_failing",
     "quota",
     "emergency_will",
+    "mind_outdated",  # ADR-054: the runner found a mind older than itself
 )
 _TERMINAL = {
     "done", "failed", "declined", "canceled", "approved", "denied", "answered", "acked",
@@ -144,7 +145,10 @@ _POST_RIGHTS = {
 # section 7: which alarm author may raise which type. `delivery_failing` is the node's
 # own (misaka-link with the node key); the environment's alarms belong to the runners.
 _ALARM_RIGHTS: dict[str, set[str]] = {
-    "runner": {"harness_failover", "session_missing", "stuck", "quota", "emergency_will"},
+    "runner": {
+        "harness_failover", "session_missing", "stuck", "quota", "emergency_will",
+        "mind_outdated",
+    },
     "admin": {"harness_failover", "quota"},
     "node": {"delivery_failing"},
 }

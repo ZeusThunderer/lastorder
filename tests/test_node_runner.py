@@ -112,6 +112,7 @@ class FakeMind:
         self.respawn_error: Exception | None = None
         self.kill_at_status = 0
         self.status_calls = 0
+        self.protocol: int | None = 2  # ADR-054: None plays a pre-ADR-052 mind
 
     def status(self) -> dict:
         self.status_calls += 1
@@ -135,6 +136,7 @@ class FakeMind:
             "term": self.term,
             "term_cause": self.term_cause,
             "serial": self.armed[0] if self.armed else None,
+            "protocol": self.protocol,
         }
 
     def arm(self, serial: int, born_at: str, ttl_min: int) -> dict:
@@ -842,6 +844,38 @@ def test_runner_without_keys_waits_instead_of_birthing(tmp_path: Path) -> None:
     rig2.script(FakeProcess(code=0, output="w"))
     rig2.run_generation()
     assert len(rig2.hive.births) == 1
+
+
+def test_an_outdated_mind_gets_an_alarm_not_a_birth(tmp_path: Path) -> None:
+    """ADR-054: a mind older than the runner (no protocol on /runner/status — the
+    2026-11-13 half-updated stand) could never end a life, so none is born: one
+    mind_outdated alarm per episode, cleared once the mind speaks the protocol."""
+    rig = Rig(tmp_path)
+    rig.mind.protocol = None
+    rig.run_generation()
+    rig.run_generation()
+    assert rig.hive.births == []
+    assert [c[0] for c in rig.alarms.calls] == ["mind_outdated"]  # once, not per round
+    assert rig.pauses[-1] == 60.0
+
+    rig.mind.protocol = 2
+    # a born life that dies on its first watch ends the generation
+    rig.mind.kill_at_status = rig.mind.status_calls + 2
+    rig.script(FakeProcess(code=0, output="w"))
+    rig.run_generation()
+    assert len(rig.hive.births) == 1
+    assert rig.alarms.cleared == [701]
+
+
+def test_an_outdated_mind_still_closes_a_death(tmp_path: Path) -> None:
+    """The guard stops births only: a death on an old mind still walks the death path."""
+    rig = Rig(tmp_path)
+    rig.runner._birth()
+    rig.mind.protocol = None
+    rig.mind.kill()
+    rig.script(FakeProcess(code=0, output="w"))
+    rig.run_generation()
+    assert rig.hive.retires and rig.hive.retires[0][0] == rig.hive.serial
 
 
 def test_retire_auth_error_retries_loudly(tmp_path: Path) -> None:

@@ -85,6 +85,10 @@ WILL_DRAFT_FILE = "will-draft.md"
 # _wait_session's quota sentinel: the long session died on quota while the body
 # lives — not a Death, the life loop owns the switch/wait after it
 QUOTA_DURING_SESSION = "quota-during-session"
+# The oldest mind this runner works with (runtime/mind/executor.py MIND_PROTOCOL; ADR-054):
+# 2 = the soft term (ADR-052). A mind that does not report it is older — a half-updated
+# stand, where no life can end — and gets an alarm instead of a birth.
+MIND_PROTOCOL_MIN = 2
 
 
 def _tail(text: str, limit: int) -> str:
@@ -233,6 +237,9 @@ class NodeRunner:
         # a killed session's log line must not be mistaken for the next boot's
         # report — the ids ride the exclusion set of boot_report (the will's 409)
         self._known_session_ids: list[str] = []
+        # the mind_outdated alarm (ADR-054): raised once per episode, cleared on recovery
+        self._outdated_alarm_id: int | None = None
+        self._outdated_raised = False
 
     def _alarm(self, alarm_type: str, text: str, state: "LifeState | None" = None) -> int | None:
         """Raise a board alarm best-effort: a board that is down must not take
@@ -375,6 +382,32 @@ class NodeRunner:
                 self._log("runner.error", {"error": f"{type(exc).__name__}: {exc}"})
                 self._sleep(self.cfg.restart_pause_s)
 
+    def _mind_outdated(self, status: Mapping[str, Any], state: "LifeState | None" = None) -> bool:
+        """True when the mind speaks an older protocol than this runner (ADR-054). One
+        board alarm per episode: the operator rebuilds and recreates mind-N from the
+        same commit as node-N; until then no life is born — it could never end."""
+        try:
+            protocol = int(status.get("protocol") or 1)
+        except (TypeError, ValueError):
+            protocol = 1
+        if protocol >= MIND_PROTOCOL_MIN:
+            if self._outdated_raised:
+                self._alarm_clear(self._outdated_alarm_id, "mind_outdated")
+                self._outdated_raised = False
+                self._outdated_alarm_id = None
+            return False
+        if not self._outdated_raised:
+            self._outdated_raised = True
+            self._log("mind.outdated", {"protocol": protocol, "needed": MIND_PROTOCOL_MIN})
+            self._outdated_alarm_id = self._alarm(
+                "mind_outdated",
+                f"the mind of {self.cfg.slot} speaks protocol {protocol}, this runner needs "
+                f"{MIND_PROTOCOL_MIN}: rebuild lastorder-mind and recreate the mind from the "
+                "runner's commit — no life can end until then, so none is born",
+                state,
+            )
+        return True
+
     def _generation(self) -> None:
         status = self._wait_for_mind()
         state = self._load_state()
@@ -412,6 +445,8 @@ class NodeRunner:
                 soft=True,
             )
             return
+        # a death or a term above closes on any mind; a NEW life needs one that can end it
+        outdated = self._mind_outdated(status, state)
         armed = status.get("serial")
         if not armed and self._live_unarmed(state):
             # T-072: the mind restarted mid-life (a server move, a slot restart) and
@@ -424,6 +459,9 @@ class NodeRunner:
             self._death_path(state, death.cause, death.text, adapter_name, soft=death.soft)
             return
         if not armed:
+            if outdated:
+                self._sleep(self.cfg.restart_pause_max_s)
+                return
             if self._keys_missing():
                 # fail-closed (review R2-6): without both keys the node would run open —
                 # an empty runner key silently passes no gate, an empty node key ships
@@ -900,6 +938,7 @@ class NodeRunner:
         except HiveUnavailable:
             self._mind_unreachable()
             return None  # the mind restarts; the session keeps running meanwhile
+        self._mind_outdated(status, state)  # an alarm only: the living session runs on
         if not status.get("dead"):
             if state is not None and not status.get("serial") and self._live_unarmed(state):
                 self._rearm(state)  # the mind came back without her clock (T-072)
