@@ -101,6 +101,7 @@ def test_the_kind_picks_the_adapter_and_the_slot_reads_from_the_account() -> Non
     with pytest.raises(ValueError):
         make_body("chess")
     assert type(make_body("minecraft")).__name__ == "Py4jBody"
+    assert make_body("none") is None  # ADR-054: a mind with no body attached
 
 
 def test_the_bridge_addresses_make_the_mind_a_peer() -> None:

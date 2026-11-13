@@ -1208,3 +1208,62 @@ def test_a_fresh_birth_on_a_stale_corpse_still_respawns_quietly() -> None:
         assert rig.events_of("game.death") == []
     finally:
         rig.close()
+
+
+# --- a mind with no body (ADR-054) ------------------------------------------------------------
+
+
+def test_a_bodiless_mind_lives_and_its_clock_ends_the_life() -> None:
+    from runtime.mind.executor import MIND_PROTOCOL, NO_BODY_ERROR
+
+    clock, wall = FakeClock(), FakeWall()
+    x = Executor(None, username="LastOrder02", log_=JsonlLog(), clock=clock, wall_clock=wall,
+                 sleep=lambda _s: None)
+    assert x.bodiless
+    status = x.death_status()
+    assert status["protocol"] == MIND_PROTOCOL and status["body"] == "none"
+    x.runner_birth(9, "2026-10-18T11:50:00+00:00", 15)  # births arm with no body
+    with pytest.raises(RuntimeError, match="no body is attached"):
+        x.submit("goto", {"x": 1, "y": 64, "z": 1})
+    with pytest.raises(RuntimeError, match=NO_BODY_ERROR[:20]):
+        x.stop_intent()
+    with x.body_lock:
+        x._tick()  # 12:00: inside the life — nothing happens, nothing raises
+    assert not x.termed()
+    wall.advance(6 * 60)  # 12:06, past 12:05
+    with x.body_lock:
+        x._tick()
+    assert x.termed() and x.death_status()["term_cause"] == "ttl"
+    with pytest.raises(RuntimeError, match="not dead"):
+        x.runner_respawn()  # a bodiless mind never dies: the respawn is the 409 case
+    x.runner_term_ack()
+    assert not x.termed() and x.death_status()["serial"] is None
+
+
+def test_the_life_clock_runs_when_the_body_does_not_answer() -> None:
+    """2026-11-13: a body down made every tick raise before the clock was read, so a
+    life never ended. The clock now runs beside the tick."""
+
+    class DeadBridge(FakeBody):
+        def state(self):
+            raise RuntimeError("Py4JError: An error occurred while calling t.getGameState")
+
+    rig = Rig(body=DeadBridge(), birth=BirthRecord(serial=7, born_at="2026-10-18T11:10:00+00:00", ttl_min=45))
+    try:
+        with pytest.raises(RuntimeError):
+            rig.tick()
+        assert not rig.x.termed()
+        rig.x._clock_step()  # what the C1 loop runs after every tick
+        assert rig.x.termed() and rig.x.death_status()["term_cause"] == "ttl"
+    finally:
+        rig.close()
+
+
+def test_the_clock_step_holds_still_while_the_body_is_dead() -> None:
+    rig = Rig(birth=BirthRecord(serial=7, born_at="2026-10-18T11:10:00+00:00", ttl_min=45))
+    try:
+        rig.x._dead = True  # between a death and the runner's respawn
+        rig.x._clock_step()
+        assert not rig.x.termed()  # the death path owns that life
+    finally:
+        rig.close()

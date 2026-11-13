@@ -1116,3 +1116,29 @@ def test_visible_blocks_without_a_center_drops_nothing() -> None:
     shown, hidden = visible_blocks(cube, None)
     assert len(shown) == len(cube) and hidden == 0
 
+
+
+# --- a mind with no body (ADR-054) ------------------------------------------------------------
+
+
+def test_a_bodiless_mind_answers_honestly() -> None:
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    _server, impl, executor = build_mind(None, username="LastOrder03", start_c1=False)
+    seen = impl.observe()
+    assert seen["self"] == {"body": "none"} and "no body is attached" in seen["note"]
+    for call in (lambda: impl.act("goto", {"x": 1, "y": 64, "z": 1}), impl.stop,
+                 lambda: impl.say("привет"), lambda: impl.server_command("/spawn")):
+        with pytest.raises(ToolError, match="no body is attached"):
+            call()
+    executor.events.put("board", lines=["#5 task from last-order"])
+    assert impl.wait_events(1.0)["type"] == "board"  # the network still wakes her
+
+
+def test_teardown_of_a_bodiless_mind_has_no_bridge_to_close() -> None:
+    from runtime.mind.mcp_body import teardown_mind
+
+    uvi, thread = FakeUvi(), FakeThread()
+    calls: list[str] = []
+    teardown_mind(uvi, thread, types.SimpleNamespace(stop=lambda: calls.append("stop")), None)
+    assert calls == ["stop"]

@@ -70,6 +70,10 @@ IDLE_S_DEFAULT = 120.0
 LIFE_WARN_S = 180.0  # life.expiring this many seconds before ttl_min
 QUEUE_LIMIT = 200
 RESPAWN_MAX_ATTEMPTS = 3  # bounded respawn retries, then the body stays dead (spike R1-4)
+# What this mind speaks on /runner/status (ADR-054): 2 = the soft term of ADR-052. The
+# runner refuses a mind below its own minimum — a half-updated stand (new hive and
+# runner, an old mind) once left every life unable to end (2026-11-13).
+MIND_PROTOCOL = 2
 
 # Levers whose outcome C1 can verify; everything else settles as done on completion.
 TARGET_LEVERS = ("goto", "goto_far", "bridge_to", "pillar_to")  # arrival by position
@@ -77,6 +81,13 @@ GET_LEVER = "get"  # arrival by inventory count
 DEAD_ACT_ERROR = "the body is dead: the runner decides the respawn, the intent is not accepted"
 TERM_ACT_ERROR = (
     "the life term is over: the runner owns the handover, the intent is not accepted"
+)
+# ADR-054: a mind may run with no body at all (BODY_KIND=none) — the network decides
+# whether a slot wears one. The life, the clock, wait_events and the hive tools do not
+# need a body; only the levers do, and they say so instead of pretending.
+NO_BODY_ERROR = (
+    "no body is attached to this mind: bodies are a resource the network attaches "
+    "(Last Order's body_up); your life, the network and wait_events work without one"
 )
 
 # What counts as a threat source: uc's getEntitiesInfo reports the entity TYPE id
@@ -321,7 +332,7 @@ class Executor:
             raise ValueError(
                 f"tick_interval must be within {TICK_MIN_S}..{TICK_MAX_S} s (1-4 Hz), got {tick_interval}"
             )
-        self._body = body
+        self._body = body  # None: a bodiless mind (ADR-054)
         self._username = username
         self._log = log_
         # The operator's game name (T-051): the environment marks `<name>` chat lines
@@ -414,6 +425,11 @@ class Executor:
         return self._body
 
     @property
+    def bodiless(self) -> bool:
+        """True when no body is attached to this mind (ADR-054)."""
+        return self._body is None
+
+    @property
     def journal(self) -> JsonlLog:
         return self._log
 
@@ -438,6 +454,7 @@ class Executor:
                 self._tick()
             except Exception as exc:  # a flaky bridge must not kill C1
                 self._log.record("error", scope="tick", error=f"{type(exc).__name__}: {exc}")
+            self._clock_step()
             interval = ACT_BURST_INTERVAL_S if self._pending_act else self._tick_interval
             delay = interval - (self._clock() - started)
             if delay > 0:
@@ -523,7 +540,25 @@ class Executor:
 
     # -- the tick -----------------------------------------------------------------------
 
+    def _clock_step(self) -> None:
+        """The life clock beside the tick, not inside it (ADR-054): a body that does not
+        answer — down, booting, a broken bridge — raises out of `_tick` before the clock
+        is read, and a life must still end on time. A death holds the clock still (the
+        death path owns that life); the term latch keeps a second call a no-op."""
+        try:
+            with self.body_lock:
+                if not self._dead:
+                    self._life_clock()
+        except Exception as exc:  # the clock must outlive any one bad read
+            self._log.record("error", scope="life_clock", error=f"{type(exc).__name__}: {exc}")
+
     def _tick(self) -> None:
+        if self._body is None:
+            # a bodiless mind (ADR-054): no game state to read, no threat, no intent —
+            # the life clock is all C1 keeps
+            with self.body_lock:
+                self._life_clock()
+            return
         with self.body_lock:
             prev_busy = self._busy_last
             self._drain_body_events()
@@ -721,10 +756,11 @@ class Executor:
             self._current.state = Intent.CLEARED
         self._current = None
         self._pending_act = None
-        try:
-            self._body.stop()  # the body stands still; the rules keep guarding it
-        except Exception as exc:
-            self._log.record("error", scope="term_stop", error=f"{type(exc).__name__}: {exc}")
+        if self._body is not None:
+            try:
+                self._body.stop()  # the body stands still; the rules keep guarding it
+            except Exception as exc:
+                self._log.record("error", scope="term_stop", error=f"{type(exc).__name__}: {exc}")
         self._log.record(
             "term", event="life.ended", cause=cause, username=self._username
         )
@@ -762,6 +798,8 @@ class Executor:
             "term": self._term,
             "term_cause": self._term_cause or None,
             "serial": self._birth.serial if self._birth else None,
+            "protocol": MIND_PROTOCOL,
+            "body": "none" if self._body is None else "attached",
         }
 
     def runner_respawn(self) -> dict[str, Any]:
@@ -1061,6 +1099,8 @@ class Executor:
             # the check and the swap cannot arm an intent for the next node's body (R1-3).
             # The term check is its soft sibling (ADR-052): an outgoing mind must not
             # walk the heir's living body either.
+            if self._body is None:
+                raise RuntimeError(NO_BODY_ERROR)
             if self._dead:
                 raise RuntimeError(DEAD_ACT_ERROR)
             if self._term:
@@ -1081,6 +1121,8 @@ class Executor:
         return intent
 
     def stop_intent(self) -> None:
+        if self._body is None:
+            raise RuntimeError(NO_BODY_ERROR)
         self._pending_act = None
         if self._current is not None and not self._current.finished:
             self._log.record(

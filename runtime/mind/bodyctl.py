@@ -26,7 +26,7 @@ from typing import Any
 
 from runtime.game.py4j_body import Py4jBody
 from runtime.hive.client import HiveRejected, HiveUnavailable
-from runtime.hive.infra import DEFAULT_BODY_KIND
+from runtime.hive.infra import BODY_NONE, DEFAULT_BODY_KIND
 
 # kind -> the GameBody adapter of that game (runtime/ports.py GameBody)
 BODY_ADAPTERS: dict[str, Callable[[], Any]] = {"minecraft": Py4jBody}
@@ -39,9 +39,14 @@ UNAVAILABLE_RETRY_S = 30.0  # the hive did not answer: try again soon, not after
 
 
 def make_body(kind: str = DEFAULT_BODY_KIND) -> Any:
-    """The adapter of `kind`; an unknown kind is a startup error, not a silent default."""
+    """The adapter of `kind`, or None for `none` — a mind with no body attached
+    (ADR-054). An unknown kind is a startup error, not a silent default."""
+    if kind == BODY_NONE:
+        return None
     if kind not in BODY_ADAPTERS:
-        raise ValueError(f"BODY_KIND must be one of {sorted(BODY_ADAPTERS)}, got {kind!r}")
+        raise ValueError(
+            f"BODY_KIND must be one of {sorted([*BODY_ADAPTERS, BODY_NONE])}, got {kind!r}"
+        )
     return BODY_ADAPTERS[kind]()
 
 

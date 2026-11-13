@@ -38,8 +38,10 @@ INFRA_ACTIONS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "mc_restart": ((), ()),
     "status": ((), ()),
     "logs": (("service",), ("lines",)),
-    # the body verbs (ADR-050): asked by the slot's mind for its own body, or by the
-    # operator / Last Order; `kind` picks the body of a game from BODY_KINDS
+    # the body verbs (ADR-050, ADR-054): whether a slot wears a body is the network's
+    # decision — body_up {kind} attaches one and body_down detaches it, and the choice
+    # holds through later restarts until changed (the executor records it); a mind
+    # with a body asks body_up/body_restart for its own when it dies
     "body_up": (("slot",), ("kind",)),
     "body_down": (("slot",), ()),
     "body_restart": (("slot",), ()),
@@ -49,7 +51,10 @@ INFRA_ACTIONS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 # today; another game is one more line here, its service in compose and its adapter
 # in the mind (runtime/mind/bodyctl.py BODY_ADAPTERS) — slots do not change.
 BODY_KINDS: dict[str, str] = {"minecraft": "body-{slot}"}
-DEFAULT_BODY_KIND = "minecraft"
+DEFAULT_BODY_KIND = "minecraft"  # what body_up attaches when no kind is named
+# ADR-054: a mind with no body attached — the slot's recorded state after body_down,
+# and the stand's default for a slot nobody has given a body (docker/compose.yml)
+BODY_NONE = "none"
 
 # Who may ask for what. Last Order and the operator rule the whole set; a slot's
 # environment (`runner:<slot>` — the mind and the runner hold the slot's runner key)
@@ -126,7 +131,10 @@ def check(action: Any, args: Any) -> dict[str, str]:
             raise InfraError("service must be a compose service name (mc-server, body-1, …)")
     if "kind" in cleaned:
         if cleaned["kind"] not in BODY_KINDS:
-            raise InfraError(f"kind must be one of {sorted(BODY_KINDS)}, got {cleaned['kind']!r}")
+            hint = " (body_down detaches a body)" if cleaned["kind"] == BODY_NONE else ""
+            raise InfraError(
+                f"kind must be one of {sorted(BODY_KINDS)}, got {cleaned['kind']!r}{hint}"
+            )
     if "lines" in cleaned:
         try:
             lines = int(cleaned["lines"])
@@ -141,6 +149,7 @@ def check(action: Any, args: Any) -> dict[str, str]:
 __all__ = [
     "ADDRESS_RE",
     "BODY_KINDS",
+    "BODY_NONE",
     "DEFAULT_BODY_KIND",
     "INFRA_ACTIONS",
     "RUNNER_ACTIONS",

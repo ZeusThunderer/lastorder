@@ -39,6 +39,7 @@ from starlette.responses import JSONResponse, Response
 from runtime.game.py4j_body import LEVERS
 from runtime.mind.executor import (
     DEAD_ACT_ERROR,
+    NO_BODY_ERROR,
     TICK_MAX_S,
     TICK_MIN_S,
     Executor,
@@ -518,6 +519,10 @@ class BodyMcp:
 
     def observe(self) -> dict[str, Any]:
         body = self._x.body
+        if body is None:
+            # ADR-054: no body to look through — the honest answer, never an empty
+            # world that would pass for a real one (ADR-037)
+            return {"self": {"body": "none"}, "note": NO_BODY_ERROR}
         with self._x.body_lock:  # one writer with C1 at a time (review P1-6)
             state = body.state()
             entities = tuple(body.entities(radius=16))
@@ -580,11 +585,15 @@ class BodyMcp:
         return {"intent_id": submitted.id}
 
     def stop(self) -> dict[str, Any]:
+        if self._x.bodiless:
+            _err(NO_BODY_ERROR)
         with self._x.body_lock:
             self._x.stop_intent()
         return {"stopped": True}
 
     def say(self, text: str) -> dict[str, Any]:
+        if self._x.bodiless:
+            _err(NO_BODY_ERROR)
         cleaned = check_say(text)
         now = self._clock()
         if now - self._last_say_at < SAY_MIN_INTERVAL_S:
@@ -598,6 +607,8 @@ class BodyMcp:
         """One player command to the server (ADR-043): anything a player may type,
         minus the stand's deny list; the server enforces the rights. The answer,
         if any, arrives as ordinary chat lines."""
+        if self._x.bodiless:
+            _err(NO_BODY_ERROR)
         cleaned = check_server_command(command, self._deny)
         now = self._clock()
         if now - self._last_command_at < SAY_MIN_INTERVAL_S:
@@ -654,7 +665,9 @@ def build_server(
             "(player chat), server_command (a player command to the server, minus the "
             "stand's deny list), wait_events (sleep until an event or the timeout — you "
             "pick the rhythm), retire_stuck (only after a task.idle event). Names are plain "
-            "game names; uc service lines are already filtered out."
+            "game names; uc service lines are already filtered out. A mind may have no body "
+            "attached (the network decides): then observe says so and the levers refuse, "
+            "while wait_events and your life go on as usual."
         ),
     )
 
@@ -880,7 +893,8 @@ def teardown_mind(
     uvi.should_exit = True
     thread.join(timeout=grace_s)
     executor.stop()
-    body.close()
+    if body is not None:  # a bodiless mind (ADR-054) has no bridge to close
+        body.close()
     log.info("mind stopped: server down, C1 stopped, bridge closed")
 
 
@@ -993,7 +1007,9 @@ def main() -> None:
     # ADR-050: the body is the mind's — BODY_KIND picks the game's adapter here and
     # the body service on the executor's side; the supervisor below starts it
     body_kind = env("BODY_KIND", default=DEFAULT_BODY_KIND) or DEFAULT_BODY_KIND
-    body = make_body(body_kind)
+    body = make_body(body_kind)  # None for `none`: a bodiless mind (ADR-054)
+    if body is None:
+        log.info("no body attached (BODY_KIND=none): the life, the clock and wait_events only")
     # Jev (T-031, ADR-027): JEV_BACKEND=rules keeps C1 on its own rules; cloud/local wire
     # the decider with the mind's virtual key through the gateway. An unknown backend or a
     # non-number JEV_* is a startup error, not a silent fallback.
@@ -1019,10 +1035,10 @@ def main() -> None:
             send=lambda text: body.act("chat", {"text": text}),
             skin_command=skin_command,
         )
-        if password
+        if password and body is not None
         else None
     )
-    if password:
+    if login is not None:
         log.info(
             "login armed: mind-N logs into the server itself (the password is never logged)%s",
             "; a skin command follows each login" if skin_command else "",
@@ -1067,7 +1083,9 @@ def main() -> None:
     )
     # The mind owns its body (ADR-050): it asks the executor for it at start and for a
     # new one when it dies. BODY_SUPERVISE=0 leaves the body to whoever raised it.
-    if (env("BODY_SUPERVISE", default="1") or "1") != "0":
+    # A bodiless mind asks for nothing: whether the slot wears a body is the network's
+    # decision (ADR-054), never the mind's own.
+    if body is not None and (env("BODY_SUPERVISE", default="1") or "1") != "0":
         BodySupervisor(body, hive, username=username, kind=body_kind, log=call_log).start()
         log.info("body supervisor armed: %s body of %s", body_kind, username)
     # host="0.0.0.0" keeps the SDK's localhost-only DNS-rebinding protection off: the harness
