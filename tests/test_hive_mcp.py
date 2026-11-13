@@ -46,7 +46,8 @@ LO_TOOLS = {"proposals", "decide", "set_goals", "chronicle",
             "board", "post", "claim", "update", "reply",
             "send", "inbox",  # T-043: the desk answers the sisters on Misaka-net
             "request_grant", "grants", "http_request", "publish_tool", "shelf",  # the grant vault (T-046, TASKBOARD.md 5.3)
-            "infra_state"}  # the infra executor's state (T-057, TASKBOARD.md 5.4)
+            "infra_state",  # the infra executor's state (T-057, TASKBOARD.md 5.4)
+            "life_rule"}  # the length of a life is the network's rule (ADR-054)
 
 
 class FakeClock:

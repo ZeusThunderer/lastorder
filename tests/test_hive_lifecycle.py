@@ -286,3 +286,29 @@ def test_pre_adr052_state_file_with_kill_fields_loads(tmp_path: Path) -> None:
     assert [b.serial for b in life2.alive()] == [record.serial]
     life2.mark_term(record.serial)  # the node is a full participant, not a crash
     assert life2.life_over(record.serial)
+
+
+# --- the network's life rule (ADR-054) ----------------------------------------------------
+
+
+def test_ttl_rule_sets_the_next_births_of_a_slot_and_persists(tmp_path: Path) -> None:
+    store, life, log, clock = make(tmp_path)
+    life.set_ttl_rule("LastOrder02", 15)
+    assert life.birth("LastOrder02", traits()).ttl_min == 15
+    assert life.birth("LastOrder01", traits()).ttl_min == 45  # other slots keep the default
+    assert "life.rule" in [e["type"] for e in log.read()]
+    _, again, _, _ = make(tmp_path, clock=clock)  # a hive restart keeps the rule
+    assert again.ttl_rules()["ttl_min"] == {"LastOrder02": 15}
+    again.set_ttl_rule("LastOrder02", None)
+    assert again.ttl_rules()["ttl_min"] == {}
+
+
+def test_ttl_rule_outside_the_bounds_is_refused(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TTL_RULE_MIN", "10")
+    monkeypatch.setenv("TTL_RULE_MAX", "30")
+    _, life, _, _ = make(tmp_path)
+    assert life.ttl_rules()["bounds_min"] == [10, 30]
+    for bad in (9, 31):
+        with pytest.raises(LifecycleError, match="10..30"):
+            life.set_ttl_rule("LastOrder01", bad)
+    assert life.ttl_rules()["ttl_min"] == {}

@@ -57,6 +57,7 @@ from runtime.hive.client import (
 from runtime.hive import grants as grants_module
 from runtime.hive import tools as tools_module
 from runtime.hive.grants import GrantError
+from runtime.hive.infra import SLOTS
 from runtime.hive.lifecycle import HiveLog, Lifecycle, LifecycleError
 from runtime.hive.proposals import (
     CommonLayers,
@@ -496,6 +497,20 @@ class HiveMcp:
         self._require_last_order(ctx)
         return {"tools": self._proposals.shelf.names()}
 
+    # --- the network's life rule (ADR-054) ----------------------------------------------------
+
+    def life_rule(self, ctx: Context, slot: int = 0, ttl_min: int = -1) -> dict[str, Any]:
+        """Look at (slot 0, or ttl_min -1) or set the life length of a slot's next
+        births; ttl_min 0 returns the slot to the stand's default."""
+        self._require_last_order(ctx)
+        if isinstance(slot, bool) or not isinstance(slot, int) or isinstance(ttl_min, bool) or not isinstance(ttl_min, int):
+            _err("life_rule: slot and ttl_min are whole numbers")
+        if slot == 0 or ttl_min < 0:
+            return self._lifecycle.ttl_rules()
+        if slot not in SLOTS:
+            _err(f"life_rule: slot must be one of {list(SLOTS)} (0 to look), got {slot}")
+        return self._lifecycle.set_ttl_rule(f"LastOrder{slot:02d}", ttl_min or None)
+
     # --- the infrastructure bridge (T-057, TASKBOARD.md 5.4; ADR-044) ------------------------
 
     def infra_state(self, ctx: Context) -> dict[str, Any]:
@@ -801,6 +816,13 @@ def build_mcp(
         nothing — infra requests wait, and `reason` is the operator's explanation."""
         return await _run(lambda: impl.infra_state(ctx))
 
+    async def life_rule(slot: int = 0, ttl_min: int = -1, *, ctx: Context) -> dict[str, Any]:
+        """The length of a life is the network's rule (ADR-054). life_rule() shows the
+        rule of every slot, the stand's default and bounds; life_rule(slot, ttl_min) sets
+        the minutes the NEXT lives of that slot get (within the bounds — the living
+        sister keeps hers); ttl_min 0 returns the slot to the default."""
+        return await _run(lambda: impl.life_rule(ctx, slot, ttl_min))
+
     async def proposals(*, ctx: Context) -> dict[str, Any]:
         """The open proposal queue ({proposals}), oldest first."""
         return await _run(lambda: impl.proposals(ctx))
@@ -839,6 +861,7 @@ def build_mcp(
     lo.add_tool(publish_tool, name="publish_tool")
     lo.add_tool(shelf, name="shelf")
     lo.add_tool(infra_state, name="infra_state")
+    lo.add_tool(life_rule, name="life_rule")
 
     return sister, lo
 

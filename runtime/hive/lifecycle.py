@@ -49,6 +49,10 @@ from runtime.lastorder.traits import Traits
 from runtime.ports import BirthRecord, NodeBrief
 
 MAX_LIFE_MIN = 45  # CLAUDE.md: the life's length in minutes; env MAX_LIFE_MIN overrides
+# ADR-054: the length of a life is the network's rule — Last Order sets it per slot
+# within the stand's bounds (env TTL_RULE_MIN / TTL_RULE_MAX); no rule = MAX_LIFE_MIN
+TTL_RULE_MIN = 5
+TTL_RULE_MAX = 90
 TTL_SCAN_S = 30  # background scan cadence (task T-022); env HIVE_TTL_SCAN_S overrides
 CAUSE_STUCK = "stuck"  # ADR-026: the only cause request_death accepts
 # The emergency will of a lost node needs an addressee: the preset-neutral one of
@@ -120,6 +124,15 @@ class Lifecycle:
             max_life_min if max_life_min is not None else (env("MAX_LIFE_MIN") or MAX_LIFE_MIN)
         )
         self._state_path = Path(run_dir) / "lifecycle.json"
+        self._ttl_min_bound = int(env("TTL_RULE_MIN") or TTL_RULE_MIN)
+        self._ttl_max_bound = int(env("TTL_RULE_MAX") or TTL_RULE_MAX)
+        if not 1 <= self._ttl_min_bound <= self._ttl_max_bound:
+            raise ValueError(
+                f"TTL_RULE_MIN..TTL_RULE_MAX must be 1 <= min <= max, got "
+                f"{self._ttl_min_bound}..{self._ttl_max_bound}"
+            )
+        self._rules_path = Path(run_dir) / "life_rules.json"
+        self._ttl_rules: dict[str, int] = self._load_rules()
         self._lock = threading.RLock()
         self._nodes: dict[int, NodeState] = {}
         # The board's death sweep (T-042, TASKBOARD.md 4.3): set by create_app. A node's
@@ -127,6 +140,45 @@ class Lifecycle:
         # lost-close — so a stuck or restarted mind cannot leave tasks dangling.
         self._on_death: Callable[[int], None] | None = None
         self._load_and_reconcile()
+
+    # --- the network's life rule (ADR-054) -----------------------------------------------
+
+    def _load_rules(self) -> dict[str, int]:
+        try:
+            raw = json.loads(self._rules_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        rules = raw.get("ttl_min", {}) if isinstance(raw, dict) else {}
+        return {str(k): int(v) for k, v in rules.items()}
+
+    def ttl_rules(self) -> dict:
+        """What a new life in each slot gets: the rules, the default, the bounds."""
+        with self._lock:
+            return {
+                "ttl_min": dict(sorted(self._ttl_rules.items())),
+                "default_min": self._max_life_min,
+                "bounds_min": [self._ttl_min_bound, self._ttl_max_bound],
+            }
+
+    def set_ttl_rule(self, slot: str, ttl_min: int | None) -> dict:
+        """Set (or with None clear) the life length of slot's NEXT births. Outside the
+        stand's bounds is a refusal, not a clamp: the caller learns the bounds."""
+        with self._lock:
+            if ttl_min is None:
+                self._ttl_rules.pop(slot, None)
+            else:
+                if not self._ttl_min_bound <= int(ttl_min) <= self._ttl_max_bound:
+                    raise LifecycleError(
+                        f"ttl_min must be within {self._ttl_min_bound}..{self._ttl_max_bound} "
+                        f"(the stand's bounds), got {ttl_min}"
+                    )
+                self._ttl_rules[slot] = int(ttl_min)
+            self._rules_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._rules_path.with_name(self._rules_path.name + ".tmp")
+            tmp.write_text(json.dumps({"ttl_min": self._ttl_rules}, indent=2), encoding="utf-8")
+            tmp.replace(self._rules_path)
+            self._log.event("life.rule", {"slot": slot, "ttl_min": ttl_min})
+        return self.ttl_rules()
 
     def set_death_hook(self, hook: Callable[[int], None]) -> None:
         self._on_death = hook
@@ -247,7 +299,8 @@ class Lifecycle:
                         },
                     )
                 self._close_lost(node)
-            record = self._store.birth(slot, traits, ttl_min=self._max_life_min)
+            ttl_min = self._ttl_rules.get(slot, self._max_life_min)
+            record = self._store.birth(slot, traits, ttl_min=ttl_min)
             self._nodes[record.serial] = NodeState(
                 serial=record.serial,
                 slot=slot,
