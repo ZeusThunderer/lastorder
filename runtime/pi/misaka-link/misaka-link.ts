@@ -16,6 +16,7 @@ import { LinkCore } from "./link.ts";
 
 const POLL_S = 10_000; // ms; the section-11 ceiling is 15 s
 export const SLEEP_MAX_S = 30;
+const IDLE_POLL_MS = 120_000; // the desk only: see the loop
 
 /** The longest `sleep N` in a shell command, in seconds (N, Ns, Nm, Nh). */
 export function longestSleep(command: string): number {
@@ -36,6 +37,7 @@ interface LinkConfig {
   hive: HiveClient;
   nameOf: ReturnType<typeof makeNameOf>;
   serial: number | null;
+  desk: boolean;
 }
 
 /** The hive MCP url + node key from the agent dir's mcp.json (rendered by the
@@ -125,6 +127,10 @@ export default function misakaLink(pi: unknown) {
           // a bug or a bad payload must not end delivery for the rest of the life
           log("misakalink.cycle_failed", { error: String(err) });
         }
+        // an idle desk takes one batch per IDLE_POLL_MS: every delivery to an idle
+        // session is a whole turn (2026-11-13: "Молчу." to each line, every 10 s);
+        // the lines wait in the hive, a working session still gets them as steer
+        if (config.desk && ctx.isIdle()) pause = Math.max(pause, IDLE_POLL_MS);
         await new Promise(resolve => setTimeout(resolve, Math.max(0, pause)));
       }
     })();

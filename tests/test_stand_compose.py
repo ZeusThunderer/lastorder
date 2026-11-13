@@ -82,7 +82,7 @@ def test_last_order_rides_pi_with_gateway_failover():
     assert env["ADMIN_HARNESS_FAILOVER"] == "${ADMIN_HARNESS_FAILOVER:-opencode}"
     # the operator's pick: the model, not Flash; the compaction budget is T-066's
     assert env["ADMIN_PI_MODEL"] == "${ADMIN_PI_MODEL:-GLM-5.3}"
-    assert env["ADMIN_PI_CONTEXT_WINDOW"] == "${ADMIN_PI_CONTEXT_WINDOW:-256000}"
+    assert env["ADMIN_PI_CONTEXT_WINDOW"] == "${ADMIN_PI_CONTEXT_WINDOW:-200000}"
     # the token rides the same lift as node-N (up.sh lifts .env's ZAI_API_KEY as
     # ZCODE_API_KEY), and the entrypoint materializes it the same way
     assert env["ZAI_API_KEY"] == "${ZCODE_API_KEY:-}"
