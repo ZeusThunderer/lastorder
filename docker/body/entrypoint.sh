@@ -38,6 +38,56 @@ soundCategory_master:0.0
 narrator:0
 OPT
 
+# Voice (ADR-055): BODY_VOICE=1 gives this body Simple Voice Chat and a virtual microphone.
+# PulseAudio holds two null sinks: lo_out, the default — the game's own sound and the voice
+# of others go nowhere — and lo_voice, where the mind's speech is played; the monitor of
+# lo_voice is remapped into lo_mic, the default source, which SVC records as its microphone.
+# Silence on lo_voice is below the activation threshold, so SVC sends only speech.
+if [ "${BODY_VOICE:-}" = "1" ]; then
+  cp /opt/body/mods-voice/*.jar "$GAME/mods/"
+  export XDG_RUNTIME_DIR=/tmp/xdg PULSE_RUNTIME_PATH=/tmp/pulse
+  mkdir -p "$XDG_RUNTIME_DIR" "$PULSE_RUNTIME_PATH"
+  chmod 700 "$XDG_RUNTIME_DIR"
+  # -n: no default.pa (no hardware probing in a container); the native socket is all we need
+  pulseaudio --daemonize=yes -n --exit-idle-time=-1 --disallow-exit --disable-shm=yes \
+    --load=module-native-protocol-unix
+  for _ in $(seq 50); do pactl info >/dev/null 2>&1 && break; sleep 0.1; done
+  pactl load-module module-null-sink sink_name=lo_out rate=48000 channels=2 >/dev/null
+  pactl load-module module-null-sink sink_name=lo_voice rate=48000 channels=1 >/dev/null
+  pactl load-module module-remap-source master=lo_voice.monitor source_name=lo_mic >/dev/null
+  pactl set-default-sink lo_out
+  pactl set-default-source lo_mic
+  # Java Sound (SVC's fallback microphone) reads ALSA: route ALSA's default to pulse
+  printf 'pcm.!default { type pulse }\nctl.!default { type pulse }\n' > /etc/asound.conf
+  echo "voice: pulse up, default source $(pactl get-default-source)" >&2
+
+  # SVC client config, rewritten on every start like options.txt. Voice activation on a
+  # pure level threshold: no denoiser, no AGC, no VAD model between the TTS and the wire.
+  mkdir -p "$GAME/config/voicechat"
+  cat > "$GAME/config/voicechat/voicechat-client.properties" <<SVC
+config_version=2
+onboarding_finished=true
+disabled=false
+muted=false
+microphone=
+speaker=
+microphone_activation_type=VOICE
+voice_activation_threshold=${BODY_VOICE_THRESHOLD_DB:--50.0}
+voice_activity_detection=false
+voice_deactivation_delay=${BODY_VOICE_TAIL:-25}
+denoiser=false
+automatic_gain_control=false
+microphone_gain=${BODY_VOICE_GAIN_DB:-0.0}
+java_microphone_implementation=${BODY_VOICE_JAVA_MIC:-false}
+SVC
+
+  # SVC needs a real OpenAL; the -lwjgl stub has none: a voice body renders on Xvfb
+  if [ "$BODY_RENDER" = "headless" ]; then
+    BODY_RENDER=xvfb
+    echo "voice: BODY_RENDER headless → xvfb (SVC needs real LWJGL/OpenAL)" >&2
+  fi
+fi
+
 LWJGL=""
 if [ "$BODY_RENDER" = "headless" ]; then
   LWJGL="-lwjgl"
@@ -96,6 +146,22 @@ if [ -n "${MIND_HOST:-}" ]; then
       sleep 1
     done
   ) &
+  # The voice inlet (ADR-055): the mind streams one line of PCM s16le 48 kHz mono, pacat
+  # plays it into lo_voice in real time. On the mind's half-close pacat drains and exits,
+  # socat closes the connection — the mind's "the line is said". One line at a time
+  # (max-children=1); -t keeps the connection open past the half-close until pacat is done.
+  if [ "${BODY_VOICE:-}" = "1" ]; then
+    VOICE_PORT="${BODY_VOICE_PORT:-25500}"
+    (
+      set +e
+      while true; do
+        socat -t 120 -T 180 "TCP4-LISTEN:${VOICE_PORT},${BIND}reuseaddr,fork,max-children=1${RANGE}" \
+          EXEC:"pacat --playback --raw --format=s16le --rate=48000 --channels=1 --device=lo_voice --latency-msec=100"
+        echo "voice: inlet exited (rc=$?), restarting in 1 s" >&2
+        sleep 1
+      done
+    ) &
+  fi
 fi
 
 cat > /data/HeadlessMC/config.properties <<PROPS

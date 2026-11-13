@@ -145,6 +145,11 @@ x-mind: &mind
     # minds alone (see each mind's volumes) — never into a sandbox, where the list
     # itself would reach a prompt. Empty turns the filter off.
     CHAT_TOPICS_PATH: "${CHAT_TOPICS_PATH:-/etc/lastorder/chat-topics/topics.txt}"
+    # The voice (ADR-055): a slot with VOICE_ENABLED=1 sends its say lines to the tts
+    # service and plays them through its body; a line tts cannot voice in time goes to
+    # chat silently. The service itself is the `voice` profile, raised by the operator.
+    TTS_URL: "${TTS_URL:-http://tts:8790}"
+    TTS_TIMEOUT_S: "${TTS_TIMEOUT_S:-12}"
   command: ["python", "-m", "runtime.mind"]
 
 # The node sandbox of a slot (T-027, ADR-033): the runner plus both harnesses in one
@@ -236,7 +241,9 @@ services:
       # skinrestorer (T-061): the sisters' skins on this offline server — the only
       # actively maintained server-side Fabric skin mod with an exact 1.21.11 build
       # (Modrinth `skinrestorer`, checked 2026-11-11); pinned like fabric-api above.
-      MODRINTH_PROJECTS: "fabric-api:${FABRIC_API:-0.140.0+1.21.11},skinrestorer:${SKINRESTORER:-2.11.1+1.21.11-fabric}"
+      # simple-voice-chat (ADR-055): the sisters' voices on our own server, so the voice
+      # bodies can be checked before a foreign server; its voice port is UDP 24454.
+      MODRINTH_PROJECTS: "fabric-api:${FABRIC_API:-0.140.0+1.21.11},skinrestorer:${SKINRESTORER:-2.11.1+1.21.11-fabric},simple-voice-chat:${SVC_SERVER:-fabric-1.21.11-2.6.27}"
       ONLINE_MODE: "FALSE"
       ENFORCE_SECURE_PROFILE: "FALSE"   # offline clients cannot sign chat
       DIFFICULTY: "easy"
@@ -250,6 +257,7 @@ services:
       MOTD: "Last Order"
     ports:
       - "${MC_HOST_PORT:-25565}:25565"   # join from the host to watch
+      - "${SVC_HOST_PORT:-24454}:24454/udp"   # Simple Voice Chat (ADR-055): hear the sisters from the host
     volumes:
       - world:/data
       # the operator's chosen skin (T-061), mounted READ-ONLY for the mod's
@@ -274,6 +282,9 @@ services:
       BODY_LINK_IP: 10.250.1.2   # the gateway relay listens on link-1 only
       # BODY_CAMERA_1=1 turns this slot's camera on (T-063): Xvfb + ffmpeg → media
       BODY_CAMERA: "${BODY_CAMERA_1:-}"
+      # BODY_VOICE_1=1 gives this body SVC and a virtual microphone (ADR-055); the
+      # mind-1 speaks through it — the same switch, see VOICE_ENABLED there
+      BODY_VOICE: "${BODY_VOICE_1:-}"
     volumes:
       - body-1:/data
     # link-1: the bridge to mind-1 alone (ADR-050); media-net only for the camera stream
@@ -316,6 +327,8 @@ services:
       # skin plugin expects, sent by the environment right after /login; empty —
       # the default — sends nothing (our mc-server skins come from skinrestorer)
       MC_SKIN_COMMAND: "${MC_SKIN_COMMAND_1:-}"
+      # ADR-055: say is spoken through body-1's inlet (link-1 :25500); same switch as the body
+      VOICE_ENABLED: "${BODY_VOICE_1:-}"
     volumes:
       - mind-1-run:/mind-run
       - workplaces-1:/workplaces:ro   # the Jev policy of the living sister, read-only
@@ -358,6 +371,7 @@ services:
       MIND_LINK_IP: 10.250.2.3
       BODY_LINK_IP: 10.250.2.2   # the gateway relay listens on link-2 only
       BODY_CAMERA: "${BODY_CAMERA_2:-}"
+      BODY_VOICE: "${BODY_VOICE_2:-}"
     volumes:
       - body-2:/data
     networks:
@@ -390,6 +404,7 @@ services:
       # lifted by up.sh into THIS mind alone, never into node-N
       MC_LOGIN_PASSWORD: "${MC_LOGIN_PASSWORD_2:-}"
       MC_SKIN_COMMAND: "${MC_SKIN_COMMAND_2:-}"   # the T-061 skin command, slot shape of mind-1
+      VOICE_ENABLED: "${BODY_VOICE_2:-}"   # ADR-055, slot shape of mind-1
     volumes:
       - mind-2-run:/mind-run
       - workplaces-2:/workplaces:ro
@@ -428,6 +443,7 @@ services:
       MIND_LINK_IP: 10.250.3.3
       BODY_LINK_IP: 10.250.3.2   # the gateway relay listens on link-3 only
       BODY_CAMERA: "${BODY_CAMERA_3:-}"
+      BODY_VOICE: "${BODY_VOICE_3:-}"
     volumes:
       - body-3:/data
     networks:
@@ -460,6 +476,7 @@ services:
       # lifted by up.sh into THIS mind alone, never into node-N
       MC_LOGIN_PASSWORD: "${MC_LOGIN_PASSWORD_3:-}"
       MC_SKIN_COMMAND: "${MC_SKIN_COMMAND_3:-}"   # the T-061 skin command, slot shape of mind-1
+      VOICE_ENABLED: "${BODY_VOICE_3:-}"   # ADR-055, slot shape of mind-1
     volumes:
       - mind-3-run:/mind-run
       - workplaces-3:/workplaces:ro
@@ -667,6 +684,48 @@ services:
   # GPU 0 is the RTX 2070 (5070 Ti stays free); model checkpoints live in the named volume,
   # never a bind mount. The 127.0.0.1 publish exists only for the dev/jev_spike.py measurement;
   # production callers reach the service inside the docker network as `jev:8000`.
+  # The voice service (ADR-055): say lines → PCM 48 kHz for the voice bodies. Qwen3-TTS
+  # clones the operator's reference voice (.stand/voice/ref.wav + ref.txt, outside git) on
+  # the GPU named TTS_GPU_NAME; TTS_BACKEND=openrouter is the cloud fallback (a new kind
+  # of spending, the key lives here alone). Raised by the operator, never by the stand.
+  tts:
+    build:
+      context: ..
+      dockerfile: docker/tts/Dockerfile
+    image: lastorder-tts:dev
+    profiles: [voice]
+    restart: "no"
+    logging: *default-logging
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      HF_HOME: /data/hf
+      TTS_BACKEND: "${TTS_BACKEND:-qwen3}"
+      TTS_QWEN_MODEL: "${TTS_QWEN_MODEL:-Qwen/Qwen3-TTS-12Hz-1.7B-Base}"
+      TTS_GPU_NAME: "${TTS_GPU_NAME:-5070 Ti}"
+      TTS_VOICE_DIR: /voice
+      OPENROUTER_API_KEY: "${TTS_OPENROUTER_KEY:-}"
+      TTS_OPENROUTER_MODEL: "${TTS_OPENROUTER_MODEL:-fish-audio/s2.1-pro}"
+    ports:
+      - "127.0.0.1:8790:8790"   # try a line from the host: curl -X POST localhost:8790/speak
+    volumes:
+      - tts-hf:/data
+      - ${STAND_DAEMON_ROOT:-..}/.stand/voice:/voice:ro
+    # every GPU is visible, pin_gpu.sh narrows CUDA to the one named TTS_GPU_NAME (UUID,
+    # stable under WSL2 reordering) — the jev rule "never all" is about what CUDA sees
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8790/health')"]
+      interval: 15s
+      timeout: 5s
+      start_period: 600s   # first start downloads the model (~4 GB)
+      retries: 5
+
   jev:
     build: ./jev
     image: lastorder-jev:dev
@@ -895,6 +954,7 @@ volumes:
   hive-work:
   gateway-db:
   jev-hf:
+  tts-hf:   # the voice service's model cache (ADR-055)
   hapi-data:
   workplaces-1:
   workplaces-2:

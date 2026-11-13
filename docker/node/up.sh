@@ -81,10 +81,11 @@ lift BODY_KIND_1
 lift BODY_KIND_2
 lift BODY_KIND_3
 # per-slot stand switches compose reads only from this process (it never sees the root
-# .env): the camera (T-063) and the post-login skin command (T-061); the chat topics
-# path (ADR-048) — empty in .env turns the filter off
+# .env): the camera (T-063), the voice (ADR-055) and the post-login skin command (T-061);
+# the chat topics path (ADR-048) — empty in .env turns the filter off
 for n in 1 2 3; do
   lift "BODY_CAMERA_$n"
+  lift "BODY_VOICE_$n"
   lift "MC_SKIN_COMMAND_$n"
 done
 lift CHAT_TOPICS_PATH

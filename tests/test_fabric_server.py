@@ -35,13 +35,15 @@ def test_mc_server_is_fabric_with_pinned_loader_and_launcher():
     assert compose_default(env["FABRIC_LAUNCHER_VERSION"]) == "1.1.2"
 
 
-def test_the_server_mod_list_is_fabric_api_plus_the_skin_mod():
+def test_the_server_mod_list_is_fabric_api_the_skin_mod_and_voice_chat():
     projects = COMPOSE["services"]["mc-server"]["environment"]["MODRINTH_PROJECTS"]
-    # the exact list: fabric-api (T-062) and skinrestorer (T-061) — a new mod is a
-    # deliberate act, each entry pinned by a ${VAR:-version} with an explicit default
+    # the exact list: fabric-api (T-062), skinrestorer (T-061), simple-voice-chat
+    # (ADR-055) — a new mod is a deliberate act, each entry pinned by a
+    # ${VAR:-version} with an explicit default
     assert projects.split(",") == [
         "fabric-api:${FABRIC_API:-0.140.0+1.21.11}",
         "skinrestorer:${SKINRESTORER:-2.11.1+1.21.11-fabric}",
+        "simple-voice-chat:${SVC_SERVER:-fabric-1.21.11-2.6.27}",
     ]
     for entry in projects.split(","):
         _project, _, pin = entry.partition(":")

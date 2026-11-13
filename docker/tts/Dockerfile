@@ -19,5 +19,9 @@ WORKDIR /app
 COPY runtime/__init__.py ./runtime/__init__.py
 COPY runtime/tts ./runtime/tts
 
+COPY docker/tts/pin_gpu.sh /usr/local/bin/pin_gpu.sh
+RUN chmod +x /usr/local/bin/pin_gpu.sh
+
 EXPOSE 8790
+ENTRYPOINT ["/usr/local/bin/pin_gpu.sh"]
 CMD ["python", "-m", "runtime.tts.server"]
