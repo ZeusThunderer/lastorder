@@ -2,7 +2,8 @@
 // live `hapi pi` session — stdin belongs to HAPI, so the board feed, Misaka-net
 // and the network's envelopes reach the agent only through this extension
 // (TASKBOARD.md section 11). It delivers; it adds no agent tools and no
-// behaviour rules (ADR-032, ADR-041). The identity is the one mcp.json already
+// behaviour rules (ADR-032, ADR-041) — except one delivery guard: no long
+// `sleep` that would hold the delivered messages. The identity is the one mcp.json already
 // carries (the node key); the naming preset comes from the workplace's own
 // PERSONA.md, never hardcoded.
 
@@ -14,6 +15,17 @@ import { HiveClient } from "./hive.ts";
 import { LinkCore } from "./link.ts";
 
 const POLL_S = 10_000; // ms; the section-11 ceiling is 15 s
+export const SLEEP_MAX_S = 30;
+
+/** The longest `sleep N` in a shell command, in seconds (N, Ns, Nm, Nh). */
+export function longestSleep(command: string): number {
+  const unit: Record<string, number> = { "": 1, s: 1, m: 60, h: 3600 };
+  let longest = 0;
+  for (const m of command.matchAll(/\bsleep\s+(\d+(?:\.\d+)?)([smh]?)\b/g)) {
+    longest = Math.max(longest, Number(m[1]) * unit[m[2]!]!);
+  }
+  return longest;
+}
 
 function log(type: string, payload: Record<string, unknown> = {}): void {
   // the extension's journal: one JSON line on Pi's stderr (docker logs)
@@ -116,6 +128,23 @@ export default function misakaLink(pi: unknown) {
         await new Promise(resolve => setTimeout(resolve, Math.max(0, pause)));
       }
     })();
+  });
+
+  // A long `sleep` in bash holds every message — the operator's HAPI line waits for
+  // the turn's end (2026-11-13: Last Order chained `sleep 540` for an hour). The one
+  // guard of this extension: refuse it and end the turn, which IS the wait.
+  api.on("tool_call", (eventRaw: unknown) => {
+    const event = eventRaw as { toolName?: string; input?: { command?: unknown } };
+    if (event.toolName !== "bash" || typeof event.input?.command !== "string") return;
+    if (longestSleep(event.input.command) <= SLEEP_MAX_S) return;
+    log("misakalink.sleep_refused", { command: event.input.command.slice(0, 80) });
+    return {
+      block: true,
+      terminate: true,
+      reason:
+        `sleep over ${SLEEP_MAX_S}s refused: a running tool holds every message. ` +
+        "To wait, end your turn — the clock and any new message wake you.",
+    };
   });
 
   api.on("session_shutdown", () => {
