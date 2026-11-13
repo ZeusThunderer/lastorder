@@ -49,6 +49,7 @@ from runtime.mind.jev import JevGate
 from runtime.mind.login import SessionLogin
 from runtime.perception.topics import TopicFilter
 from runtime.perception.translate import Perception
+from runtime.voice.speaker import Speaker, SpeakerBusy
 
 log = logging.getLogger("mcp_body")
 
@@ -471,8 +472,12 @@ class BodyMcp:
         clock: Callable[[], float] = time.monotonic,
         deny_commands: tuple[str, ...] = DEFAULT_DENY,
         wait_max_s: float = WAIT_TIMEOUT_MAX_S,
+        speaker: Speaker | None = None,
     ):
         self._x = executor
+        # ADR-055: with a voice, say queues the line and the speaker posts it to chat
+        # when its audio starts; without one, say sends it at once as before
+        self._speaker = speaker
         self._perception = perception or Perception(descriptions={}, salt="", mode="plain")
         self._clock = clock
         self._last_say_at = -1e9
@@ -595,6 +600,13 @@ class BodyMcp:
         if self._x.bodiless:
             _err(NO_BODY_ERROR)
         cleaned = check_say(text)
+        if self._speaker is not None:
+            # the queue cap replaces the 4 s rate: lines wait their turn to be spoken
+            try:
+                ahead = self._speaker.say(cleaned)
+            except SpeakerBusy as exc:
+                _err(str(exc))
+            return {"said": True, "text": cleaned, "voice": "queued", "ahead": ahead}
         now = self._clock()
         if now - self._last_say_at < SAY_MIN_INTERVAL_S:
             _err(f"say: too fast, one line per {SAY_MIN_INTERVAL_S:.0f} s")
@@ -695,7 +707,9 @@ def build_server(
         return await impl._reply("stop", {}, impl.stop)
 
     async def say(text: str) -> dict[str, Any]:
-        """One line into the player chat (no / or @, limited length and rate)."""
+        """One line into the player chat (no / or @, limited length and rate).
+        When this body has a voice, the line is spoken aloud and appears in chat
+        as the voice starts; lines are spoken in order, a few may wait their turn."""
         return await impl._reply("say", {"text": text}, lambda: impl.say(text))
 
     async def server_command(command: str) -> dict[str, Any]:
@@ -838,6 +852,7 @@ def build_mind(
     deny_commands: tuple[str, ...] = DEFAULT_DENY,
     wait_max_s: float = WAIT_TIMEOUT_MAX_S,
     login: "SessionLogin | None" = None,
+    voice: "Callable[[Executor], Speaker] | None" = None,
     **executor_kwargs: Any,
 ) -> tuple[MCPServer, BodyMcp, Executor]:
     """Assemble the whole mind of one slot; tests use the impl and executor directly."""
@@ -858,6 +873,7 @@ def build_mind(
         clock=clock,
         deny_commands=deny_commands,
         wait_max_s=wait_max_s,
+        speaker=voice(executor) if voice is not None else None,
     )
     server, impl = build_server(impl, start_c1=start_c1, runner_key=runner_key)
     return server, impl, executor
@@ -937,6 +953,43 @@ def serve_mind(
         # the server thread ended without a signal: the mind is down for a
         # reason, and docker must see a failure (not a clean stop)
         raise SystemExit(1)
+
+
+def voice_from_env(
+    env: Callable[..., Any], body: Any, call_log: JsonlLog, username: str
+) -> "Callable[[Executor], Speaker] | None":
+    """ADR-055: VOICE_ENABLED=1 (compose BODY_VOICE_N) gives this slot's say a voice —
+    the tts service synthesizes, the body's inlet on the link plays it into SVC."""
+    from runtime.voice.speaker import http_synth, tcp_inlet
+
+    if (env("VOICE_ENABLED", default="") or "") != "1":
+        return None
+    if body is None:
+        log.info("voice: VOICE_ENABLED=1 but no body (BODY_KIND=none): say stays silent")
+        return None
+    tts_url = env("TTS_URL", default="http://tts:8790") or "http://tts:8790"
+    host = env("BODY_HOST", default="127.0.0.1") or "127.0.0.1"
+    port = int(env("BODY_VOICE_PORT", default="25500") or "25500")
+    timeout_s = float(env("TTS_TIMEOUT_S", default="12") or "12")
+    max_pending = int(env("VOICE_MAX_PENDING", default="3") or "3")
+
+    def make(executor: Executor) -> Speaker:
+        def send_chat(text: str) -> None:
+            if executor.bodiless:
+                raise RuntimeError("no body")
+            with executor.body_lock:
+                executor.body.act("chat", {"text": text})
+
+        return Speaker(
+            synth=http_synth(tts_url, timeout_s),
+            connect=tcp_inlet(host, port),
+            send_chat=send_chat,
+            journal=call_log,
+            max_pending=max_pending,
+        ).start()
+
+    log.info("voice armed for %s: tts %s, inlet %s:%d", username, tts_url, host, port)
+    return make
 
 
 def main() -> None:
@@ -1061,6 +1114,8 @@ def main() -> None:
     else:
         log.warning("CHAT_TOPICS_PATH is empty: other players' chat reaches the agent unfiltered")
 
+    voice = voice_from_env(env, body, call_log, username)
+
     server, _impl, _executor = build_mind(
         body,
         username=username,
@@ -1080,6 +1135,7 @@ def main() -> None:
         deny_commands=deny,
         wait_max_s=wait_max,
         login=login,
+        voice=voice,
     )
     # The mind owns its body (ADR-050): it asks the executor for it at start and for a
     # new one when it dies. BODY_SUPERVISE=0 leaves the body to whoever raised it.
