@@ -81,8 +81,10 @@ microphone_gain=${BODY_VOICE_GAIN_DB:-0.0}
 java_microphone_implementation=${BODY_VOICE_JAVA_MIC:-false}
 SVC
 
-  # SVC needs a real OpenAL; the -lwjgl stub has none: a voice body renders on Xvfb
-  if [ "$BODY_RENDER" = "headless" ]; then
+  # SVC needs a real OpenAL; the -lwjgl stub has none: a voice body renders on Xvfb.
+  # The camera already runs the real path on its own display :99 — xvfb-run would start
+  # a second one and leave the camera filming an empty screen.
+  if [ "$BODY_RENDER" = "headless" ] && [ "${BODY_CAMERA:-}" != "1" ]; then
     BODY_RENDER=xvfb
     echo "voice: BODY_RENDER headless → xvfb (SVC needs real LWJGL/OpenAL)" >&2
   fi

@@ -3,8 +3,10 @@ Russian line in the described voice, the result becomes `ref.wav` + `ref.txt` fo
 clone. A voice nobody owns — the alternative to a clip cut from the anime.
 
     docker compose -f docker/compose.yml --profile voice run --rm \
-        -v "$PWD/.stand/voice:/voice-out" tts \
+        -v "$(pwd -W)/.stand/voice:/voice-out" tts \
         python -m runtime.tts.design_voice --out-dir /voice-out
+
+(`pwd -W` in Git Bash gives C:/… — the daemon resolves bind paths, not the shell.)
 
 Listen to `ref.wav`; run again with another `--seed` or `--instruct` until it fits.
 """
