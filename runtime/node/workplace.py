@@ -500,6 +500,10 @@ def render_agent_workshop(
 PI_CONTEXT_WINDOW = 96_000
 PI_RESERVE_TOKENS = 16_384
 PI_KEEP_RECENT_TOKENS = 20_000
+# Pi's MCP call timeout for the body server: above the mind's wait_events cap
+# (WAIT_EVENTS_MAX_S, 60). At 10 s every longer wait died, so sisters polled every
+# 8–9 s — 3.9k of 5.9k calls on 2026-11-13, each resending the whole context.
+PI_BODY_MCP_TIMEOUT_S = 75
 # A sister's life sessions think at `low` (operator, 2026-11-07, D-007): thinking is
 # resent with the history and was 19 % of the input (T-056 report), and it is the
 # output that makes a turn slow. The will session keeps Pi's default (`medium`).
@@ -553,7 +557,7 @@ def render_pi_configs(
             "mcpServers": {
                 "body": {
                     "url": f"{body_base.rstrip('/')}/mcp",
-                    "timeout": 10,
+                    "timeout": PI_BODY_MCP_TIMEOUT_S,
                     "exposure": "direct",
                 },
                 "hive": {

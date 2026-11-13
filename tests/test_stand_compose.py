@@ -114,13 +114,14 @@ def test_zai_egress_carries_api_zai_into_svc_lo():
 
 
 def test_mind_wait_events_cap_stays_under_the_harness_kill():
-    # zcode kills a tool call after 30 s (7 killed waits on node-2, T-052); the
-    # compose default keeps every ask under it with a margin, and an operator
-    # override rides the same variable.
+    # the harness kills a long tool call (zcode 30 s in T-052; now Pi's body MCP
+    # timeout): the compose default keeps every ask under it with a margin
+    from runtime.node.workplace import PI_BODY_MCP_TIMEOUT_S
     for name in ("mind-1", "mind-2", "mind-3"):
         raw = COMPOSE["services"][name]["environment"]["WAIT_EVENTS_MAX_S"]
-        assert raw == "${WAIT_EVENTS_MAX_S:-25}", name
-        assert float(re.search(r":-(\d+(?:\.\d+)?)}", raw).group(1)) < 30.0, name
+        assert raw == "${WAIT_EVENTS_MAX_S:-60}", name
+        cap = float(re.search(r":-(\d+(?:\.\d+)?)}", raw).group(1))
+        assert cap + 10 <= PI_BODY_MCP_TIMEOUT_S, name
 
 
 # --- T-055: the bridge-friendly slot lifecycle --------------------------------------------------

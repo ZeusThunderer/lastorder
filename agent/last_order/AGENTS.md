@@ -95,7 +95,8 @@ damage, death, an intent finishing, an idle-watchdog signal, a chat line, a boar
 shift expiring — or times out, and you decide again. A board batch is up to ten fresh lines of
 the task board; Misaka-net messages arrive the same way, each in its `[net from <name>]`
 envelope. Read what a batch cut off with `board()` and `inbox()`. Between your turns the world
-keeps moving: leave an intent running, or wait shorter. Do not spin on `observe()`.
+keeps moving: leave an intent running, or wait shorter. Do not spin on `observe()`. Every
+wake costs a whole turn: with nothing running, wait long (60 s) — messages keep for you.
 
 ## What others say
 

@@ -18,6 +18,25 @@ const POLL_S = 10_000; // ms; the section-11 ceiling is 15 s
 export const SLEEP_MAX_S = 30;
 const IDLE_POLL_MS = 120_000; // the desk only: see the loop
 
+/** Strip reasoning_content from assistant messages before the last user message
+ * (the current turn keeps its own) and let Z.ai clear it too. Mutates the payload. */
+export function dropOldReasoning(event: unknown): unknown {
+  const payload = (event as { payload?: unknown })?.payload as
+    | { messages?: Array<Record<string, unknown>>; thinking?: Record<string, unknown> }
+    | undefined;
+  if (!payload || !Array.isArray(payload.messages)) return undefined;
+  let lastUser = -1;
+  payload.messages.forEach((m, i) => {
+    if (m?.role === "user") lastUser = i;
+  });
+  for (let i = 0; i < lastUser; i++) {
+    const m = payload.messages[i]!;
+    if (m?.role === "assistant") delete m.reasoning_content;
+  }
+  if (payload.thinking && typeof payload.thinking === "object") payload.thinking.clear_thinking = true;
+  return payload;
+}
+
 /** The longest `sleep N` in a shell command, in seconds (N, Ns, Nm, Nh). */
 export function longestSleep(command: string): number {
   const unit: Record<string, number> = { "": 1, s: 1, m: 60, h: 3600 };
@@ -152,6 +171,11 @@ export default function misakaLink(pi: unknown) {
         "To wait, end your turn — the clock and any new message wake you.",
     };
   });
+
+  // Old reasoning stays out of the request (2026-11-13: thinking was ~48 % of a
+  // sister's resent history). Pi asks Z.ai for clear_thinking:false and replays every
+  // reasoning_content; Z.ai's own default drops reasoning of past turns — so do we.
+  api.on("before_provider_request", (eventRaw: unknown) => dropOldReasoning(eventRaw));
 
   api.on("session_shutdown", () => {
     stopped = true; // the loop finishes its sleep and exits; no in-flight re-schedule
