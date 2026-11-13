@@ -69,15 +69,15 @@ flowchart TB
 | Процесс | Образ | Внутри | Сеть |
 |---|---|---|---|
 | mc-server | itzg/minecraft-server | мир на volume `world`, RCON | внутренняя |
-| body-N | docker/body | HeadlessMC, Fabric 1.21.11, uc (C0); py4j слушает только localhost | внутренняя |
-| mind-N | docker/mind | `network_mode: service:body-N`; C1, perception, детектор смерти, MCP-сервер тела | через body-N |
+| body-N | docker/body | HeadlessMC, Fabric 1.21.11, uc (C0); py4j через relay на link-N; ресурс сети — по умолчанию нет (ADR-054) | внутренняя |
+| mind-N | docker/mind | C1, часы жизни, perception, детектор смерти, MCP-сервер тела; `BODY_KIND=none` — без тела (ADR-054) | slot-N, link-N, default (ADR-050) |
 | node-N | новый (харнесс) | раннер узла, харнесс (OpenCode или ZCode), рабочее место `agent/<serial>/`, bash; лимиты CPU и RAM | только `mind-N`, `hive`, `llm-gateway`, Z.ai |
 | hive | docker/mind | FastAPI + MCP сети, реестр, база под git (volume `knowledge`), рабочие места (volume `workplaces`), Last Order | внутренняя |
 | llm-gateway | LiteLLM proxy | ключи провайдеров, виртуальные ключи узлов, учёт и потолки | наружу к провайдерам |
 | jev | T-005 | локальный FastJev, запасной путь (ADR-027) | внутренняя, профиль |
 
 Транспорт — HTTP (ADR-024): MCP поверх streamable HTTP. Входящие соединения к `mind-N` идут только
-из `node-N` своего слота. Для этого MCP-порт публикуется в сетевом пространстве `body-N`.
+из `node-N` своего слота (сеть slot-N, ADR-050).
 
 **Раннер узла** — точка входа `node-N`, код небольшой и от харнесса не зависит (адаптер на харнесс):
 1. рождение: `NodeRegistry.birth` → рабочее место из шаблона → запуск длинной сессии;
