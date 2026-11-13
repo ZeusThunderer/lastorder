@@ -39,6 +39,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+import yaml
+
+from runtime.config import CHARACTER_DIR
 from runtime.hive.client import BoardFeedClient, HiveRejected, HiveUnavailable
 from runtime.knowledge.schema import CAUSES, SchemaError, Will, emergency_will
 from runtime.lastorder.naming import NamingPreset, node_name
@@ -57,18 +60,25 @@ from runtime.node.adapters import Command, quota_exhausted
 from runtime.node.remotes import BaseApi, HiveApi, MindApi
 from runtime.node.willproxy import WillProxy
 
-LIFE_PREFIX = "Life session."
-WILL_PREFIX = "Will session (you have just died)."
+
+
+def load_openers(path: Path = CHARACTER_DIR / "session_openers.yml") -> dict[str, str]:
+    """The first line of each session (ADR-054: content in the template, not code).
+    A missing file or key is a startup error, never a silent default."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    keys = ("life", "will_death", "will_term_ttl", "will_term_stuck")
+    if not isinstance(raw, dict) or any(not str(raw.get(k) or "").strip() for k in keys):
+        raise ValueError(f"{path}: needs non-empty {', '.join(keys)}")
+    return {k: " ".join(str(raw[k]).split()) for k in keys}
+
+
+_OPENERS = load_openers()
+LIFE_PREFIX = _OPENERS["life"]
+WILL_PREFIX = _OPENERS["will_death"]
 # ADR-052: the soft handover will sessions — the life ended (the clock or her own
 # ask), the body did not. The heir finds it standing where her predecessor left it.
-WILL_PREFIX_TERM_TTL = (
-    "Will session (your life term is over; the body did not die — it passes to your heir"
-    " as it stands)."
-)
-WILL_PREFIX_TERM_STUCK = (
-    "Will session (you asked to retire; the body did not die — it passes to your heir"
-    " as it stands)."
-)
+WILL_PREFIX_TERM_TTL = _OPENERS["will_term_ttl"]
+WILL_PREFIX_TERM_STUCK = _OPENERS["will_term_stuck"]
 # the sister's own will draft in memory/ (skills/reflect keeps it, T-071): the
 # runner's second choice after a submitted will, before the emergency template
 WILL_DRAFT_FILE = "will-draft.md"

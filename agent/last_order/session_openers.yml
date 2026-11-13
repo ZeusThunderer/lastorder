@@ -1,0 +1,14 @@
+# The first line of each session the runner opens (ADR-054: content, not code). The rest of
+# the session text is SESSION_PROMPT.md. runtime/node/runner.py only reads this file; a
+# missing key is a startup error.
+
+life: Life session.
+will_death: Will session (you have just died).
+# ADR-052: the soft handover — the life ended (the clock or her own ask), the body did not;
+# a bodiless sister (ADR-054) has none to pass on, so the line speaks of what she leaves
+will_term_ttl: >-
+  Will session (your life term is over; whatever you hold — a body, its place and loot —
+  passes to your heir as it stands).
+will_term_stuck: >-
+  Will session (you asked to retire; whatever you hold — a body, its place and loot —
+  passes to your heir as it stands).

@@ -41,7 +41,7 @@ from runtime.knowledge.schema import (
     WillMeta,
     emergency_will,
 )
-from runtime.lastorder.naming import NamingPreset, node_name
+from runtime.lastorder.naming import HEIR_NEUTRAL, PRESETS, NamingPreset, node_name
 from runtime.lastorder.persona import LEADING_COMMENT, Node, render
 from runtime.llm.client import CallStats
 from runtime.perception.translate import NAMESPACED
@@ -49,10 +49,9 @@ from runtime.perception.translate import NAMESPACED
 WILL_PROMPT_PATH = CHARACTER_DIR / "will_prompt.md"
 
 # The numberless heir address per naming preset (ADR-018): the heir's serial is assigned
-# at birth, after retire, so the dying mind cannot know it. A future preset without a
-# form here gets the preset-neutral address hive itself uses.
-HEIR_ADDRESSES: dict[str, str] = {"lab": "следующий узел", "misaka": "следующая Мисака"}
-HEIR_NEUTRAL = "наследник"
+# at birth, after retire, so the dying mind cannot know it. Content of naming.yml
+# (ADR-054); a preset without a form there gets the preset-neutral address hive uses.
+HEIR_ADDRESSES: dict[str, str] = {k: p.heir_address for k, p in PRESETS.items() if p.heir_address}
 
 # A will body never carries trait numbers (KNOWLEDGE.md v2 section 5: numbers live in the
 # frontmatter only). The stems cover the Russian renderings the prompt's examples invite.

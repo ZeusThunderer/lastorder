@@ -44,17 +44,16 @@ from runtime.config import env
 from runtime.knowledge.schema import BirthFile, emergency_will
 from runtime.knowledge.slice import format_serial, parse_utc
 from runtime.knowledge.store import AlreadyRetiredError, KnowledgeStore, UnknownNodeError
-from runtime.lastorder.naming import node_name, preset as naming_preset
+from runtime.lastorder.naming import HEIR_NEUTRAL, node_name, preset as naming_preset
 from runtime.lastorder.traits import Traits
 from runtime.ports import BirthRecord, NodeBrief
 
 MAX_LIFE_MIN = 45  # CLAUDE.md: the life's length in minutes; env MAX_LIFE_MIN overrides
 TTL_SCAN_S = 30  # background scan cadence (task T-022); env HIVE_TTL_SCAN_S overrides
 CAUSE_STUCK = "stuck"  # ADR-026: the only cause request_death accepts
-# The emergency will of a lost node needs an addressee; NamingPreset (ADR-018)
-# carries no heir form and runtime/lastorder/ is outside T-022, so the address is
-# preset-neutral — the node's own name does come from the configured preset.
-HEIR_ADDRESS = "наследник"
+# The emergency will of a lost node needs an addressee: the preset-neutral one of
+# naming.yml (ADR-054) — the node's own name does come from the configured preset.
+HEIR_ADDRESS = HEIR_NEUTRAL
 
 
 class LifecycleError(ValueError):
