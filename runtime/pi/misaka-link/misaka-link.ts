@@ -2,8 +2,8 @@
 // live `hapi pi` session — stdin belongs to HAPI, so the board feed, Misaka-net
 // and the network's envelopes reach the agent only through this extension
 // (TASKBOARD.md section 11). It delivers; it adds no agent tools and no
-// behaviour rules (ADR-032, ADR-041) — except one delivery guard: no long
-// `sleep` that would hold the delivered messages. The identity is the one mcp.json already
+// behaviour rules (ADR-032, ADR-041) — except two guards: no long `sleep` that
+// would hold the delivered messages, and no call repeated in a loop. The identity is the one mcp.json already
 // carries (the node key); the naming preset comes from the workplace's own
 // PERSONA.md, never hardcoded.
 
@@ -35,6 +35,27 @@ export function dropOldReasoning(event: unknown): unknown {
   }
   if (payload.thinking && typeof payload.thinking === "object") payload.thinking.clear_thinking = true;
   return payload;
+}
+
+/** The same call (name + input) REPEAT_MAX times in a row within one run is a loop,
+ * not work — Gemini CLI (5 in a row), OpenHands and Goose stop it the same way. The
+ * body's wait_events is the one call made to repeat. */
+export const REPEAT_MAX = 5;
+export class RepeatGuard {
+  private last = "";
+  private count = 0;
+  reset(): void {
+    this.last = "";
+    this.count = 0;
+  }
+  /** True when this call should be refused. */
+  check(toolName: string, input: unknown): boolean {
+    if (/wait_events$/.test(toolName)) return false;
+    const key = toolName + JSON.stringify(input ?? null);
+    this.count = key === this.last ? this.count + 1 : 1;
+    this.last = key;
+    return this.count >= REPEAT_MAX;
+  }
 }
 
 /** The longest `sleep N` in a shell command, in seconds (N, Ns, Nm, Nh). */
@@ -158,8 +179,24 @@ export default function misakaLink(pi: unknown) {
   // A long `sleep` in bash holds every message — the operator's HAPI line waits for
   // the turn's end (2026-11-13: Last Order chained `sleep 540` for an hour). The one
   // guard of this extension: refuse it and end the turn, which IS the wait.
+  // 2026-11-13 night: with sleep refused, Last Order "waited" by calling `date` every
+  // 2-3 s inside one run — 1,200 calls an hour at ~140k context, a 5-hour quota gone.
+  const repeats = new RepeatGuard();
+  api.on("agent_start", () => repeats.reset());
+
   api.on("tool_call", (eventRaw: unknown) => {
     const event = eventRaw as { toolName?: string; input?: { command?: unknown } };
+    if (repeats.check(String(event.toolName), event.input)) {
+      log("misakalink.repeat_refused", { tool: event.toolName });
+      return {
+        block: true,
+        terminate: true,
+        reason:
+          `the same call ${REPEAT_MAX} times in a row refused: a repeated call is a loop and ` +
+          "every call resends your whole context. To wait, end your turn — the clock and " +
+          "any new message wake you.",
+      };
+    }
     if (event.toolName !== "bash" || typeof event.input?.command !== "string") return;
     if (longestSleep(event.input.command) <= SLEEP_MAX_S) return;
     log("misakalink.sleep_refused", { command: event.input.command.slice(0, 80) });
