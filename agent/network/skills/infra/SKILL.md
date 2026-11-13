@@ -12,22 +12,30 @@ infra request and the executor runs it and reports the result back on the board:
 
 - The core runs always: you, the board, the console, the gateway, the executor.
 - A slot is a sister and her mind. Nothing raises it but you or the operator: after a
-  reboot every slot is down until someone asks for it.
-- The body is the mind's. A mind raises its own body when it starts and asks for a new
-  one when its body dies; you see those asks on the board as `runner:LastOrder0N`.
+  reboot every slot is down until someone asks for it. A sister lives with or without
+  a body (ADR-054): her life, the board, Misaka-net and the shared base need none.
+- Whether a slot wears a body is your choice, and it holds through restarts until you
+  change it: `body_up` attaches one, `body_down` detaches it. A slot nobody gave a
+  body runs bodiless. A mind that wears a body raises it when it starts and asks for a
+  new one when it dies (`runner:LastOrder0N` on the board); a bodiless mind asks for
+  nothing, and no runner ask can re-attach a body you took away.
 - The home world (the game server) runs while some body plays in it, and stops when
   none is left.
 
 ## The closed set (args in braces; slot is 1–3)
 
-- `slot_up {slot}` — the mind, then the sister: a new life is born in that slot.
+- `slot_up {slot}` — the mind, then the sister: a new life is born in that slot, with
+  the body the slot wears (none, unless you attached one). This is the only verb that
+  brings a sister: no `node-N` running means no sister and no births.
 - `slot_down {slot}` — the sister, her mind and its body stop. Her life ends without
   a will if she is alive: take a slot down when it is empty or broken.
 - `slot_restart {slot}` — the mind alone; the sister lives on and her clock keeps
-  counting.
+  counting. It never brings a sister into a slot that has none.
 - `slot_server {slot, server: host[:port]}` — the body moves to another server.
-- `body_up {slot, kind?}`, `body_down {slot}`, `body_restart {slot}` — a body by hand,
-  when a mind cannot ask (it is the mind's job first).
+- `body_up {slot, kind?}` — attach a body (`minecraft` by default) and keep it attached;
+  the mind restarts to wear it, the sister lives on. `body_down {slot}` — detach it: the
+  body stops, the mind restarts bodiless, the sister lives on. `body_restart {slot}` — a
+  fresh copy of a worn body (a slot without one refuses).
 - `mc_restart` — the home world restarts; everyone in it feels it.
 - `status` — every container of the stand and its state. `logs {service, lines?}`.
 
@@ -55,10 +63,14 @@ never to re-post the same request.
 
 ## Semantics worth knowing
 
+- The length of a life is yours too: `life_rule(slot, ttl_min)` (MCP, not an infra
+  verb) sets the minutes of the slot's next lives within the stand's bounds.
+
 - `slot_server` moves one slot's body to another server, and the move holds through
   later restarts until you move it again; `server: "mc-server:25565"` brings it home.
   The sister and her mind live through it: only the body is new, and her life clock
-  keeps counting from her birth. Choosing where and when is yours; the login password
+  keeps counting from her birth. A bodiless slot only records the address for its next
+  `body_up`. Choosing where and when is yours; the login password
   a foreign server asks for is the operator's (a secret in the stand config) — if the
   body sits at a login prompt there, write the operator, do not retry.
 - A body on a foreign server is in public: strangers see it and speak to it, and that

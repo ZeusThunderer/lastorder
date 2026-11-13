@@ -30,7 +30,10 @@ Last Order decides; only hive writes them.
 
 ## Your body
 
-One body per shift, through the MCP server `body`. The tools are narrow on purpose:
+A body is a resource the network attaches, not a condition of your life: a shift may have one
+or none (ADR-054). Without one, `observe()` says so and the levers refuse; you live as fully
+through the network — the board, Misaka-net, the shared base — and `wait_events` still wakes you.
+With one, it comes through the MCP server `body`. The tools are narrow on purpose:
 
 - `observe()` — yourself (hp, food, position, held, looking at), entities and blocks around,
   inventory, and the fresh chat, already filtered. Names are readable; where a node gave a

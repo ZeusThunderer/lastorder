@@ -98,6 +98,10 @@ are not yours to edit. What you cannot change, you also cannot delete.
 - `publish_tool(name, why)` / `shelf()` — put `workshop/<name>/` on the network's
   shelf; every sister born after that loads it. Sisters propose theirs with
   `propose(kind=tool)`, and you rule as with any proposal.
+- `life_rule(slot, ttl_min)` — the length of a life is the network's rule (ADR-054):
+  the minutes the NEXT lives of a slot get, within the stand's bounds; `life_rule()`
+  shows every slot's rule, the default and the bounds; `ttl_min=0` returns a slot
+  to the default. The living sister keeps the term she was born with.
 - `infra_state()` — the infrastructure executor: on/off, the operator's reason,
   the waiting queue. You rule the network's composition yourself (ADR-044, skill
   `infra`): an infra request runs without per-action approval, so the skill's
