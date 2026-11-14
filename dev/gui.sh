@@ -10,7 +10,8 @@
 # the abstract X socket with the body's own cookie (x11vnc, port 5900 inside that
 # namespace); `lastorder-gui-N-web` sits on the stand's default network, publishes
 # 127.0.0.1:608N and bridges the browser (noVNC) to body-N:5900.
-# C1 keeps acting while you drive: stop the sister's intent first if it fights you.
+# While you drive, the sister's sandbox node-N is PAUSED (docker pause): she sends no
+# intents, her session and life resume on `down`. Her mind (C1, clock) keeps running.
 # A link clicked in the game's chat cannot open a browser in the body — choose
 # "Copy to Clipboard"; it shows up in noVNC's clipboard panel (left side bar).
 set -euo pipefail
@@ -20,8 +21,10 @@ case "$slot" in 1|2|3) ;; *) echo "usage: $0 up|down 1|2|3" >&2; exit 2 ;; esac
 body="lastorder-body-${slot}-1"; vnc="lastorder-gui-${slot}"; web="lastorder-gui-${slot}-web"
 port="608${slot}"; image="lastorder-gui:dev"
 
+node="lastorder-node-${slot}-1"
 if [ "$cmd" = down ]; then
   docker rm -f "$vnc" "$web" >/dev/null 2>&1 || true
+  docker unpause "$node" >/dev/null 2>&1 && echo "gui $slot: sister resumed" || true
   echo "gui $slot: down"; exit 0
 fi
 [ "$cmd" = up ] || { echo "usage: $0 up|down 1|2|3" >&2; exit 2; }
@@ -53,4 +56,5 @@ sleep 3
 if [ "$(docker inspect -f '{{.State.Running}}' "$vnc")" != true ]; then
   docker logs --tail 20 "$vnc" >&2; echo "gui $slot: x11vnc failed" >&2; exit 1
 fi
+[ "$(docker inspect -f '{{.State.Paused}}' "$node" 2>/dev/null)" = true ]   || { docker pause "$node" >/dev/null 2>&1 && echo "gui $slot: sister paused (node-${slot})"; } || true
 echo "gui $slot: http://127.0.0.1:${port}/vnc.html  (down: bash dev/gui.sh down ${slot})"
