@@ -46,6 +46,9 @@ OPT
 if [ "${BODY_VOICE:-}" = "1" ]; then
   cp /opt/body/mods-voice/*.jar "$GAME/mods/"
   export XDG_RUNTIME_DIR=/tmp/xdg PULSE_RUNTIME_PATH=/tmp/pulse
+  # a restarted container keeps /tmp: the old daemon's pid and socket make the new one
+  # refuse to start ("Daemon startup failed", seen on the second run)
+  rm -rf "$XDG_RUNTIME_DIR" "$PULSE_RUNTIME_PATH" /data/.config/pulse
   mkdir -p "$XDG_RUNTIME_DIR" "$PULSE_RUNTIME_PATH"
   chmod 700 "$XDG_RUNTIME_DIR"
   # -n: no default.pa (no hardware probing in a container); the native socket is all we need

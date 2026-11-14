@@ -55,3 +55,14 @@
   Docker Desktop падает на bake (`--allow=fs.read`): образы собирать `docker build`.
 - С SVC в теле uc начнёт слать чужой голос в `onVoiceFeed` (сейчас `pass` в `py4j_body.py`) — нагрузка
   на мост py4j не измерена. Это же вход для STT (GigaAM v3, следующий шаг).
+
+## STT 2026-11-14 [проверено на стенде]
+- `tts` получил `POST /transcribe` (PCM 48 кГц → текст): Whisper large-v3-turbo через transformers на том же GPU.
+  GigaAM v3 (ADR-010) — лучше для русского, замена позже. 5.4 с речи — 0.94 с.
+- Разум: `runtime/voice/listener.py` — пакеты `onVoiceFeed` по игроку, пауза 0.8 с режет фразу (0.5–20 с),
+  текст → событие `voice.line` → executor пропускает его через `chat_entry` (фильтр тем, `from`) и отдаёт
+  агенту как `chat.line` с `voice: true`. Свой голос не слушается; `VOICE_IGNORE` — список имён.
+- Стенд: LastOrder01 сказал «Вижу пещеру у реки, иду туда, жди меня у дома.» — у LastOrder02 событие
+  `{"from": "LastOrder01", "text": "Вижу пещеру у реки, идут у дожди меня у дома.", "voice": true}`.
+- Найдено и исправлено: перезапущенное тело не поднимало PulseAudio (старый `/tmp/pulse`).
+- `pytest`: голосовые и соседние наборы — 211 passed, 1 skipped.

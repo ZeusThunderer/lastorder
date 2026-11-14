@@ -70,6 +70,12 @@ class BodyCallback:
 
     def __init__(self, sink: Callable[[str, str, bool], None]) -> None:
         self._sink = sink
+        # ADR-055: a voice slot also hears — phrases of other players become voice.line
+        from runtime.voice.listener import listener_from_env
+
+        self._listener = listener_from_env(
+            lambda speaker, text: self._sink("voice.line", f"<{speaker}> {text}", False)
+        )
 
     def isStarted(self):
         return True
@@ -106,17 +112,9 @@ class BodyCallback:
         pass
 
     def onVoiceFeed(self, s="", audio=None):
-        # Voice of another player heard through SVC (ADR-055): no STT yet — one log
-        # line per speaker per 5 s proves the inbound path (PCM16LE from uc, ADR-010).
-        now = time.monotonic()
-        seen = self.__dict__.setdefault("_voice_seen", {})
-        n, last = seen.get(s, (0, 0.0))
-        n += 1
-        if now - last >= 5.0:
-            log.info("voice heard: %s, %d packets, last %d bytes", s, n, len(audio or b""))
-            seen[s] = (0, now)
-        else:
-            seen[s] = (n, last)
+        # Voice of another player heard through SVC (ADR-055, PCM16LE 48 kHz from uc)
+        if self._listener is not None:
+            self._listener.feed(str(s or ""), bytes(audio) if audio is not None else None)
 
     def agentCommandRequest(self, s=""):
         # Chat and voice are observation, never commands (ADR-012).

@@ -646,6 +646,13 @@ class Executor:
                 entry = self.chat_entry(payload.get("text"))
                 if entry is not None:
                     self._emit("chat.line", lines=[entry])
+            elif event.type == "voice.line":
+                # heard in voice chat (ADR-055): the same filter and `from` as a chat
+                # line, marked so the agent knows it was spoken, not typed
+                entry = self.chat_entry(payload.get("text"))
+                if entry is not None:
+                    entry["voice"] = True
+                    self._emit("chat.line", lines=[entry])
             elif event.type == "game.damage" and not payload.get("service"):
                 self._last_damage_at = self._clock()
                 source = self._nearest_hostile()

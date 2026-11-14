@@ -15,7 +15,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -34,12 +34,17 @@ class SpeakIn(BaseModel):
 
 def create_app(backend: Backend | None = None) -> FastAPI:
     """`backend=None` loads the one from env at startup (the model takes ~a minute)."""
-    state: dict[str, Backend] = {}
+    state: dict[str, object] = {}
     lock = threading.Lock()
+    stt_lock = threading.Lock()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         state["backend"] = backend or await run_in_threadpool(from_env)
+        if backend is None:
+            from runtime.tts.stt import stt_from_env
+
+            state["stt"] = await run_in_threadpool(stt_from_env)
         log.info("tts ready: backend %s", state["backend"].name)
         yield
 
@@ -48,6 +53,23 @@ def create_app(backend: Backend | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"backend": state["backend"].name, "rate": str(OUT_RATE)}
+
+    @app.post("/transcribe")
+    async def transcribe(request: Request) -> dict[str, str]:
+        """Raw PCM s16le 48 kHz mono in (one phrase), {"text": ...} out; "" = nothing said."""
+        stt = state.get("stt")
+        if stt is None:
+            raise HTTPException(status_code=503, detail="stt is off (TTS_STT=0)")
+        pcm = await request.body()
+
+        def run() -> str:
+            with stt_lock:
+                return stt.transcribe(pcm)
+
+        t0 = time.monotonic()
+        text = await run_in_threadpool(run)
+        log.info("heard %.1f s in %.2f s: %r", len(pcm) / 2 / OUT_RATE, time.monotonic() - t0, text[:80])
+        return {"text": text}
 
     @app.post("/speak")
     def speak(body: SpeakIn) -> Response:
