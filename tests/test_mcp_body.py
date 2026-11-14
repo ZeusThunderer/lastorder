@@ -885,14 +885,6 @@ def test_check_server_command_accepts_a_player_command() -> None:
 @pytest.mark.parametrize(
     "command",
     [
-        "/login hunter2",
-        "/LOGIN hunter2",
-        "/l hunter2",
-        "/authme:login hunter2",  # the plugin-prefix disguise
-        "/Authme:Register pw pw",
-        "/reg pw pw",
-        "/changepassword a b",
-        "/unregister",
         "/skin set web slim https://x/x.png",  # the skin is the operator's, not a sister's (T-061)
         "/SkinRestorer:skin set player X",
         "/warp; /kill",  # one command per call
@@ -909,8 +901,14 @@ def test_check_server_command_rejections(command: str) -> None:
 
 
 def test_check_server_command_reason_names_the_command() -> None:
-    with pytest.raises(ToolError, match="'login' is on this stand's deny list"):
-        check_server_command("/login secret")
+    with pytest.raises(ToolError, match="'skin' is on this stand's deny list"):
+        check_server_command("/skin set player X")
+
+
+@pytest.mark.parametrize("command", ["/login pw", "/authme:register pw pw", "/changepassword a b"])
+def test_check_server_command_login_is_the_sisters(command: str) -> None:
+    # ADR-056: a server password is the sister's own
+    assert check_server_command(command) == command
 
 
 def test_parse_deny_takes_commas_spaces_and_slashes() -> None:
@@ -920,7 +918,7 @@ def test_parse_deny_takes_commas_spaces_and_slashes() -> None:
 
 def test_server_command_guards_over_mcp(stack: Stack) -> None:
     """The tool set carries the deny list; the body sees only what passed it."""
-    result = stack.call(lambda c: c.call_tool("server_command", {"command": "/login hunter2"}))
+    result = stack.call(lambda c: c.call_tool("server_command", {"command": "/skin set player X"}))
     assert "deny list" in error_text(result)
     result = stack.call(lambda c: c.call_tool("server_command", {"command": "warp pers"}))
     assert "starts with /" in error_text(result)
@@ -936,8 +934,8 @@ def test_server_command_takes_the_stands_slot_list(tmp_path: Path) -> None:
     stack = Stack(deny_commands=("warp",))
     result = stack.call(lambda c: c.call_tool("server_command", {"command": "/warp pers"}))
     assert "deny list" in error_text(result)
-    result = stack.call(lambda c: c.call_tool("server_command", {"command": "/login x"}))
-    assert "deny list" in error_text(result)  # the login default rides on top
+    result = stack.call(lambda c: c.call_tool("server_command", {"command": "/skin x"}))
+    assert "deny list" in error_text(result)  # the stand's default rides on top
 
 
 # --- the environment's login (T-053) ------------------------------------------------------

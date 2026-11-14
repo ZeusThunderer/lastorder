@@ -31,7 +31,9 @@ infra request and the executor runs it and reports the result back on the board:
   a will if she is alive: take a slot down when it is empty or broken.
 - `slot_restart {slot}` — the mind alone; the sister lives on and her clock keeps
   counting. It never brings a sister into a slot that has none.
-- `slot_server {slot, server: host[:port]}` — the body moves to another server.
+- `slot_server {slot, server: host[:port]}` — the body moves to another server. This
+  is THE verb for "go to server X": there is no other connect lever, and a request
+  with any other action name is a plain note to the operator that nothing executes.
 - `body_up {slot, kind?}` — attach a body (`minecraft` by default) and keep it attached;
   the mind restarts to wear it, the sister lives on. `body_down {slot}` — detach it: the
   body stops, the mind restarts bodiless, the sister lives on. `body_restart {slot}` — a
@@ -70,9 +72,10 @@ never to re-post the same request.
   later restarts until you move it again; `server: "mc-server:25565"` brings it home.
   The sister and her mind live through it: only the body is new, and her life clock
   keeps counting from her birth. A bodiless slot only records the address for its next
-  `body_up`. Choosing where and when is yours; the login password
-  a foreign server asks for is the operator's (a secret in the stand config) — if the
-  body sits at a login prompt there, write the operator, do not retry.
+  `body_up`. Choosing where and when is yours. The login a foreign server asks for
+  (`/register`, `/login`) is the sisters' own: each slot's sister registers or logs in
+  with `server_command`, and you keep each slot's password for its later lives — tell
+  the sister you move it, ask her for the one she chose. Not the operator's.
 - A body on a foreign server is in public: strangers see it and speak to it, and that
   server's rules bind it. Say so to the sister you move (a board message), and move one
   slot first, read the result, then the others.

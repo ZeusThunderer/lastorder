@@ -292,12 +292,11 @@ def check_say(text: Any) -> str:
 
 # --- player commands to the server (ADR-043, T-053) ----------------------------------------
 
-# The stand's deny list, always on top of whatever the operator configures: the
-# login/password commands are the environment's (mind-N logs in itself), and a
-# sister spending the slot's credential must stay impossible. `skin` likewise:
-# the skin is the operator's pick, applied by the stand (T-061) — never a
-# sister's own move on this or any server.
-DEFAULT_DENY = ("login", "l", "register", "reg", "changepassword", "unregister", "skin")
+# The stand's deny list, always on top of whatever the operator configures. ADR-056:
+# a server's password is the sister's own (she and Last Order keep it) — /register,
+# /login and /changepassword are hers to type. `skin`: the operator's pick, applied
+# by the stand (T-061).
+DEFAULT_DENY = ("skin",)
 
 
 def parse_deny(*values: str | None) -> tuple[str, ...]:
@@ -351,7 +350,7 @@ def check_server_command(command: Any, deny: tuple[str, ...] = DEFAULT_DENY) -> 
     if denied:
         _err(
             f"server_command: '{next(iter(sorted(denied)))}' is on this stand's deny list"
-            " (ADR-043); the login commands are the environment's"
+            " (ADR-043)"
         )
     return cleaned
 
@@ -714,8 +713,9 @@ def build_server(
 
     async def server_command(command: str) -> dict[str, Any]:
         """One player command to the server, e.g. "/tpa LastOrder02" or "/sethome".
-        Anything a player may type is allowed except this stand's deny list (the
-        login/password commands: the environment logs in itself); the server
+        Anything a player may type is allowed except this stand's deny list. A
+        server's /register and /login are yours: pick the password, keep it (your
+        will, Last Order) for the slot's next lives; the server
         enforces the rights. One command per call, no ';' or line breaks, same
         rate cap as say. The reply, if any, comes back as ordinary chat lines."""
         return await impl._reply(

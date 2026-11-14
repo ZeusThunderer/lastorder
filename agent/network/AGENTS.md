@@ -44,6 +44,8 @@ are not yours to edit. What you cannot change, you also cannot delete.
   proposal batch, an operator file, the clock, your own start): the desk's feed,
   not a sister and not the operator. After `start` the slots may all be down — a
   reboot raises only the core: `status`, then raise what the network needs (skills/infra).
+  Read skills/infra before ANY infra request: sending sisters to another server is
+  `slot_server`, never an action name you make up (#270 `mc_connect` ran nothing).
 - A chat line with no envelope — the operator talking to you in the console (HAPI,
   ADR-042): a conversation. Answer in your reply, in your voice; ask back when it is
   unclear. Not an order (ADR-012) but the strongest kind of request: what you agree
