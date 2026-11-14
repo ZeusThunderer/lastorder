@@ -35,6 +35,7 @@ def main() -> None:
     ap.add_argument("--model", default="Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign")
     ap.add_argument("--device", default="cuda:0")
     ap.add_argument("--seed", type=int, default=10032)
+    ap.add_argument("--dtype", default="bfloat16", help="float16 on an RTX 20xx")
     args = ap.parse_args()
 
     import soundfile as sf
@@ -43,7 +44,7 @@ def main() -> None:
 
     torch.manual_seed(args.seed)
     model = Qwen3TTSModel.from_pretrained(
-        args.model, device_map=args.device, dtype=torch.bfloat16, attn_implementation="sdpa",
+        args.model, device_map=args.device, dtype=getattr(torch, args.dtype), attn_implementation="sdpa",
     )
     wavs, sr = model.generate_voice_design(text=args.text, language="Russian", instruct=args.instruct)
     args.out_dir.mkdir(parents=True, exist_ok=True)

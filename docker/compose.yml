@@ -149,7 +149,7 @@ x-mind: &mind
     # service and plays them through its body; a line tts cannot voice in time goes to
     # chat silently. The service itself is the `voice` profile, raised by the operator.
     TTS_URL: "${TTS_URL:-http://tts:8790}"
-    TTS_TIMEOUT_S: "${TTS_TIMEOUT_S:-12}"
+    TTS_TIMEOUT_S: "${TTS_TIMEOUT_S:-25}"
   command: ["python", "-m", "runtime.mind"]
 
 # The node sandbox of a slot (T-027, ADR-033): the runner plus both harnesses in one
@@ -702,6 +702,7 @@ services:
       TTS_BACKEND: "${TTS_BACKEND:-qwen3}"
       TTS_QWEN_MODEL: "${TTS_QWEN_MODEL:-Qwen/Qwen3-TTS-12Hz-1.7B-Base}"
       TTS_GPU_NAME: "${TTS_GPU_NAME:-5070 Ti}"
+      TTS_DTYPE: "${TTS_DTYPE:-bfloat16}"   # float16 on the RTX 2070 (no bf16 on Turing)
       TTS_VOICE_DIR: /voice
       OPENROUTER_API_KEY: "${TTS_OPENROUTER_KEY:-}"
       TTS_OPENROUTER_MODEL: "${TTS_OPENROUTER_MODEL:-fish-audio/s2.1-pro}"

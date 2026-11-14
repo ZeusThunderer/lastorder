@@ -69,14 +69,15 @@ def to_pcm48(data: bytes, *, in_args: list[str]) -> bytes:
 class Qwen3Backend:
     name = "qwen3"
 
-    def __init__(self, ref: VoiceRef, *, model_id: str, device: str, language: str = "Russian"):
+    def __init__(self, ref: VoiceRef, *, model_id: str, device: str, language: str = "Russian",
+                 dtype: str = "bfloat16"):
         import torch
         from qwen_tts import Qwen3TTSModel
 
         log.info("loading %s on %s", model_id, device)
         # sdpa, not flash-attn: flash-attn has no prebuilt wheel for Blackwell (sm_120)
         self._model = Qwen3TTSModel.from_pretrained(
-            model_id, device_map=device, dtype=torch.bfloat16, attn_implementation="sdpa",
+            model_id, device_map=device, dtype=getattr(torch, dtype), attn_implementation="sdpa",
         )
         self._language = language
         self._prompt = self._model.create_voice_clone_prompt(
@@ -138,6 +139,7 @@ def from_env() -> Backend:
             ref,
             model_id=os.environ.get("TTS_QWEN_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"),
             device=os.environ.get("TTS_DEVICE", "cuda:0"),
+            dtype=os.environ.get("TTS_DTYPE", "bfloat16"),  # float16 on Turing (RTX 20xx): no bf16
         )
     if kind == "openrouter":
         return OpenRouterBackend(

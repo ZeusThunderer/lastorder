@@ -106,7 +106,17 @@ class BodyCallback:
         pass
 
     def onVoiceFeed(self, s="", audio=None):
-        pass
+        # Voice of another player heard through SVC (ADR-055): no STT yet — one log
+        # line per speaker per 5 s proves the inbound path (PCM16LE from uc, ADR-010).
+        now = time.monotonic()
+        seen = self.__dict__.setdefault("_voice_seen", {})
+        n, last = seen.get(s, (0, 0.0))
+        n += 1
+        if now - last >= 5.0:
+            log.info("voice heard: %s, %d packets, last %d bytes", s, n, len(audio or b""))
+            seen[s] = (0, now)
+        else:
+            seen[s] = (n, last)
 
     def agentCommandRequest(self, s=""):
         # Chat and voice are observation, never commands (ADR-012).

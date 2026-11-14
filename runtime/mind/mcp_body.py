@@ -970,7 +970,7 @@ def voice_from_env(
     tts_url = env("TTS_URL", default="http://tts:8790") or "http://tts:8790"
     host = env("BODY_HOST", default="127.0.0.1") or "127.0.0.1"
     port = int(env("BODY_VOICE_PORT", default="25500") or "25500")
-    timeout_s = float(env("TTS_TIMEOUT_S", default="12") or "12")
+    timeout_s = float(env("TTS_TIMEOUT_S", default="25") or "25")
     max_pending = int(env("VOICE_MAX_PENDING", default="3") or "3")
 
     def make(executor: Executor) -> Speaker:
