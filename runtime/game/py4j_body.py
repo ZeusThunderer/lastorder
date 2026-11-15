@@ -663,14 +663,15 @@ class Py4jBody:
             self._call(lambda mc: mc.buildQueueClear())
 
     def build_status(self) -> dict[str, Any]:
-        """The last build_blocks batch: placed, already solid (skipped at the start or
-        filled meanwhile), still queued, handed back and why (uc buildQueue)."""
+        """The last build_blocks batch: placed by the body, already solid at the start,
+        still queued, handed back and why (uc buildQueue). uc's own `alreadyFilled`
+        also counts the cells the queue just placed, so it is not reported."""
         q = dict(self._call(lambda mc: mc.buildQueue()))
         start = self._last_build or {}
         return {
             "queued": int(q.get("queued", 0) or 0),
             "placed": int(q.get("placed", 0) or 0),
-            "already": int(start.get("already", 0) or 0) + int(q.get("already", 0) or 0),
+            "already": int(start.get("already", 0) or 0),
             "deferred": int(q.get("deferredCount", 0) or 0),
             "reasons": {
                 "no_material": int(q.get("deferNoMaterial", 0) or 0),

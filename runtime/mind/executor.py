@@ -104,16 +104,21 @@ def build_verdict(expected: int, status: Mapping[str, Any]) -> tuple[str, str]:
     """A build is done when every cell is placed or was already solid; otherwise the
     reason names the cells handed back and why — the sister can fix and call build again
     (cells already standing are skipped)."""
-    filled = int(status.get("placed", 0)) + int(status.get("already", 0))
-    if filled >= expected and not int(status.get("deferred", 0)):
+    # uc's own `already` also counts the cells the queue itself just placed (stand,
+    # 2026-11-15: placed 81, already 106 for a 108-cell house) — counters do not add up;
+    # what is left is: handed back + still queued
+    deferred, queued = int(status.get("deferred", 0)), int(status.get("queued", 0))
+    filled = max(0, expected - deferred - queued)
+    if not deferred and not queued:
         return "done", ""
     reasons = status.get("reasons") or {}
     why = ", ".join(
         f"{n} — {BUILD_DEFER_REASONS.get(k, k)}" for k, n in reasons.items() if int(n or 0) > 0
     )
     return "failed", (
-        f"built {filled} of {expected} cells; {int(status.get('deferred', 0))} handed back"
+        f"built {filled} of {expected} cells; {deferred} handed back"
         + (f" ({why})" if why else "")
+        + "; call build again with the same schematic and origin to retry them"
     )
 DEAD_ACT_ERROR = "the body is dead: the runner decides the respawn, the intent is not accepted"
 TERM_ACT_ERROR = (
