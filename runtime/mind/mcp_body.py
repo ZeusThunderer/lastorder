@@ -27,6 +27,7 @@ import re
 import signal
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
@@ -37,9 +38,16 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from runtime.game.py4j_body import LEVERS
-from runtime.mind.build import SchematicError, material_check, parse_schematic
+from runtime.mind.build import (
+    SchematicError,
+    material_check,
+    parse_schematic,
+    ring_cells,
+    site_conflicts,
+)
 from runtime.mind.executor import (
     BUILD_LEVER,
+    DESTROY_LEVER,
     DEAD_ACT_ERROR,
     NO_BODY_ERROR,
     TICK_MAX_S,
@@ -67,6 +75,7 @@ ITEM_RE = re.compile(r"^[a-z0-9_]+$")
 NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,32}$")
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 COORD_ABS_MAX = 30_000_000
+BUILD_REACH_M = 32.0  # build: the body stands this close to the site's middle (loaded world)
 
 # Levers the agent may pull: everything in LEVERS except the raw escape hatches (ADR-037).
 FORBIDDEN_LEVERS = ("command", "chat")
@@ -197,8 +206,8 @@ def validate_args(lever: str, args: Mapping[str, Any]) -> dict[str, Any]:
     values are rejections, not silent fixes: the agent sees the reason and can retry."""
     if lever in FORBIDDEN_LEVERS:
         _err(f"lever {lever!r} is not available to the agent (ADR-037)")
-    if lever == BUILD_LEVER:
-        _err("build_blocks is driven by the build tool: build(schematic, x, y, z)")
+    if lever in (BUILD_LEVER, DESTROY_LEVER):
+        _err(f"{lever} is driven by the build tool: build(schematic, x, y, z); to dig, use mine")
     if lever not in _KNOWN_LEVERS:
         _err(f"unknown lever {lever!r}; known: {', '.join(sorted(_KNOWN_LEVERS))}")
     args = dict(args or {})
@@ -599,8 +608,10 @@ class BodyMcp:
             self._x.stop_intent()
         return {"stopped": True}
 
-    def build(self, schematic: Any, x: Any, y: Any, z: Any) -> dict[str, Any]:
-        """Check a schematic, check the hotbar, hand the cells to C1 as one intent."""
+    def build(self, schematic: Any, x: Any, y: Any, z: Any, clear: Any = False) -> dict[str, Any]:
+        """Check a schematic, the hotbar and the site; hand the cells to C1 as one intent."""
+        if not isinstance(clear, bool):
+            _err("build.clear must be true or false")
         if self._x.bodiless:
             _err(NO_BODY_ERROR)
         origin = [
@@ -616,17 +627,56 @@ class BodyMcp:
             _err(f"build: the top would be at y={origin[1] + plan.size[1]}, above the world")
         with self._x.body_lock:
             inventory = tuple(self._x.body.inventory())
+            pos = [float(c) for c in getattr(self._x.body.state(), "pos", ()) or ()]
+        # the client only holds the world around the body: a far site reads as air, so the
+        # site check would pass a forest; and the builder walks, it does not travel
+        center = [o + s / 2 for o, s in zip(origin, plan.size)]
+        if len(pos) == 3 and math.dist((pos[0], pos[2]), (center[0], center[2])) > BUILD_REACH_M:
+            _err(
+                f"build: the site is {math.dist((pos[0], pos[2]), (center[0], center[2])):.0f} m "
+                f"away — walk within {BUILD_REACH_M:.0f} m of it first (goto), then build"
+            )
         missing, short = material_check(plan, inventory)
         if missing:
             _err(
-                "build: not in the hotbar: " + ", ".join(missing)
-                + " — put every palette block in slots 0-8 first (the builder takes blocks "
-                "from the hotbar only); needs: "
+                "build: not in the inventory: " + ", ".join(missing)
+                + " — gather or craft them first; the whole build needs: "
                 + ", ".join(f"{b} {n}" for b, n in plan.materials.items())
             )
-        cells = plan.placed_at(origin)
+        def read(cx: int, cy: int, cz: int) -> dict[str, Any]:
+            with self._x.body_lock:  # per cell: C1's tick is never held for the whole scan
+                return dict(self._x.body.block_at(cx, cy, cz))
+
+        t0 = time.monotonic()
         try:
-            submitted = self._x.submit(BUILD_LEVER, {"blocks": cells, "name": plan.name})
+            conflicts = site_conflicts(plan, origin, read)
+            # what stands around the box now: anything solid there after the build that
+            # was air here is the builder's own scaffolding, and C1 digs it out
+            ring_air = [c for c in ring_cells(origin, plan.size) if read(*c).get("air")]
+        except SchematicError as exc:
+            _err(f"build: {exc}")
+        except RuntimeError as exc:
+            _err(f"build: the site could not be read ({exc}) — come closer, it may be unloaded")
+        scan_s = round(time.monotonic() - t0, 1)
+        if conflicts and not clear:
+            what = Counter(c[3] for c in conflicts).most_common(6)
+            _err(
+                f"build: the site is not clear — {len(conflicts)} cell(s) of the box hold other "
+                f"blocks ({', '.join(f'{b} {n}' for b, n in what)}; e.g. {conflicts[0][:3]}). "
+                "Pick a clear, flat spot, or call build again with clear: true to dig them "
+                "out first"
+            )
+        cells = plan.placed_at(origin)
+        args: dict[str, Any] = {
+            "blocks": cells,
+            "name": plan.name,
+            "box": [*origin, *(o + s - 1 for o, s in zip(origin, plan.size))],
+            "ring": ring_air,
+        }
+        if conflicts:
+            args["clear"] = [c[:3] for c in conflicts]
+        try:
+            submitted = self._x.submit(BUILD_LEVER, args)
         except RuntimeError as exc:
             raise ToolError(str(exc) or DEAD_ACT_ERROR) from exc
         answer: dict[str, Any] = {
@@ -636,11 +686,14 @@ class BodyMcp:
             "size": list(plan.size),
             "blocks": len(cells),
             "materials": plan.materials,
-            # uc places one block per 4 ticks; walking between cells comes on top
-            "estimate_s": round(len(cells) * 0.2) + 10,
+            "site_checked_s": scan_s,
+            # uc places one block per 4 ticks, a dig takes seconds; walking comes on top
+            "estimate_s": round(len(cells) * 0.2) + 3 * len(conflicts) + 10,
         }
+        if conflicts:
+            answer["clearing"] = len(conflicts)
         if short:
-            answer["short"] = short  # the build runs; these cells come back as no_material
+            answer["short"] = short  # the build runs; these cells stay missing
         if plan.entrance:
             answer["entrance"] = [o + c for o, c in zip(origin, plan.entrance)]
         return answer
@@ -762,7 +815,9 @@ def build_server(
         """Drop the current intent and stop the body."""
         return await impl._reply("stop", {}, impl.stop)
 
-    async def build(schematic: dict[str, Any] | str, x: int, y: int, z: int) -> dict[str, Any]:
+    async def build(
+        schematic: dict[str, Any] | str, x: int, y: int, z: int, clear: bool = False
+    ) -> dict[str, Any]:
         """Build a structure from a schematic, block by block, with this body. The
         schematic is local coordinates [x, y, z], y up: {"name": ..., "size": [w, h, d],
         "palette": ["oak planks", "glass", ...] (at most 16), "regions": [{"from": [0,0,0],
@@ -771,11 +826,14 @@ def build_server(
         single cells after the regions, optional "entrance": [x, y, z]. Layer y=0 is the
         foundation and is placed at (x, y, z), the lowest corner; every block must connect
         to it. Full blocks only: no stairs, slabs, doors, torches, nothing that falls.
-        Every palette block must already be in the hotbar (slots 0-8). A wrong schematic
-        is refused with the reason — fix it and call again. Accepted: C1 builds it as one
-        intent (a threat may interrupt; it resumes), intent.done / intent.failed tell the
-        outcome; cells already solid are skipped, so calling again finishes a build."""
-        args = {"schematic": schematic, "x": x, "y": y, "z": z}
+        Every palette block must already be in the hotbar (slots 0-8). The site is
+        checked: a box holding other blocks (a tree, a wall, grass inside) is refused
+        with what is there — pick a clear spot, or pass clear: true and the body digs
+        them out first. A wrong schematic is refused with the reason — fix it and call
+        again. Accepted: C1 builds it as one intent (a threat may interrupt; it resumes),
+        intent.done / intent.failed tell the outcome; cells already built are skipped,
+        so calling again finishes a build."""
+        args = {"schematic": schematic, "x": x, "y": y, "z": z, "clear": clear}
         return await impl._reply("build", {**args, "schematic": "…"}, lambda: impl.build(**args))
 
     async def build_status() -> dict[str, Any]:

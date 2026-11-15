@@ -104,11 +104,29 @@ class FakeBody:
     def build_status(self) -> dict:
         return dict(self.build)
 
+    # the world a build's site check reads: (x, y, z) -> block id; everything else is air
+    world: dict = {}
+
+    def block_at(self, x: int, y: int, z: int) -> dict:
+        block = self.world.get((x, y, z))
+        return {"id": block or "air", "air": block is None, "replaceable": block == "short_grass"}
+
     def recent_chat(self, lines: int = 5):
         return tuple(self.chat[-lines:])
 
     def act(self, lever: str, args: dict | None = None) -> None:
         self.acts.append((lever, dict(args or {})))
+        if lever == "destroy_block":
+            self.world = {k: v for k, v in self.world.items()
+                          if k != (args["x"], args["y"], args["z"]) or v == "bedrock"}
+        if lever == "build_blocks":  # uc places into air and replaceable cells, skips solid ones
+            for x, y, z, block in args["blocks"]:
+                if self.world.get((x, y, z)) in (None, "short_grass"):
+                    self.world = {**self.world, (x, y, z): block}
+
+    def restock(self, needs: dict) -> dict:
+        self.acts.append(("__restock__", dict(needs)))
+        return {"swaps": 0, "hotbar": {}}
 
     def busy(self) -> bool:
         return self.busy_flag
@@ -343,10 +361,10 @@ HUT = {
 }
 
 
-def test_build_refuses_a_block_missing_from_the_hotbar(stack: Stack) -> None:
+def test_build_refuses_a_block_missing_from_the_inventory(stack: Stack) -> None:
     result = stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 10, "y": 64, "z": 10}))
     text = error_text(result)
-    assert "not in the hotbar: oak_planks" in text and "oak_planks 25" in text
+    assert "not in the inventory: oak_planks" in text and "oak_planks 25" in text
     assert not [a for a in stack.body.acts if a[0] == "build_blocks"]
 
 
@@ -366,16 +384,75 @@ def test_build_hands_absolute_cells_to_c1_and_settles_by_the_queue(stack: Stack)
     (lever, args), = [a for a in stack.body.acts if a[0] == "build_blocks"]
     assert len(args["blocks"]) == 25 and [10, 64, -3, "oak_planks"] in args["blocks"]
     assert [11, 65, -3, "oak_planks"] not in args["blocks"]  # the doorway stays air
-    # uc reports every cell placed: the intent settles done
-    stack.body.build = {"queued": 0, "placed": 24, "already": 1, "deferred": 0, "reasons": {}}
+    # the world holds every planned block (the fake places them): the intent settles done
     stack.wait_until(lambda: any(
         line.get("kind") == "intent" and line.get("phase") == "done" for line in stack.log_lines()
     ), timeout=10)
+    assert ("__restock__", {"oak_planks": 25}) in stack.body.acts  # hotbar first, then place
     # the journal carries the cell count, not the 25-cell list
     applied = [l for l in stack.log_lines() if l.get("kind") == "intent" and l.get("phase") == "applied"]
     assert applied[-1]["args"]["blocks"] == 25
+    stack.body.build = {"queued": 0, "placed": 25, "already": 0, "deferred": 0, "reasons": {}}
     status = parse(stack.call(lambda c: c.call_tool("build_status", {})))
-    assert status["placed"] == 24
+    assert status["placed"] == 25
+
+
+def test_build_refuses_a_far_site_the_body_cannot_see(stack: Stack) -> None:
+    stack.body.extra_items = (ItemStack(name="minecraft:oak_planks", count=64, slot=1),)
+    result = stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 200, "y": 64, "z": 0}))
+    assert "walk within 32 m of it first" in error_text(result)
+
+
+def test_build_refuses_a_site_that_is_not_clear(stack: Stack) -> None:
+    stack.body.extra_items = (ItemStack(name="minecraft:oak_planks", count=64, slot=1),)
+    # a log where the doorway goes, leaves where a planned plank goes; grass under the floor is fine
+    stack.body.world = {(11, 65, 10): "oak_log", (11, 66, 11): "oak_leaves", (10, 64, 10): "short_grass"}
+    result = stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 10, "y": 64, "z": 10}))
+    text = error_text(result)
+    assert "not clear — 2 cell(s)" in text and "oak_log 1" in text and "oak_leaves 1" in text
+    assert "clear: true" in text
+    assert not [a for a in stack.body.acts if a[0] in ("build_blocks", "destroy_block")]
+
+
+def test_build_with_clear_digs_the_site_top_down_then_builds(stack: Stack) -> None:
+    stack.body.extra_items = (ItemStack(name="minecraft:oak_planks", count=64, slot=1),)
+    # a log in the doorway (plan: air), stone in the wall (plan: planks), bedrock that stays
+    stack.body.world = {(11, 65, 10): "oak_log", (12, 66, 12): "stone", (10, 64, 10): "bedrock"}
+    answer = parse(stack.call(lambda c: c.call_tool(
+        "build", {"schematic": HUT, "x": 10, "y": 64, "z": 10, "clear": True})))
+    assert answer["clearing"] == 3
+    stack.wait_until(lambda: any(a[0] == "build_blocks" for a in stack.body.acts), timeout=15)
+    digs = [(a[1]["x"], a[1]["y"], a[1]["z"]) for a in stack.body.acts if a[0] == "destroy_block"]
+    assert digs == [(12, 66, 12), (11, 65, 10), (10, 64, 10)]  # top-down
+    stack.wait_until(lambda: any(
+        line.get("kind") == "intent" and line.get("phase") == "failed" for line in stack.log_lines()
+    ), timeout=20)
+    failed = [l for l in stack.log_lines() if l.get("kind") == "intent" and l.get("phase") == "failed"]
+    reason = failed[-1]["reason"]
+    # the world check: bedrock where a plank goes; one repair round tried, then it stopped
+    assert "24 of 25 planned blocks in place; 1 missing (oak_planks at 10,64,10)" in reason
+    assert "1 site cell(s) could not be dug out (10,64,10)" in reason
+    repairs = [l for l in stack.log_lines() if l.get("kind") == "intent" and l.get("phase") == "repair"]
+    assert len(repairs) == 1
+
+
+def test_build_digs_its_own_scaffolding_and_fills_a_hole(stack: Stack) -> None:
+    stack.body.extra_items = (ItemStack(name="minecraft:oak_planks", count=64, slot=20),)
+    answer = parse(stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 10, "y": 64, "z": 10})))
+    assert "clearing" not in answer
+    stack.wait_until(lambda: any(a[0] == "build_blocks" for a in stack.body.acts), timeout=10)
+    # as uc leaves it: a pillar outside the box, a hole in the wall
+    stack.body.world = {**{k: v for k, v in stack.body.world.items() if k != (12, 65, 11)},
+                        (13, 64, 12): "oak_planks", (13, 65, 12): "oak_planks"}
+    stack.wait_until(lambda: any(
+        line.get("kind") == "intent" and line.get("phase") in ("done", "failed") for line in stack.log_lines()
+    ), timeout=20)
+    phases = [l.get("phase") for l in stack.log_lines() if l.get("kind") == "intent"]
+    assert "repair" in phases and phases[-1] == "done", phases
+    digs = [(a[1]["x"], a[1]["y"], a[1]["z"]) for a in stack.body.acts if a[0] == "destroy_block"]
+    assert digs == [(13, 65, 12), (13, 64, 12)]  # the pillar, top-down
+    assert stack.body.world.get((12, 65, 11)) == "oak_planks"  # the hole refilled
+    assert (13, 64, 12) not in stack.body.world
 
 
 def test_act_over_mcp_returns_intent_id_and_reaches_body(stack: Stack) -> None:

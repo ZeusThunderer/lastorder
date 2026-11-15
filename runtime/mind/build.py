@@ -270,25 +270,72 @@ def _check_entrance(
     return e
 
 
+MAX_SCAN = 6000  # cells of the schematic's box read before a build (one uc call each)
+
+
+def site_conflicts(
+    plan: Plan, origin: Iterable[int], read: Any
+) -> list[list[Any]]:
+    """Cells of the schematic's box the world holds otherwise: [x, y, z, block id].
+
+    `read(x, y, z)` -> {"id", "air", "replaceable"} (the body's block_at). A conflict is
+    anything in a cell the plan leaves air (a tree inside the house, grass on its floor),
+    and a solid block other than the planned one where the plan puts a block — uc's
+    builder skips a solid cell as done, so a log in the wall would stay a log. A
+    replaceable plant under a planned block is not a conflict: the block goes over it.
+    Top-down order, so digging never leaves a block hanging over the body."""
+    ox, oy, oz = (int(c) for c in origin)
+    w, h, d = plan.size
+    if w * h * d > MAX_SCAN:
+        raise SchematicError(
+            f"the box is {w}x{h}x{d} = {w * h * d} cells; the site check reads at most {MAX_SCAN}"
+        )
+    found = []
+    for y in range(h - 1, -1, -1):
+        for x in range(w):
+            for z in range(d):
+                cell = read(ox + x, oy + y, oz + z)
+                if cell.get("air"):
+                    continue
+                want = plan.cells.get((x, y, z))
+                if want is None or (not cell.get("replaceable") and cell.get("id") != want):
+                    found.append([ox + x, oy + y, oz + z, str(cell.get("id"))])
+    return found
+
+
 def material_check(
-    plan: Plan, inventory: Iterable[Any], hotbar_slots: int = 9
+    plan: Plan, inventory: Iterable[Any], slots: int = 36
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    """(missing, short): blocks absent from the hotbar, and blocks the hotbar holds fewer
-    of than the plan needs. uc's builder equips from the hotbar only, and with the named
-    block absent it places whatever block is already in hand — so an absent block is a
-    refusal, never a warning."""
-    hotbar: Counter[str] = Counter()
+    """(missing, short): blocks absent from the inventory (hotbar + main, slots 0-35),
+    and blocks it holds fewer of than the plan needs. The body moves stacks into the
+    hotbar itself before each placing round (uc's builder takes from slots 0-8, and with
+    the named block absent it places whatever is in hand — so an absent block is a
+    refusal, never a warning)."""
+    have: Counter[str] = Counter()
     for stack in inventory:
-        slot = int(getattr(stack, "slot", -1))
-        if 0 <= slot < hotbar_slots:
-            hotbar[block_id(str(getattr(stack, "name", "")) or "air", "inventory")] += int(
+        if 0 <= int(getattr(stack, "slot", -1)) < slots:
+            have[block_id(str(getattr(stack, "name", "")) or "air", "inventory")] += int(
                 getattr(stack, "count", 0)
             )
     missing, short = [], []
     for block, need in plan.materials.items():
-        have = hotbar.get(block, 0)
-        if have == 0:
+        got = have.get(block, 0)
+        if got == 0:
             missing.append(block)
-        elif have < need:
-            short.append({"block": block, "need": need, "hotbar": have})
+        elif got < need:
+            short.append({"block": block, "need": need, "have": got})
     return missing, short
+
+
+def ring_cells(origin: Iterable[int], size: Iterable[int], margin: int = 2) -> list[list[int]]:
+    """Cells around the schematic's box, `margin` wide, from the foundation to one above
+    the top: where the builder's own scaffolding (pillars, bridges) lands."""
+    ox, oy, oz = (int(c) for c in origin)
+    w, h, d = (int(c) for c in size)
+    cells = []
+    for y in range(oy, oy + h + 1):
+        for x in range(ox - margin, ox + w + margin):
+            for z in range(oz - margin, oz + d + margin):
+                if not (ox <= x < ox + w and oz <= z < oz + d and y < oy + h):
+                    cells.append([x, y, z])
+    return cells

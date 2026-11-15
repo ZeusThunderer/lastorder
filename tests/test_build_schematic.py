@@ -123,17 +123,51 @@ def test_block_cap():
         parse_schematic(big)
 
 
-def test_material_check_reads_the_hotbar_only():
+def test_material_check_counts_hotbar_and_main_inventory():
     plan = parse_schematic(hut())
     inventory = [
         ItemStack(name="minecraft:oak_planks", count=10, slot=0),
-        ItemStack(name="minecraft:glass", count=5, slot=20),  # main inventory: not usable
+        ItemStack(name="minecraft:oak_planks", count=6, slot=20),  # main inventory counts too
+        ItemStack(name="minecraft:glass", count=5, slot=38),  # an armor slot: never
     ]
     missing, short = material_check(plan, inventory)
     assert missing == ["glass"]
-    assert short == [{"block": "oak_planks", "need": 31, "hotbar": 10}]
-    missing, short = material_check(plan, inventory + [ItemStack(name="glass", count=1, slot=3)])
+    assert short == [{"block": "oak_planks", "need": 31, "have": 16}]
+    missing, short = material_check(plan, inventory + [ItemStack(name="glass", count=1, slot=30)])
     assert missing == []
+
+
+def test_ring_cells_surround_the_box_and_cover_its_top():
+    from runtime.mind.build import ring_cells
+
+    ring = ring_cells((0, 64, 0), (3, 2, 3), margin=1)
+    assert [0, 64, 0] not in ring and [1, 65, 1] not in ring  # inside the box
+    assert [-1, 64, -1] in ring and [3, 65, 3] in ring        # around it
+    assert [1, 66, 1] in ring                                 # one layer above its top
+    assert len(ring) == (5 * 5 - 9) * 2 + 25
+
+
+def test_site_conflicts_find_what_the_builder_would_skip():
+    from runtime.mind.build import site_conflicts
+
+    plan = parse_schematic(hut())
+    world = {
+        (11, 66, 21): ("oak_leaves", False),   # inside the hut (plan: air)
+        (10, 64, 20): ("sand", False),         # the floor (plan: planks) — would stay sand
+        (12, 64, 20): ("oak_planks", False),   # already right: no conflict
+        (10, 64, 21): ("short_grass", True),   # replaceable under a planned block: fine
+        (11, 65, 20): ("short_grass", True),   # replaceable in the doorway (plan: air): dig
+    }
+
+    def read(x, y, z):
+        block = world.get((x, y, z))
+        if block is None:
+            return {"id": "air", "air": True, "replaceable": True}
+        return {"id": block[0], "air": False, "replaceable": block[1]}
+
+    found = site_conflicts(plan, (10, 64, 20), read)
+    assert [c[3] for c in found] == ["oak_leaves", "short_grass", "sand"]  # top-down
+    assert found[-1] == [10, 64, 20, "sand"]
 
 
 def test_build_verdict_names_the_cells_handed_back():

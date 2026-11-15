@@ -49,18 +49,25 @@ Local coordinates, y up, layer y = 0 is the foundation:
 ## 3. Where, and materials
 
 - `x, y, z` is the lowest corner: y is the first air layer above the ground where the
-  foundation goes. Pick flat ground, clear of other players' builds; ask the owner before
-  you build next to someone's house.
-- Every palette block must be in the hotbar (slots 0–8) before you call: `observe` shows the
-  slots. The answer lists `materials`; `short` means the hotbar holds fewer than the build
-  needs — those cells come back as `no_material`.
+  foundation goes. Pick flat, open ground — a beach, a meadow — clear of other players'
+  builds; ask the owner before you build next to someone's house.
+- The body checks the whole box first. A tree, a wall or a rock inside it is refused with
+  what is there: move to a clear spot (best), or call again with `clear: true` and the
+  body digs those cells out before building. Never build around a tree — a house with a
+  trunk through the middle is not the house you drew.
+- Every palette block must be in your inventory before you call — gather, mine, craft or
+  smelt it first; the body moves the stacks into the hotbar itself. A refusal names what
+  is missing and the whole bill. `short` in the answer means you hold fewer than the build
+  needs: it goes up, and those cells stay missing.
 
 ## 4. While it builds
 
 - `build` returns at once; C1 builds as one intent (≈ 5 blocks a second plus walking).
   A threat may interrupt it — it resumes. `build_status` shows the progress.
-- `intent.failed` names the cells handed back and why. Fix the cause (bring the block, clear
-  the spot) and call `build` again with the same schematic: what stands is skipped.
+- When the blocks are placed the body reads the build back from the world, digs out stray
+  blocks and its own scaffolding (pillars it climbed), and fills holes — a few rounds.
+  `intent.failed` names what is still wrong and where. Fix the cause (bring the block,
+  clear the spot) and call `build` again with the same schematic, origin and `clear: true`.
 - When it is done, tell the player, and show them the door.
 
 ## 5. Keep what worked

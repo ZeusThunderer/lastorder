@@ -310,6 +310,12 @@ def _lever_build_blocks(mc, a):
     return mc.buildBlocks(cells)
 
 
+def _lever_destroy_block(mc, a):
+    # altoclef's own DestroyBlockTask: walks up, picks a tool, mines one cell (a build's
+    # site clearing); a user task, so busy() reads it through hasActiveTask
+    return mc.destroyBlockAt(int(a["x"]), int(a["y"]), int(a["z"]))
+
+
 LEVERS: Mapping[str, Callable[[Any, dict[str, Any]], Any]] = {
     "goto": _lever_goto,
     "goto_far": _lever_goto_far,
@@ -331,6 +337,7 @@ LEVERS: Mapping[str, Callable[[Any, dict[str, Any]], Any]] = {
     "get": _lever_get,
     "equip": _lever_equip,
     "build_blocks": _lever_build_blocks,
+    "destroy_block": _lever_destroy_block,
 }
 
 
@@ -661,6 +668,63 @@ class Py4jBody:
         self._call(lambda mc: mc.punkStop())
         if self._last_build:
             self._call(lambda mc: mc.buildQueueClear())
+
+    def block_at(self, x: int, y: int, z: int) -> dict[str, Any]:
+        """One cell of the loaded world: {"id": "oak_log", "air": False, "replaceable":
+        False} (uc getBlockAt). An unloaded or failed read raises."""
+        m = dict(self._call(lambda mc: mc.getBlockAt(int(x), int(y), int(z))))
+        if m.get("error"):
+            raise RuntimeError(f"getBlockAt {x},{y},{z}: {m['error']}")
+        raw = str(m.get("id") or m.get("block") or "")
+        raw = raw.split(":", 1)[1] if raw.startswith("minecraft:") else raw
+        air = str(m.get("is_air", "")).lower() == "true"
+        return {
+            "id": "air" if air else raw,
+            "air": air,
+            "replaceable": str(m.get("replaceable", "")).lower() == "true",
+        }
+
+    def inventory_slots(self) -> dict[int, tuple[str, int]]:
+        """Player inventory by slot: 0-8 hotbar, 9-35 main -> (raw id, count)."""
+        inv = dict(self._call(lambda mc: mc.getInventoryFull()))
+        out: dict[int, tuple[str, int]] = {}
+        for raw in inv.get("slots") or ():
+            s = dict(raw)
+            index = int(s.get("index", -1))
+            if 0 <= index <= 35 and not s.get("empty"):
+                out[index] = (str(s.get("item", "")).split(":")[-1], int(s.get("count", 0)))
+        return out
+
+    def restock(self, needs: Mapping[str, int]) -> dict[str, Any]:
+        """Bring the blocks a build needs from the main inventory into the hotbar (uc's
+        builder takes from slots 0-8 only): vanilla's hotbar swap, one click per stack.
+        A hotbar slot already holding a needed block is kept; empty slots go first,
+        then slots of things the build does not use."""
+        slots = self.inventory_slots()
+        protected = {i for i, (item, _) in slots.items() if i < 9 and item in needs}
+        swaps = 0
+        for item, need in sorted(needs.items(), key=lambda kv: -kv[1]):
+            while sum(c for i, (it, c) in slots.items() if i < 9 and it == item) < need:
+                source = next((i for i in range(9, 36) if slots.get(i, ("", 0))[0] == item), None)
+                free = [i for i in range(9) if i not in protected]
+                if source is None or not free:
+                    break
+                target = next((i for i in free if i not in slots), free[0])
+                self._call(lambda mc, s=source, t=target: mc.clickUiSlot(s, t, "SWAP"))
+                moved, back = slots.get(source), slots.get(target)
+                slots[target] = moved
+                if back is None:
+                    slots.pop(source, None)
+                else:
+                    slots[source] = back
+                protected.add(target)
+                swaps += 1
+                self._sleep(0.15)  # the slot handler paces clicks
+        hotbar: dict[str, int] = {}
+        for i in range(9):
+            if i in slots:
+                hotbar[slots[i][0]] = hotbar.get(slots[i][0], 0) + slots[i][1]
+        return {"swaps": swaps, "hotbar": hotbar}
 
     def build_status(self) -> dict[str, Any]:
         """The last build_blocks batch: placed by the body, already solid at the start,

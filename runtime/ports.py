@@ -215,6 +215,8 @@ class GameBody(Protocol):
     def stop(self) -> None: ...
     def respawn(self) -> None: ...
     def build_status(self) -> Mapping[str, Any]: ...  # the last build_blocks batch
+    def block_at(self, x: int, y: int, z: int) -> Mapping[str, Any]: ...  # id, air, replaceable
+    def restock(self, needs: Mapping[str, int]) -> Mapping[str, Any]: ...  # main inventory -> hotbar
 
 
 @runtime_checkable

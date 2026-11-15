@@ -79,14 +79,18 @@ MIND_PROTOCOL = 2
 TARGET_LEVERS = ("goto", "goto_far", "bridge_to", "pillar_to")  # arrival by position
 GET_LEVER = "get"  # arrival by inventory count
 BUILD_LEVER = "build_blocks"  # outcome by uc's build queue counters (defence-plan W3)
+DESTROY_LEVER = "destroy_block"  # one site cell of a build's clearing (altoclef DestroyBlockTask)
+CLEAR_CELL_TIMEOUT_S = 30.0  # a cell the body cannot dig in this long is noted and skipped
+MAX_BUILD_ROUNDS = 3  # repair rounds after the first placing round, while each one helps
 
 
 def public_args(args: Mapping[str, Any]) -> dict[str, Any]:
-    """Intent args fit for the journal and for Jev: a build's cell list (up to 2000
-    cells) becomes its count — the snapshot is the menu, not the ammunition."""
+    """Intent args fit for the journal and for Jev: a build's cell lists (up to 2000
+    cells) become their counts — the snapshot is the menu, not the ammunition."""
     out = dict(args)
-    if isinstance(out.get("blocks"), list):
-        out["blocks"] = len(out["blocks"])
+    for key in ("blocks", "clear", "ring"):
+        if isinstance(out.get(key), list):
+            out[key] = len(out[key])
     return out
 
 
@@ -98,6 +102,27 @@ BUILD_DEFER_REASONS = {
     "protected": "the server protects that area",
     "timeout": "the aim never got there",
 }
+
+
+def world_verdict(expected: int, check: Mapping[str, list[list[Any]]]) -> tuple[str, str]:
+    """A build judged by the world itself: every planned block in place, nothing stray
+    inside, no scaffolding left around it."""
+    missing, extra, scaffold = (check.get(k) or [] for k in ("missing", "extra", "scaffold"))
+    if not (missing or extra or scaffold):
+        return "done", ""
+
+    def where(cells: list[list[Any]]) -> str:
+        return "; ".join(f"{c[3]} at {c[0]},{c[1]},{c[2]}" for c in cells[:3])
+
+    parts = [f"{expected - len(missing)} of {expected} planned blocks in place"]
+    if missing:
+        parts.append(f"{len(missing)} missing ({where(missing)})")
+    stray = [c for c in extra if [c[0], c[1], c[2]] not in [m[:3] for m in missing]]
+    if stray:
+        parts.append(f"{len(stray)} stray block(s) inside ({where(stray)})")
+    if scaffold:
+        parts.append(f"{len(scaffold)} scaffold block(s) left around it ({where(scaffold)})")
+    return "failed", "; ".join(parts) + " — call build again with the same schematic, origin and clear: true to repair"
 
 
 def build_verdict(expected: int, status: Mapping[str, Any]) -> tuple[str, str]:
@@ -325,6 +350,14 @@ class Intent:
         self.state = Intent.PENDING
         self.applied_at: float | None = None
         self.busy_seen = False
+        # a build's site clearing (build(clear=true)): cells to dig out first, top-down,
+        # one destroy_block per step; the ones still standing after their step
+        self.clear_left: list[list[int]] = [list(c) for c in args.get("clear") or ()] if lever == BUILD_LEVER else []
+        self.clear_failed: list[list[int]] = []
+        # a build's repair rounds: after each placing round C1 reads the box and its ring
+        # back from the world (missing, stray, scaffold) and fixes what it can
+        self.rounds = 0
+        self.last_check: dict[str, list[list[Any]]] | None = None
 
     @property
     def finished(self) -> bool:
@@ -1196,15 +1229,103 @@ class Executor:
             return
         if intent.state == Intent.ACTIVE:
             now = self._clock()
+            clearing = bool(intent.clear_left)
             if busy:
                 intent.busy_seen = True
                 self._last_activity_at = now
+                if clearing and now - (intent.applied_at or now) >= CLEAR_CELL_TIMEOUT_S:
+                    self._body.stop()  # one stuck cell must not hold the whole site
+                    self._clear_step_done(intent)
                 return
             if intent.busy_seen or now - (intent.applied_at or now) >= INSTANT_GRACE_S:
-                self._settle(intent)
+                if clearing:
+                    self._clear_step_done(intent)
+                elif intent.lever == BUILD_LEVER:
+                    self._build_round_done(intent)
+                else:
+                    self._settle(intent)
+
+    def _build_check(self, intent: Intent) -> dict[str, list[list[Any]]]:
+        """The build as the world has it: planned cells not holding their block
+        (missing), blocks where the plan has air or another block (extra), and solid
+        cells in the ring that were air before the build (scaffold)."""
+        plan = {(int(x), int(y), int(z)): str(b) for x, y, z, b in intent.args.get("blocks") or ()}
+        x0, y0, z0, x1, y1, z1 = intent.args.get("box") or (0, 0, 0, -1, -1, -1)
+        missing: list[list[Any]] = []
+        extra: list[list[Any]] = []
+        for y in range(y1, y0 - 1, -1):
+            for x in range(x0, x1 + 1):
+                for z in range(z0, z1 + 1):
+                    cell = self._body.block_at(x, y, z)
+                    want = plan.get((x, y, z))
+                    if want is None:
+                        if not cell.get("air"):
+                            extra.append([x, y, z, cell.get("id")])
+                    elif cell.get("id") != want:
+                        missing.append([x, y, z, want])
+                        if not cell.get("air") and not cell.get("replaceable"):
+                            extra.append([x, y, z, cell.get("id")])  # dig, then place
+        scaffold = [
+            [x, y, z, cell.get("id")]
+            for x, y, z in intent.args.get("ring") or ()
+            if not (cell := self._body.block_at(x, y, z)).get("air")
+        ]
+        return {"missing": missing, "extra": extra, "scaffold": scaffold}
+
+    def _build_round_done(self, intent: Intent) -> None:
+        """A placing round is over: check the world; dig what does not belong (stray
+        blocks, scaffolding) and place what is missing, while a round still helps."""
+        try:
+            check = self._build_check(intent)
+        except Exception as exc:  # an unreadable world settles on uc's own counters
+            self._log.record("intent", phase="check_failed", intent_id=intent.id, error=str(exc))
+            self._settle(intent)
+            return
+        defects = sum(len(v) for v in check.values())
+        before = sum(len(v) for v in intent.last_check.values()) if intent.last_check else None
+        intent.last_check = check
+        if defects and intent.rounds < MAX_BUILD_ROUNDS and (before is None or defects < before):
+            intent.rounds += 1
+            dig = {tuple(c[:3]) for c in check["extra"] + check["scaffold"]}
+            intent.clear_left = [list(c) for c in sorted(dig, key=lambda c: (-c[1], c[0], c[2]))]
+            self._log.record(
+                "intent", phase="repair", intent_id=intent.id, round=intent.rounds,
+                missing=len(check["missing"]), extra=len(check["extra"]),
+                scaffold=len(check["scaffold"]),
+            )
+            self._apply(intent)
+            return
+        self._settle(intent)
+
+    def _clear_step_done(self, intent: Intent) -> None:
+        """One site cell's dig is over: note it if it still stands, then the next step —
+        the next cell, or the build itself once the site is clear."""
+        x, y, z = intent.clear_left.pop(0)
+        try:
+            standing = not self._body.block_at(x, y, z).get("air", False)
+        except Exception:  # a read failure is not a reason to stop the build
+            standing = False
+        if standing and [x, y, z] not in intent.clear_failed:
+            intent.clear_failed.append([x, y, z])
+        self._apply(intent)
 
     def _apply(self, intent: Intent) -> None:
-        self._body.act(intent.lever, intent.args)
+        lever, args = intent.lever, intent.args
+        if intent.clear_left:  # a build clears its site first, one cell per step
+            x, y, z = intent.clear_left[0]
+            lever, args = DESTROY_LEVER, {"x": x, "y": y, "z": z}
+        elif lever == BUILD_LEVER:
+            # uc's builder takes blocks from the hotbar only: bring the stacks up first
+            needs: dict[str, int] = {}
+            for *_, block in args.get("blocks") or ():
+                needs[str(block)] = needs.get(str(block), 0) + 1
+            try:
+                stocked = self._body.restock(needs)
+                if stocked.get("swaps"):
+                    self._log.record("intent", phase="restock", intent_id=intent.id, **dict(stocked))
+            except Exception as exc:  # a failed restock leaves cells missing, not the build
+                self._log.record("intent", phase="restock_failed", intent_id=intent.id, error=str(exc))
+        self._body.act(lever, args)
         intent.state = Intent.ACTIVE
         intent.applied_at = self._clock()
         intent.busy_seen = False
@@ -1264,7 +1385,15 @@ class Executor:
                 return "done", ""
             return "failed", f"collected {have} of {want_item}, wanted {want_count}"
         if intent.lever == BUILD_LEVER:
-            return build_verdict(len(args.get("blocks") or ()), self._body.build_status())
+            if intent.last_check is not None:  # the world, read back after the last round
+                verdict, reason = world_verdict(len(args.get("blocks") or ()), intent.last_check)
+            else:  # the world could not be read: uc's own counters
+                verdict, reason = build_verdict(len(args.get("blocks") or ()), self._body.build_status())
+            if intent.clear_failed:
+                cells = ", ".join(",".join(map(str, c)) for c in intent.clear_failed[:4])
+                note = f"{len(intent.clear_failed)} site cell(s) could not be dug out ({cells})"
+                return "failed", f"{reason}; {note}" if reason else note
+            return verdict, reason
         return "done", ""
 
     # -- the idle watchdog (task.idle arms retire_stuck; ADR-034) ---------------------------
