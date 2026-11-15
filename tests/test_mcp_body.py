@@ -95,7 +95,14 @@ class FakeBody:
         return (BlockInfo(name="minecraft:grass_block", pos=(0, 63, 0)),)
 
     def inventory(self):
-        return (ItemStack(name="minecraft:wooden_axe", count=1, slot=0),)
+        return (ItemStack(name="minecraft:wooden_axe", count=1, slot=0), *self.extra_items)
+
+    extra_items: tuple = ()
+    # the last build batch as uc would report it; tests script it
+    build: dict = {"queued": 0, "placed": 0, "already": 0, "deferred": 0, "reasons": {}}
+
+    def build_status(self) -> dict:
+        return dict(self.build)
 
     def recent_chat(self, lines: int = 5):
         return tuple(self.chat[-lines:])
@@ -278,6 +285,7 @@ def test_validate_args_plain_item_and_ranges() -> None:
         ("hold_key", {"key": "w", "ms": 999999}),
         ("select_hotbar", {"slot": 9}),
         ("fly", {}),
+        ("build_blocks", {"blocks": [[0, 64, 0, "stone"]]}),  # only through the build tool
     ],
 )
 def test_validate_args_rejections(lever: str, args: dict) -> None:
@@ -313,6 +321,8 @@ def test_tool_set_is_exactly_section_four(stack: Stack) -> None:
     names = stack.call(lambda c: c.list_tools())
     assert sorted(t.name for t in names.tools) == [
         "act",
+        "build",
+        "build_status",
         "observe",
         "retire_stuck",
         "say",
@@ -320,6 +330,52 @@ def test_tool_set_is_exactly_section_four(stack: Stack) -> None:
         "stop",
         "wait_events",
     ]
+
+
+HUT = {
+    "name": "hut",
+    "size": [3, 3, 3],
+    "palette": ["oak planks"],
+    "regions": [
+        {"from": [0, 0, 0], "to": [2, 2, 2], "block": "oak planks"},
+        {"from": [1, 1, 0], "to": [1, 1, 1], "block": "air"},
+    ],
+}
+
+
+def test_build_refuses_a_block_missing_from_the_hotbar(stack: Stack) -> None:
+    result = stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 10, "y": 64, "z": 10}))
+    text = error_text(result)
+    assert "not in the hotbar: oak_planks" in text and "oak_planks 25" in text
+    assert not [a for a in stack.body.acts if a[0] == "build_blocks"]
+
+
+def test_build_refuses_a_broken_schematic_with_the_reason(stack: Stack) -> None:
+    bad = {**HUT, "palette": ["oak stairs"]}
+    result = stack.call(lambda c: c.call_tool("build", {"schematic": bad, "x": 0, "y": 64, "z": 0}))
+    assert "cannot place oak_stairs" in error_text(result)
+
+
+def test_build_hands_absolute_cells_to_c1_and_settles_by_the_queue(stack: Stack) -> None:
+    stack.body.extra_items = (ItemStack(name="minecraft:oak_planks", count=64, slot=1),)
+    result = stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 10, "y": 64, "z": -3}))
+    answer = parse(result)
+    assert answer["blocks"] == 25 and answer["materials"] == {"oak_planks": 25}
+    assert answer["origin"] == [10, 64, -3]
+    stack.wait_until(lambda: any(a[0] == "build_blocks" for a in stack.body.acts))
+    (lever, args), = [a for a in stack.body.acts if a[0] == "build_blocks"]
+    assert len(args["blocks"]) == 25 and [10, 64, -3, "oak_planks"] in args["blocks"]
+    assert [11, 65, -3, "oak_planks"] not in args["blocks"]  # the doorway stays air
+    # uc reports every cell placed: the intent settles done
+    stack.body.build = {"queued": 0, "placed": 24, "already": 1, "deferred": 0, "reasons": {}}
+    stack.wait_until(lambda: any(
+        line.get("kind") == "intent" and line.get("phase") == "done" for line in stack.log_lines()
+    ), timeout=10)
+    # the journal carries the cell count, not the 25-cell list
+    applied = [l for l in stack.log_lines() if l.get("kind") == "intent" and l.get("phase") == "applied"]
+    assert applied[-1]["args"]["blocks"] == 25
+    status = parse(stack.call(lambda c: c.call_tool("build_status", {})))
+    assert status["placed"] == 24
 
 
 def test_act_over_mcp_returns_intent_id_and_reaches_body(stack: Stack) -> None:

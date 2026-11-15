@@ -37,7 +37,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from runtime.game.py4j_body import LEVERS
+from runtime.mind.build import SchematicError, material_check, parse_schematic
 from runtime.mind.executor import (
+    BUILD_LEVER,
     DEAD_ACT_ERROR,
     NO_BODY_ERROR,
     TICK_MAX_S,
@@ -195,6 +197,8 @@ def validate_args(lever: str, args: Mapping[str, Any]) -> dict[str, Any]:
     values are rejections, not silent fixes: the agent sees the reason and can retry."""
     if lever in FORBIDDEN_LEVERS:
         _err(f"lever {lever!r} is not available to the agent (ADR-037)")
+    if lever == BUILD_LEVER:
+        _err("build_blocks is driven by the build tool: build(schematic, x, y, z)")
     if lever not in _KNOWN_LEVERS:
         _err(f"unknown lever {lever!r}; known: {', '.join(sorted(_KNOWN_LEVERS))}")
     args = dict(args or {})
@@ -595,6 +599,58 @@ class BodyMcp:
             self._x.stop_intent()
         return {"stopped": True}
 
+    def build(self, schematic: Any, x: Any, y: Any, z: Any) -> dict[str, Any]:
+        """Check a schematic, check the hotbar, hand the cells to C1 as one intent."""
+        if self._x.bodiless:
+            _err(NO_BODY_ERROR)
+        origin = [
+            _as_int(x, "build.x", -COORD_ABS_MAX, COORD_ABS_MAX),
+            _as_int(y, "build.y", -64, 320),
+            _as_int(z, "build.z", -COORD_ABS_MAX, COORD_ABS_MAX),
+        ]
+        try:
+            plan = parse_schematic(schematic)
+        except SchematicError as exc:
+            _err(f"build: {exc}")
+        if origin[1] + plan.size[1] > 320:
+            _err(f"build: the top would be at y={origin[1] + plan.size[1]}, above the world")
+        with self._x.body_lock:
+            inventory = tuple(self._x.body.inventory())
+        missing, short = material_check(plan, inventory)
+        if missing:
+            _err(
+                "build: not in the hotbar: " + ", ".join(missing)
+                + " — put every palette block in slots 0-8 first (the builder takes blocks "
+                "from the hotbar only); needs: "
+                + ", ".join(f"{b} {n}" for b, n in plan.materials.items())
+            )
+        cells = plan.placed_at(origin)
+        try:
+            submitted = self._x.submit(BUILD_LEVER, {"blocks": cells, "name": plan.name})
+        except RuntimeError as exc:
+            raise ToolError(str(exc) or DEAD_ACT_ERROR) from exc
+        answer: dict[str, Any] = {
+            "intent_id": submitted.id,
+            "name": plan.name,
+            "origin": origin,
+            "size": list(plan.size),
+            "blocks": len(cells),
+            "materials": plan.materials,
+            # uc places one block per 4 ticks; walking between cells comes on top
+            "estimate_s": round(len(cells) * 0.2) + 10,
+        }
+        if short:
+            answer["short"] = short  # the build runs; these cells come back as no_material
+        if plan.entrance:
+            answer["entrance"] = [o + c for o, c in zip(origin, plan.entrance)]
+        return answer
+
+    def build_status(self) -> dict[str, Any]:
+        if self._x.bodiless:
+            _err(NO_BODY_ERROR)
+        with self._x.body_lock:
+            return dict(self._x.body.build_status())
+
     def say(self, text: str) -> dict[str, Any]:
         if self._x.bodiless:
             _err(NO_BODY_ERROR)
@@ -672,7 +728,8 @@ def build_server(
         instructions=(
             "The body of one slot, held by C1 between your turns. Tools: observe (state, "
             "entities, blocks, inventory, filtered chat), act (an intent from the levers; C1 "
-            "applies it and may interrupt it for a threat, then returns to it), stop, say "
+            "applies it and may interrupt it for a threat, then returns to it), stop, build "
+            "(a structure from your schematic, block by block) and build_status, say "
             "(player chat), server_command (a player command to the server, minus the "
             "stand's deny list), wait_events (sleep until an event or the timeout — you "
             "pick the rhythm), retire_stuck (only after a task.idle event). Names are plain "
@@ -704,6 +761,27 @@ def build_server(
     async def stop() -> dict[str, Any]:
         """Drop the current intent and stop the body."""
         return await impl._reply("stop", {}, impl.stop)
+
+    async def build(schematic: dict[str, Any] | str, x: int, y: int, z: int) -> dict[str, Any]:
+        """Build a structure from a schematic, block by block, with this body. The
+        schematic is local coordinates [x, y, z], y up: {"name": ..., "size": [w, h, d],
+        "palette": ["oak planks", "glass", ...] (at most 16), "regions": [{"from": [0,0,0],
+        "to": [4,0,4], "block": "oak planks"}, ...] — inclusive filled boxes applied in
+        order, "air" carves doors and windows — optional "blocks": [[x, y, z, block], ...]
+        single cells after the regions, optional "entrance": [x, y, z]. Layer y=0 is the
+        foundation and is placed at (x, y, z), the lowest corner; every block must connect
+        to it. Full blocks only: no stairs, slabs, doors, torches, nothing that falls.
+        Every palette block must already be in the hotbar (slots 0-8). A wrong schematic
+        is refused with the reason — fix it and call again. Accepted: C1 builds it as one
+        intent (a threat may interrupt; it resumes), intent.done / intent.failed tell the
+        outcome; cells already solid are skipped, so calling again finishes a build."""
+        args = {"schematic": schematic, "x": x, "y": y, "z": z}
+        return await impl._reply("build", {**args, "schematic": "…"}, lambda: impl.build(**args))
+
+    async def build_status() -> dict[str, Any]:
+        """How the current build goes: placed, already solid, still queued, cells handed
+        back and why (no_material, no_face, no_support, protected)."""
+        return await impl._reply("build_status", {}, impl.build_status)
 
     async def say(text: str) -> dict[str, Any]:
         """One line into the player chat (no / or @, limited length and rate).
@@ -748,6 +826,8 @@ def build_server(
     server.add_tool(observe, name="observe")
     server.add_tool(act, name="act")
     server.add_tool(stop, name="stop")
+    server.add_tool(build, name="build")
+    server.add_tool(build_status, name="build_status")
     server.add_tool(say, name="say")
     server.add_tool(server_command, name="server_command")
     server.add_tool(wait_events, name="wait_events")

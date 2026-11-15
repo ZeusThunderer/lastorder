@@ -302,6 +302,14 @@ def _lever_equip(mc, a):
     return mc.ExecuteCommand(f"@equip {a['item']}")
 
 
+def _lever_build_blocks(mc, a):
+    # [[x, y, z, raw_id], ...] absolute cells (runtime/mind/build.py makes them). uc starts
+    # a NEW batch: the previous one is dropped, its counters reset; cells already solid are
+    # skipped, so the same call after an interruption resumes the build.
+    cells = [[int(x), int(y), int(z), str(name)] for x, y, z, name in a["blocks"]]
+    return mc.buildBlocks(cells)
+
+
 LEVERS: Mapping[str, Callable[[Any, dict[str, Any]], Any]] = {
     "goto": _lever_goto,
     "goto_far": _lever_goto_far,
@@ -322,6 +330,7 @@ LEVERS: Mapping[str, Callable[[Any, dict[str, Any]], Any]] = {
     "eat": _lever_eat,
     "get": _lever_get,
     "equip": _lever_equip,
+    "build_blocks": _lever_build_blocks,
 }
 
 
@@ -417,6 +426,9 @@ class Py4jBody:
         # when the last uc call came back (clock()); None until the first one — the
         # mind's body supervisor reads it to tell "not up yet" from "gone" (ADR-050)
         self.last_ok: float | None = None
+        # the reply of the last build_blocks lever; empty until a build ever ran, so the
+        # build queue stays out of every busy()/stop() of a body that never builds
+        self._last_build: dict[str, Any] = {}
 
     # -- connection ----------------------------------------------------------------
 
@@ -625,19 +637,50 @@ class Py4jBody:
         handler = LEVERS.get(lever)
         if handler is None:
             raise ValueError(f"unknown lever: {lever!r}")
-        return self._call(lambda mc: handler(mc, dict(args or {})))
+        result = self._call(lambda mc: handler(mc, dict(args or {})))
+        if lever == "build_blocks":
+            # the cells skipped as already solid are known only from this reply
+            self._last_build = dict(result) if result is not None else {}
+        return result
 
     def busy(self) -> bool:
         """Two engines can hold the body: an altoclef task and a tungsten fight
         (punk). A task with no fight and a fight with no task both read busy."""
         if self._call(lambda mc: bool(mc.hasActiveTask())):
             return True
-        return bool(dict(self._call(lambda mc: mc.punkStatus())).get("active"))
+        if bool(dict(self._call(lambda mc: mc.punkStatus())).get("active")):
+            return True
+        # the third engine: uc's tick-driven build queue (buildBlocks) runs with no task
+        return bool(self._last_build) and int(
+            dict(self._call(lambda mc: mc.buildQueue())).get("queued", 0) or 0
+        ) > 0
 
     def stop(self) -> None:
         self._call(lambda mc: mc.stopPathing())
         self.command("stop")
         self._call(lambda mc: mc.punkStop())
+        if self._last_build:
+            self._call(lambda mc: mc.buildQueueClear())
+
+    def build_status(self) -> dict[str, Any]:
+        """The last build_blocks batch: placed, already solid (skipped at the start or
+        filled meanwhile), still queued, handed back and why (uc buildQueue)."""
+        q = dict(self._call(lambda mc: mc.buildQueue()))
+        start = self._last_build or {}
+        return {
+            "queued": int(q.get("queued", 0) or 0),
+            "placed": int(q.get("placed", 0) or 0),
+            "already": int(start.get("already", 0) or 0) + int(q.get("already", 0) or 0),
+            "deferred": int(q.get("deferredCount", 0) or 0),
+            "reasons": {
+                "no_material": int(q.get("deferNoMaterial", 0) or 0),
+                "no_face": int(q.get("deferNoFace", 0) or 0),
+                "no_support": int(q.get("deferNoSupport", 0) or 0),
+                "protected": int(q.get("deferProtected", 0) or 0),
+                "timeout": int(q.get("deferTimeout", 0) or 0),
+            },
+            "deferred_cells": list(q.get("deferred") or [])[:16],
+        }
 
     def respawn(self, timeout: float = 60.0, poll: float = 1.0) -> BodyState:
         """respawnPlayer() and wait for a living body: uc does not auto-respawn

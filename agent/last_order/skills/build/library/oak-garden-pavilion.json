@@ -1,0 +1,214 @@
+{
+ "name": "Oak Garden Pavilion",
+ "description": "A small open-sided oak pavilion on a 7x7 plank deck with four corner posts, a stepped oak stair roof and an oak slab cap. All sides are open for easy access. Adapted from github.com/rkhazh/jevcraft data/schematics (MIT, (c) 2026 Matt Rubens): stairs and slabs as full blocks, doors as an open doorway.",
+ "size": [
+  7,
+  6,
+  7
+ ],
+ "palette": [
+  "oak_planks"
+ ],
+ "regions": [
+  {
+   "from": [
+    0,
+    0,
+    0
+   ],
+   "to": [
+    6,
+    0,
+    6
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    0,
+    1,
+    0
+   ],
+   "to": [
+    0,
+    3,
+    0
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    6,
+    1,
+    0
+   ],
+   "to": [
+    6,
+    3,
+    0
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    0,
+    1,
+    6
+   ],
+   "to": [
+    0,
+    3,
+    6
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    6,
+    1,
+    6
+   ],
+   "to": [
+    6,
+    3,
+    6
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    1,
+    4,
+    1
+   ],
+   "to": [
+    5,
+    4,
+    5
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    0,
+    4,
+    0
+   ],
+   "to": [
+    6,
+    4,
+    0
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    0,
+    4,
+    6
+   ],
+   "to": [
+    6,
+    4,
+    6
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    0,
+    4,
+    1
+   ],
+   "to": [
+    0,
+    4,
+    5
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    6,
+    4,
+    1
+   ],
+   "to": [
+    6,
+    4,
+    5
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    1,
+    5,
+    1
+   ],
+   "to": [
+    5,
+    5,
+    1
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    1,
+    5,
+    5
+   ],
+   "to": [
+    5,
+    5,
+    5
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    1,
+    5,
+    2
+   ],
+   "to": [
+    1,
+    5,
+    4
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    5,
+    5,
+    2
+   ],
+   "to": [
+    5,
+    5,
+    4
+   ],
+   "block": "oak_planks"
+  },
+  {
+   "from": [
+    2,
+    5,
+    2
+   ],
+   "to": [
+    4,
+    5,
+    4
+   ],
+   "block": "oak_planks"
+  }
+ ],
+ "entrance": [
+  3,
+  1,
+  0
+ ]
+}

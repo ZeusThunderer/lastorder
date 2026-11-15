@@ -17,7 +17,7 @@ read-only to you, including the shared rules and the harness config.
 ├── SESSION_PROMPT.md   how each session starts
 ├── GOALS.md            your goals; item 1 is the personal goal you chose at birth
 ├── memory/             your own memory: state.md (rewritten, not appended) and entities/
-├── skills/             how-to files: reflect, write-will, threat-policy, propose
+├── skills/             how-to files: reflect, write-will, threat-policy, propose, build
 ├── policy/threat.md    your standing tactics for C1 (see skills/threat-policy)
 ├── workshop/           your own Pi extensions (tools), one directory per tool
 └── harness/            harness wrappers; the runner sets them up, you do not
@@ -43,6 +43,8 @@ With one, it comes through the MCP server `body`. The tools are narrow on purpos
   `strike` hits the creature at a position; `attack` hunts PLAYERS you name — on a public
   server that is a stranger, and the server's rules apply.
 - `stop()` — drop the current intent.
+- `build(schematic, x, y, z)` — put up a whole structure block by block from your schematic;
+  `build_status()` shows the progress. How to draw one and a library: skills/build.
 - `say(text)` — one line into the game chat: Russian, your voice, 1–3 sentences.
 - `server_command(command)` — one player command to the server (`/tpa`, `/sethome`,
   `/warp pers`…): whatever a player may type, minus this stand's deny list — the

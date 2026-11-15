@@ -78,6 +78,43 @@ MIND_PROTOCOL = 2
 # Levers whose outcome C1 can verify; everything else settles as done on completion.
 TARGET_LEVERS = ("goto", "goto_far", "bridge_to", "pillar_to")  # arrival by position
 GET_LEVER = "get"  # arrival by inventory count
+BUILD_LEVER = "build_blocks"  # outcome by uc's build queue counters (defence-plan W3)
+
+
+def public_args(args: Mapping[str, Any]) -> dict[str, Any]:
+    """Intent args fit for the journal and for Jev: a build's cell list (up to 2000
+    cells) becomes its count — the snapshot is the menu, not the ammunition."""
+    out = dict(args)
+    if isinstance(out.get("blocks"), list):
+        out["blocks"] = len(out["blocks"])
+    return out
+
+
+# uc's reasons for handing a cell back (Py4jEntryPoint.buildQueue), in the sister's words
+BUILD_DEFER_REASONS = {
+    "no_material": "the block is not in the hotbar",
+    "no_face": "nothing to place it against from where the body could stand",
+    "no_support": "the block cannot stay in that cell",
+    "protected": "the server protects that area",
+    "timeout": "the aim never got there",
+}
+
+
+def build_verdict(expected: int, status: Mapping[str, Any]) -> tuple[str, str]:
+    """A build is done when every cell is placed or was already solid; otherwise the
+    reason names the cells handed back and why — the sister can fix and call build again
+    (cells already standing are skipped)."""
+    filled = int(status.get("placed", 0)) + int(status.get("already", 0))
+    if filled >= expected and not int(status.get("deferred", 0)):
+        return "done", ""
+    reasons = status.get("reasons") or {}
+    why = ", ".join(
+        f"{n} — {BUILD_DEFER_REASONS.get(k, k)}" for k, n in reasons.items() if int(n or 0) > 0
+    )
+    return "failed", (
+        f"built {filled} of {expected} cells; {int(status.get('deferred', 0))} handed back"
+        + (f" ({why})" if why else "")
+    )
 DEAD_ACT_ERROR = "the body is dead: the runner decides the respawn, the intent is not accepted"
 TERM_ACT_ERROR = (
     "the life term is over: the runner owns the handover, the intent is not accepted"
@@ -975,7 +1012,7 @@ class Executor:
             options.insert(1, Option("fight", "strike the hostile", "strike", {}))
         intent = None
         if self._current is not None and not self._current.finished:
-            intent = {"lever": self._current.lever, "args": dict(self._current.args)}
+            intent = {"lever": self._current.lever, "args": public_args(self._current.args)}
         snapshot = {
             "hp": round(hp, 1),
             "food": round(float(getattr(state, "food", 0.0) or 0.0), 1),
@@ -1123,7 +1160,8 @@ class Executor:
             self._idle_flag = False
             self._last_activity_at = self._clock()
             self._log.record(
-                "intent", phase="submitted", intent_id=intent.id, lever=lever, args=intent.args
+                "intent", phase="submitted", intent_id=intent.id, lever=lever,
+                args=public_args(intent.args),
             )
         return intent
 
@@ -1173,7 +1211,8 @@ class Executor:
             "intent_id": intent.id,
         }
         self._log.record(
-            "intent", phase="applied", intent_id=intent.id, lever=intent.lever, args=intent.args
+            "intent", phase="applied", intent_id=intent.id, lever=intent.lever,
+            args=public_args(intent.args),
         )
 
     def _settle(self, intent: Intent) -> None:
@@ -1219,6 +1258,8 @@ class Executor:
             if have >= want_count:
                 return "done", ""
             return "failed", f"collected {have} of {want_item}, wanted {want_count}"
+        if intent.lever == BUILD_LEVER:
+            return build_verdict(len(args.get("blocks") or ()), self._body.build_status())
         return "done", ""
 
     # -- the idle watchdog (task.idle arms retire_stuck; ADR-034) ---------------------------

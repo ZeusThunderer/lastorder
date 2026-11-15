@@ -1,0 +1,66 @@
+{
+ "name": "Cobblestone Stepped Pyramid",
+ "description": "A small solid stepped pyramid of cobblestone, 7x7 at the base and four tiers high, each tier inset by one block. A monument with no interior or entrance. Adapted from github.com/rkhazh/jevcraft data/schematics (MIT, (c) 2026 Matt Rubens): stairs and slabs as full blocks, doors as an open doorway.",
+ "size": [
+  7,
+  4,
+  7
+ ],
+ "palette": [
+  "cobblestone"
+ ],
+ "regions": [
+  {
+   "from": [
+    0,
+    0,
+    0
+   ],
+   "to": [
+    6,
+    0,
+    6
+   ],
+   "block": "cobblestone"
+  },
+  {
+   "from": [
+    1,
+    1,
+    1
+   ],
+   "to": [
+    5,
+    1,
+    5
+   ],
+   "block": "cobblestone"
+  },
+  {
+   "from": [
+    2,
+    2,
+    2
+   ],
+   "to": [
+    4,
+    2,
+    4
+   ],
+   "block": "cobblestone"
+  },
+  {
+   "from": [
+    3,
+    3,
+    3
+   ],
+   "to": [
+    3,
+    3,
+    3
+   ],
+   "block": "cobblestone"
+  }
+ ]
+}
