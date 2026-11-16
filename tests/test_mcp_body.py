@@ -500,6 +500,51 @@ def test_build_again_bills_only_the_cells_still_missing(stack: Stack) -> None:
     assert "still to place: oak_planks 25" in error_text(result)
 
 
+def test_build_digs_the_last_rounds_pillars_even_when_placing_stopped_helping(stack: Stack) -> None:
+    # the Birch Cottage roof: every fill round fails on the same cell and climbs a new pillar
+    # for it; the rounds stop helping, and the last pillar used to stay standing
+    stack.body.extra_items = (ItemStack(name="minecraft:oak_planks", count=64, slot=20),)
+    hole = (12, 65, 11)
+    pillars = iter([(13, 64, 12), (13, 64, 8), (8, 64, 10), (8, 64, 12), (13, 64, 9)])
+    real = stack.body.act
+
+    def act(lever: str, args: dict | None = None) -> None:
+        real(lever, args)
+        if lever == "build_blocks":
+            stack.body.world = {**{k: v for k, v in stack.body.world.items() if k != hole},
+                                next(pillars): "oak_planks"}
+
+    stack.body.act = act
+    parse(stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 10, "y": 64, "z": 10})))
+    stack.wait_until(lambda: any(
+        line.get("kind") == "intent" and line.get("phase") in ("done", "failed") for line in stack.log_lines()
+    ), timeout=20)
+    phases = [l.get("phase") for l in stack.log_lines() if l.get("kind") == "intent"]
+    assert "cleanup" in phases and phases[-1] == "failed", phases
+    ring = {(13, 64, 12), (13, 64, 8), (8, 64, 10), (8, 64, 12), (13, 64, 9)}
+    assert not ring & set(stack.body.world), "a pillar was left standing"
+    reason = [l for l in stack.log_lines() if l.get("phase") == "failed"][-1]["reason"]
+    assert "1 missing (oak_planks at 12,65,11)" in reason and "scaffold" not in reason
+
+
+def test_a_second_build_call_still_sees_the_first_calls_pillars_as_scaffolding(stack: Stack) -> None:
+    stack.body.extra_items = (ItemStack(name="minecraft:oak_planks", count=64, slot=20),)
+    call = {"schematic": HUT, "x": 10, "y": 64, "z": 10}
+    parse(stack.call(lambda c: c.call_tool("build", call)))
+    stack.wait_until(lambda: any(
+        line.get("kind") == "intent" and line.get("phase") == "done" for line in stack.log_lines()
+    ), timeout=20)
+    # what a death mid-build leaves: a pillar beside the house and a hole in it
+    stack.body.world = {**{k: v for k, v in stack.body.world.items() if k != (12, 65, 11)},
+                        (13, 64, 12): "oak_planks", (13, 65, 12): "oak_planks"}
+    parse(stack.call(lambda c: c.call_tool("build", call)))
+    stack.wait_until(lambda: len([
+        line for line in stack.log_lines() if line.get("kind") == "intent" and line.get("phase") == "done"
+    ]) >= 2, timeout=20)
+    assert (13, 64, 12) not in stack.body.world and (13, 65, 12) not in stack.body.world
+    assert stack.body.world.get((12, 65, 11)) == "oak_planks"
+
+
 def test_act_over_mcp_returns_intent_id_and_reaches_body(stack: Stack) -> None:
     result = stack.call(lambda c: c.call_tool("act", {"intent": "goto", "args": {"x": 5, "y": 64, "z": 5}}))
     assert parse(result) == {"intent_id": 1}

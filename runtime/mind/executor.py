@@ -361,6 +361,9 @@ class Intent:
         # cells left out of the last placing round: their block was not in the hotbar
         # (uc would place whatever is in hand instead); the next round restocks for them
         self.withheld = 0
+        # the closing pass: placing has stopped helping, what is left to do is dig out what
+        # the build put where it does not belong (its scaffolding, strays inside the box)
+        self.cleanup_only = False
 
     @property
     def finished(self) -> bool:
@@ -1303,6 +1306,18 @@ class Executor:
             )
             self._apply(intent)
             return
+        # Placing is over, cleaning is not: a round that failed on the roof still put up its
+        # pillars, and those come down whether or not the round helped. Wrong blocks in planned
+        # cells stay (digging one only trades it for a hole) and the verdict names them.
+        wrong = {tuple(c[:3]) for c in check["missing"]}
+        litter = {tuple(c[:3]) for c in check["scaffold"]}
+        litter |= {tuple(c[:3]) for c in check["extra"] if tuple(c[:3]) not in wrong}
+        if litter and not intent.cleanup_only:
+            intent.cleanup_only = True
+            intent.clear_left = [list(c) for c in sorted(litter, key=lambda c: (-c[1], c[0], c[2]))]
+            self._log.record("intent", phase="cleanup", intent_id=intent.id, cells=len(litter))
+            self._apply(intent)
+            return
         self._settle(intent)
 
     def _clear_step_done(self, intent: Intent) -> None:
@@ -1322,6 +1337,13 @@ class Executor:
         if intent.clear_left:  # a build clears its site first, one cell per step
             x, y, z = intent.clear_left[0]
             lever, args = DESTROY_LEVER, {"x": x, "y": y, "z": z}
+        elif lever == BUILD_LEVER and intent.cleanup_only:  # the closing pass is dug: judge
+            try:
+                intent.last_check = self._build_check(intent)
+            except Exception as exc:
+                self._log.record("intent", phase="check_failed", intent_id=intent.id, error=str(exc))
+            self._settle(intent)
+            return
         elif lever == BUILD_LEVER:
             cells = list(args.get("blocks") or ())
             if intent.last_check is not None:  # a repair places only what is missing
@@ -1351,14 +1373,14 @@ class Executor:
             if intent.withheld:
                 self._log.record("intent", phase="withheld", intent_id=intent.id,
                                  cells=intent.withheld, placing=len(cells))
-            if not cells:  # nothing this body can place now: judge what stands
+            if not cells:  # nothing this body can place now: judge what stands NOW (a
+                # repair's digs may just have changed it)
                 intent.withheld = 0
-                if intent.last_check is None:
-                    try:
-                        intent.last_check = self._build_check(intent)
-                    except Exception as exc:
-                        self._log.record("intent", phase="check_failed", intent_id=intent.id,
-                                         error=str(exc))
+                try:
+                    intent.last_check = self._build_check(intent)
+                except Exception as exc:
+                    self._log.record("intent", phase="check_failed", intent_id=intent.id,
+                                     error=str(exc))
                 self._settle(intent)
                 return
             args = {**args, "blocks": cells}

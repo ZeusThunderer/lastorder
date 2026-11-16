@@ -496,6 +496,8 @@ class BodyMcp:
         self._last_command_at = -1e9
         self._deny = tuple(deny_commands) or DEFAULT_DENY
         self._wait_max_s = float(wait_max_s)
+        # each build site's ring as it was before its first call (see build): name, origin, size
+        self._build_sites: dict[tuple, list[list[int]]] = {}
 
     @property
     def executor(self) -> Executor:
@@ -650,6 +652,11 @@ class BodyMcp:
             # what stands around the box now: anything solid there after the build that
             # was air here is the builder's own scaffolding, and C1 digs it out
             ring_air = [c for c in ring_cells(origin, plan.size) if read(*c).get("air")]
+            # the site as it was before THIS BUILD began, not before this call: calling again to
+            # finish (after a death, a refusal, a stop) must still see the first try's pillars
+            # as scaffolding, not as part of the landscape
+            site = (plan.name, *origin, *plan.size)
+            ring_air = self._build_sites.setdefault(site, ring_air)
         except SchematicError as exc:
             _err(f"build: {exc}")
         except RuntimeError as exc:
