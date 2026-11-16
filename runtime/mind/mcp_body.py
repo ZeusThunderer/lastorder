@@ -636,16 +636,13 @@ class BodyMcp:
                 f"build: the site is {math.dist((pos[0], pos[2]), (center[0], center[2])):.0f} m "
                 f"away — walk within {BUILD_REACH_M:.0f} m of it first (goto), then build"
             )
-        missing, short = material_check(plan, inventory)
-        if missing:
-            _err(
-                "build: not in the inventory: " + ", ".join(missing)
-                + " — gather or craft them first; the whole build needs: "
-                + ", ".join(f"{b} {n}" for b, n in plan.materials.items())
-            )
+        seen: dict[tuple[int, int, int], dict[str, Any]] = {}
+
         def read(cx: int, cy: int, cz: int) -> dict[str, Any]:
-            with self._x.body_lock:  # per cell: C1's tick is never held for the whole scan
-                return dict(self._x.body.block_at(cx, cy, cz))
+            if (cx, cy, cz) not in seen:
+                with self._x.body_lock:  # per cell: C1's tick is never held for the whole scan
+                    seen[(cx, cy, cz)] = dict(self._x.body.block_at(cx, cy, cz))
+            return seen[(cx, cy, cz)]
 
         t0 = time.monotonic()
         try:
@@ -658,6 +655,18 @@ class BodyMcp:
         except RuntimeError as exc:
             _err(f"build: the site could not be read ({exc}) — come closer, it may be unloaded")
         scan_s = round(time.monotonic() - t0, 1)
+        # the bill is what is not standing yet: calling again to finish a build asks
+        # only for the blocks of its holes
+        cells = plan.placed_at(origin)
+        todo = [c for c in cells if read(*c[:3]).get("id") != c[3]]
+        missing, short = material_check(plan, inventory, cells=todo)
+        if missing:
+            _err(
+                "build: not in the inventory: " + ", ".join(missing)
+                + " — gather or craft them first; still to place: "
+                + ", ".join(f"{b} {n}" for b, n in Counter(c[3] for c in todo).most_common())
+                + f" (the whole build: {', '.join(f'{b} {n}' for b, n in plan.materials.items())})"
+            )
         if conflicts and not clear:
             what = Counter(c[3] for c in conflicts).most_common(6)
             _err(
@@ -666,7 +675,6 @@ class BodyMcp:
                 "Pick a clear, flat spot, or call build again with clear: true to dig them "
                 "out first"
             )
-        cells = plan.placed_at(origin)
         args: dict[str, Any] = {
             "blocks": cells,
             "name": plan.name,
@@ -826,7 +834,8 @@ def build_server(
         single cells after the regions, optional "entrance": [x, y, z]. Layer y=0 is the
         foundation and is placed at (x, y, z), the lowest corner; every block must connect
         to it. Full blocks only: no stairs, slabs, doors, torches, nothing that falls.
-        Every palette block must already be in the hotbar (slots 0-8). The site is
+        Every block still to place must be in the inventory (the body moves the stacks
+        into the hotbar itself); cells already standing are not billed. The site is
         checked: a box holding other blocks (a tree, a wall, grass inside) is refused
         with what is there — pick a clear spot, or pass clear: true and the body digs
         them out first. A wrong schematic is refused with the reason — fix it and call

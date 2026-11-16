@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -304,10 +304,12 @@ def site_conflicts(
 
 
 def material_check(
-    plan: Plan, inventory: Iterable[Any], slots: int = 36
+    plan: Plan, inventory: Iterable[Any], slots: int = 36,
+    cells: Iterable[Sequence[Any]] | None = None,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     """(missing, short): blocks absent from the inventory (hotbar + main, slots 0-35),
-    and blocks it holds fewer of than the plan needs. The body moves stacks into the
+    and blocks it holds fewer of than the plan needs — or, given `cells` ([x, y, z,
+    block] still to place), than those cells need. The body moves stacks into the
     hotbar itself before each placing round (uc's builder takes from slots 0-8, and with
     the named block absent it places whatever is in hand — so an absent block is a
     refusal, never a warning)."""
@@ -317,8 +319,9 @@ def material_check(
             have[block_id(str(getattr(stack, "name", "")) or "air", "inventory")] += int(
                 getattr(stack, "count", 0)
             )
+    bill = plan.materials if cells is None else Counter(str(c[3]) for c in cells)
     missing, short = [], []
-    for block, need in plan.materials.items():
+    for block, need in bill.items():
         got = have.get(block, 0)
         if got == 0:
             missing.append(block)

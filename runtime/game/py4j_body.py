@@ -698,28 +698,58 @@ class Py4jBody:
     def restock(self, needs: Mapping[str, int]) -> dict[str, Any]:
         """Bring the blocks a build needs from the main inventory into the hotbar (uc's
         builder takes from slots 0-8 only): vanilla's hotbar swap, one click per stack.
-        A hotbar slot already holding a needed block is kept; empty slots go first,
-        then slots of things the build does not use."""
+        First every needed block gets one hotbar slot — uc places whatever is in hand
+        when the named block is not in the hotbar (a window of planks) — then free slots
+        take more stacks of the biggest shortfalls. A slot is free when it is empty,
+        holds something the build does not use, or holds a second stack of a block."""
         slots = self.inventory_slots()
-        protected = {i for i, (item, _) in slots.items() if i < 9 and item in needs}
+        keep: set[int] = set()
+        for item in needs:  # one stack of each needed block already up there stays
+            have = [i for i in range(9) if slots.get(i, ("", 0))[0] == item]
+            if have:
+                keep.add(max(have, key=lambda i: slots[i][1]))
+
+        def hot(item: str) -> int:
+            return sum(c for i, (it, c) in slots.items() if i < 9 and it == item)
+
+        def free_slot() -> int | None:
+            free = [i for i in range(9) if i not in keep]
+            for good in (lambda i: i not in slots,
+                         lambda i: slots[i][0] not in needs,
+                         lambda i: True):
+                pick = next((i for i in free if good(i)), None)
+                if pick is not None:
+                    return pick
+            return None
+
+        def swap_in(item: str) -> bool:
+            source = next((i for i in range(9, 36) if slots.get(i, ("", 0))[0] == item), None)
+            target = free_slot()
+            if source is None or target is None:
+                return False
+            self._call(lambda mc, s=source, t=target: mc.clickUiSlot(s, t, "SWAP"))
+            moved, back = slots.get(source), slots.get(target)
+            slots[target] = moved
+            if back is None:
+                slots.pop(source, None)
+            else:
+                slots[source] = back
+            keep.add(target)
+            self._sleep(0.15)  # the slot handler paces clicks
+            return True
+
         swaps = 0
-        for item, need in sorted(needs.items(), key=lambda kv: -kv[1]):
-            while sum(c for i, (it, c) in slots.items() if i < 9 and it == item) < need:
-                source = next((i for i in range(9, 36) if slots.get(i, ("", 0))[0] == item), None)
-                free = [i for i in range(9) if i not in protected]
-                if source is None or not free:
-                    break
-                target = next((i for i in free if i not in slots), free[0])
-                self._call(lambda mc, s=source, t=target: mc.clickUiSlot(s, t, "SWAP"))
-                moved, back = slots.get(source), slots.get(target)
-                slots[target] = moved
-                if back is None:
-                    slots.pop(source, None)
-                else:
-                    slots[source] = back
-                protected.add(target)
+        for item, _ in sorted(needs.items(), key=lambda kv: -kv[1]):
+            if not hot(item) and swap_in(item):
                 swaps += 1
-                self._sleep(0.15)  # the slot handler paces clicks
+        while True:
+            short = sorted(((need - hot(item), item) for item, need in needs.items()
+                            if hot(item) < need
+                            and any(slots.get(i, ("", 0))[0] == item for i in range(9, 36))),
+                           reverse=True)
+            if not short or not swap_in(short[0][1]):
+                break
+            swaps += 1
         hotbar: dict[str, int] = {}
         for i in range(9):
             if i in slots:

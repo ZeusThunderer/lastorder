@@ -126,7 +126,11 @@ class FakeBody:
 
     def restock(self, needs: dict) -> dict:
         self.acts.append(("__restock__", dict(needs)))
-        return {"swaps": 0, "hotbar": {}}
+        hotbar: dict = {}  # the whole inventory is in reach: a hotbar of plenty
+        for stack in self.inventory():
+            name = stack.name.split(":")[-1]
+            hotbar[name] = hotbar.get(name, 0) + stack.count
+        return {"swaps": 0, "hotbar": hotbar}
 
     def busy(self) -> bool:
         return self.busy_flag
@@ -364,7 +368,7 @@ HUT = {
 def test_build_refuses_a_block_missing_from_the_inventory(stack: Stack) -> None:
     result = stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 10, "y": 64, "z": 10}))
     text = error_text(result)
-    assert "not in the inventory: oak_planks" in text and "oak_planks 25" in text
+    assert "not in the inventory: oak_planks" in text and "still to place: oak_planks 25" in text
     assert not [a for a in stack.body.acts if a[0] == "build_blocks"]
 
 
@@ -453,6 +457,47 @@ def test_build_digs_its_own_scaffolding_and_fills_a_hole(stack: Stack) -> None:
     assert digs == [(13, 65, 12), (13, 64, 12)]  # the pillar, top-down
     assert stack.body.world.get((12, 65, 11)) == "oak_planks"  # the hole refilled
     assert (13, 64, 12) not in stack.body.world
+
+
+def test_build_withholds_cells_the_hotbar_cannot_cover_and_places_them_next_round(stack: Stack) -> None:
+    # uc places whatever is in hand once the named block runs out of the hotbar (the
+    # Birch Cottage's planked-over windows): a round never sends more than the hotbar holds
+    stack.body.extra_items = (ItemStack(name="minecraft:oak_planks", count=64, slot=20),)
+    first = [{"oak_planks": 10}]
+    real = stack.body.restock
+
+    def restock(needs: dict) -> dict:
+        out = real(needs)
+        if first:
+            out["hotbar"] = first.pop()
+        return out
+
+    stack.body.restock = restock
+    parse(stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 10, "y": 64, "z": 10})))
+    stack.wait_until(lambda: any(
+        line.get("kind") == "intent" and line.get("phase") in ("done", "failed") for line in stack.log_lines()
+    ), timeout=20)
+    batches = [a[1]["blocks"] for a in stack.body.acts if a[0] == "build_blocks"]
+    assert [len(b) for b in batches] == [10, 15]  # the second round: only what is missing
+    phases = [l.get("phase") for l in stack.log_lines() if l.get("kind") == "intent"]
+    assert "withheld" in phases and phases[-1] == "done", phases
+
+
+def test_build_again_bills_only_the_cells_still_missing(stack: Stack) -> None:
+    from runtime.mind.build import parse_schematic
+
+    cells = parse_schematic(HUT).placed_at((10, 64, 10))
+    stack.body.world = {tuple(c[:3]): c[3] for c in cells[2:]}  # two holes left
+    stack.body.extra_items = (ItemStack(name="minecraft:oak_planks", count=2, slot=20),)
+    answer = parse(stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 10, "y": 64, "z": 10})))
+    assert "short" not in answer
+    stack.wait_until(lambda: any(
+        line.get("kind") == "intent" and line.get("phase") == "done" for line in stack.log_lines()
+    ), timeout=20)
+    stack.body.extra_items = ()
+    stack.body.world = {}
+    result = stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 10, "y": 64, "z": 10}))
+    assert "still to place: oak_planks 25" in error_text(result)
 
 
 def test_act_over_mcp_returns_intent_id_and_reaches_body(stack: Stack) -> None:

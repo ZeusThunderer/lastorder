@@ -358,6 +358,9 @@ class Intent:
         # back from the world (missing, stray, scaffold) and fixes what it can
         self.rounds = 0
         self.last_check: dict[str, list[list[Any]]] | None = None
+        # cells left out of the last placing round: their block was not in the hotbar
+        # (uc would place whatever is in hand instead); the next round restocks for them
+        self.withheld = 0
 
     @property
     def finished(self) -> bool:
@@ -1284,8 +1287,13 @@ class Executor:
         defects = sum(len(v) for v in check.values())
         before = sum(len(v) for v in intent.last_check.values()) if intent.last_check else None
         intent.last_check = check
-        if defects and intent.rounds < MAX_BUILD_ROUNDS and (before is None or defects < before):
-            intent.rounds += 1
+        helps = before is None or defects < before
+        # a round that only ran out of hotbar room is a supply round, not a repair: it
+        # does not count against the cap, and progress alone bounds it
+        supply = intent.withheld > 0
+        if defects and helps and (supply or intent.rounds < MAX_BUILD_ROUNDS):
+            if not supply:
+                intent.rounds += 1
             dig = {tuple(c[:3]) for c in check["extra"] + check["scaffold"]}
             intent.clear_left = [list(c) for c in sorted(dig, key=lambda c: (-c[1], c[0], c[2]))]
             self._log.record(
@@ -1315,16 +1323,45 @@ class Executor:
             x, y, z = intent.clear_left[0]
             lever, args = DESTROY_LEVER, {"x": x, "y": y, "z": z}
         elif lever == BUILD_LEVER:
+            cells = list(args.get("blocks") or ())
+            if intent.last_check is not None:  # a repair places only what is missing
+                todo = {tuple(c[:3]) for c in intent.last_check["missing"]}
+                cells = [c for c in cells if tuple(c[:3]) in todo]
             # uc's builder takes blocks from the hotbar only: bring the stacks up first
             needs: dict[str, int] = {}
-            for *_, block in args.get("blocks") or ():
+            for *_, block in cells:
                 needs[str(block)] = needs.get(str(block), 0) + 1
             try:
                 stocked = self._body.restock(needs)
                 if stocked.get("swaps"):
                     self._log.record("intent", phase="restock", intent_id=intent.id, **dict(stocked))
+                # no more of a block than the hotbar holds: past that uc places whatever
+                # is in hand; the rest waits for the next round's restock
+                budget = {b: int(n) for b, n in dict(stocked.get("hotbar") or {}).items()}
+                batch = []
+                for cell in cells:
+                    if budget.get(str(cell[3]), 0) > 0:
+                        budget[str(cell[3])] -= 1
+                        batch.append(cell)
+                intent.withheld = len(cells) - len(batch)
+                cells = batch
             except Exception as exc:  # a failed restock leaves cells missing, not the build
                 self._log.record("intent", phase="restock_failed", intent_id=intent.id, error=str(exc))
+                intent.withheld = 0
+            if intent.withheld:
+                self._log.record("intent", phase="withheld", intent_id=intent.id,
+                                 cells=intent.withheld, placing=len(cells))
+            if not cells:  # nothing this body can place now: judge what stands
+                intent.withheld = 0
+                if intent.last_check is None:
+                    try:
+                        intent.last_check = self._build_check(intent)
+                    except Exception as exc:
+                        self._log.record("intent", phase="check_failed", intent_id=intent.id,
+                                         error=str(exc))
+                self._settle(intent)
+                return
+            args = {**args, "blocks": cells}
         self._body.act(lever, args)
         intent.state = Intent.ACTIVE
         intent.applied_at = self._clock()

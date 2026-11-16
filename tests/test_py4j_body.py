@@ -766,3 +766,55 @@ def test_stop_also_stops_the_fight():
     body, ep, _, _ = make_body()
     body.stop()
     assert ("punkStop",) in ep.log
+
+
+# --- restock: the hotbar the builder takes from -----------------------------------------
+
+
+class InventoryEntryPoint(FakeEntryPoint):
+    """A real 36-slot inventory: clickUiSlot(main, hotbar, "SWAP") swaps two slots."""
+
+    def __init__(self, slots: dict[int, tuple[str, int]]):
+        super().__init__()
+        self.slots = dict(slots)
+
+    def getInventoryFull(self):
+        self._rec("getInventoryFull")
+        return {"ok": True, "slots": [
+            {"index": i, "empty": False, "item": f"minecraft:{it}", "count": c}
+            for i, (it, c) in self.slots.items()]}
+
+    def clickUiSlot(self, slot, button, action):
+        self._rec("clickUiSlot", slot, button, action)
+        a, b = self.slots.pop(slot, None), self.slots.pop(button, None)
+        if a:
+            self.slots[button] = a
+        if b:
+            self.slots[slot] = b
+        return {"ok": True}
+
+
+def test_restock_gives_every_needed_block_a_hotbar_slot_first():
+    # the Birch Cottage case: /give filled the hotbar with planks and cobble, glass and
+    # glowstone landed in the main inventory — the builder then put planks into windows
+    hotbar = {i: ("birch_planks", 64) for i in range(4)}
+    hotbar.update({4: ("cobblestone", 64), 5: ("cobblestone", 46), 6: ("spruce_planks", 64),
+                   7: ("spruce_planks", 26), 8: ("stone_pickaxe", 1)})
+    ep = InventoryEntryPoint({**hotbar, 9: ("birch_planks", 8), 10: ("glass", 8),
+                              11: ("glowstone", 2)})
+    body, *_ = make_body(ep)
+    out = body.restock({"birch_planks": 193, "cobblestone": 107, "spruce_planks": 87,
+                        "glass": 6, "glowstone": 1})
+    up = {it for i, (it, _) in ep.slots.items() if i < 9}
+    assert {"birch_planks", "cobblestone", "spruce_planks", "glass", "glowstone"} <= up
+    assert out["hotbar"]["glass"] == 8 and out["hotbar"]["glowstone"] == 2
+    assert sum(c for _, (it, c) in ep.slots.items() if it == "birch_planks") == 4 * 64 + 8  # nothing lost
+
+
+def test_restock_fills_free_slots_with_the_biggest_shortfall():
+    ep = InventoryEntryPoint({0: ("oak_planks", 64), 9: ("oak_planks", 64), 10: ("oak_planks", 64),
+                              11: ("glass", 10)})
+    body, *_ = make_body(ep)
+    out = body.restock({"oak_planks": 150, "glass": 4})
+    assert out["hotbar"] == {"oak_planks": 192, "glass": 10}
+    assert out["swaps"] == 3

@@ -1,7 +1,7 @@
 """Live probe of the body's build tool (defence-plan W3) — what a sister would do, minus the sister.
 
 Runs INSIDE the mind container (the MCP port is never published):
-    docker exec -i lastorder-mind-1-1 python - "<schematic json>" [dx dz [limit_s [x y z]]] < dev/build_probe.py
+    docker exec -i lastorder-mind-1-1 python - "<schematic json>" [dx dz [limit_s [x y z [clear]]]] < dev/build_probe.py
 
 observe -> build next to the body (dx, dz blocks away, on its feet level) -> build_status
 every 5 s -> the intent.done / intent.failed event. Prints one line per step.
@@ -31,7 +31,8 @@ def text(result) -> dict:
         return {"text": body}
 
 
-async def main(schematic: str, dx: int, dz: int, limit_s: float, at: list[int] | None = None) -> None:
+async def main(schematic: str, dx: int, dz: int, limit_s: float, at: list[int] | None = None,
+               clear: bool = False) -> None:
     async with Client(streamable_http_client(URL)) as c:
         seen = text(await c.call_tool("observe", {}))
         me = seen.get("self", {})
@@ -40,7 +41,7 @@ async def main(schematic: str, dx: int, dz: int, limit_s: float, at: list[int] |
         x, y, z = (math.floor(c) for c in me["pos"])
         ox, oy, oz = at if at else (x + dx, y, z + dz)
         answer = text(await c.call_tool("build", {"schematic": json.loads(schematic),
-                                                  "x": ox, "y": oy, "z": oz}))
+                                                  "x": ox, "y": oy, "z": oz, "clear": clear}))
         print("build:", json.dumps(answer, ensure_ascii=False))
         if "error" in answer:
             return
@@ -62,4 +63,5 @@ if __name__ == "__main__":
     dx = int(sys.argv[2]) if len(sys.argv) > 2 else 3
     dz = int(sys.argv[3]) if len(sys.argv) > 3 else 3
     at = [int(v) for v in sys.argv[5:8]] if len(sys.argv) > 7 else None  # absolute origin
-    asyncio.run(main(sys.argv[1], dx, dz, float(sys.argv[4]) if len(sys.argv) > 4 else 300, at))
+    clear = len(sys.argv) > 8 and sys.argv[8] == "clear"  # dig what the site check finds
+    asyncio.run(main(sys.argv[1], dx, dz, float(sys.argv[4]) if len(sys.argv) > 4 else 300, at, clear))
