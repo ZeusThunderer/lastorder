@@ -476,6 +476,8 @@ class Executor:
         self._detector = DeathDetector(username)
         self.events = EventQueue()
         self._events_watermark = 0
+        # called with each chat or voice line someone ELSE said (the voice's interrupt, W1)
+        self._heard: list[Callable[[dict[str, Any]], None]] = []
         self._intent_seq = 0
         self._current: Intent | None = None
 
@@ -620,6 +622,21 @@ class Executor:
         entry["text"] = clean
         return entry
 
+    def on_heard(self, fn: Callable[[dict[str, Any]], None]) -> None:
+        """Call `fn(entry)` for every chat or voice line another player said (`from` set and
+        not this slot's own account). A failing listener never stops the tick."""
+        self._heard.append(fn)
+
+    def _notify_heard(self, entry: dict[str, Any]) -> None:
+        who = str(entry.get("from") or "").lower()
+        if not who or who == self._username.lower():
+            return
+        for fn in self._heard:
+            try:
+                fn(entry)
+            except Exception:  # pragma: no cover - a listener's failure is its own
+                log.exception("heard listener failed")
+
     @property
     def username(self) -> str:
         """The slot account this body plays as (LastOrder01)."""
@@ -744,6 +761,7 @@ class Executor:
                 entry = self.chat_entry(payload.get("text"))
                 if entry is not None:
                     self._emit("chat.line", lines=[entry])
+                    self._notify_heard(entry)
             elif event.type == "voice.line":
                 # heard in voice chat (ADR-055): the same filter and `from` as a chat
                 # line, marked so the agent knows it was spoken, not typed
@@ -751,6 +769,7 @@ class Executor:
                 if entry is not None:
                     entry["voice"] = True
                     self._emit("chat.line", lines=[entry])
+                    self._notify_heard(entry)
             elif event.type == "game.damage" and not payload.get("service"):
                 self._last_damage_at = self._clock()
                 source = self._nearest_hostile()

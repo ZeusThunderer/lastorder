@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from runtime.mind.mcp_body import BodyMcp, ToolError
-from runtime.voice.speaker import BYTES_PER_S, FIRST_CHUNK, Speaker, SpeakerBusy
+from runtime.voice.speaker import BYTES_PER_S, FIRST_CHUNK, Speaker, split_parts
 
 
 class Events:
@@ -69,13 +69,12 @@ def pcm_for(text: str, seconds: float = 0.2) -> bytes:
     return tag + b"\0" * (int(BYTES_PER_S * seconds) - 8)
 
 
-def make(ev: Events, *, synth=None, connect=None, max_pending=3, play_s=0.05) -> Speaker:
+def make(ev: Events, *, synth=None, connect=None, play_s=0.05) -> Speaker:
     return Speaker(
         synth=synth or (lambda text: (pcm_for(text), "")),
         connect=connect or (lambda: FakeInlet(ev, play_s)),
         send_chat=lambda text: ev.add("chat", text),
         journal=ev,
-        max_pending=max_pending,
     ).start()
 
 
@@ -91,9 +90,10 @@ def wait_for(cond, timeout=5.0):
 def test_lines_are_spoken_in_order_and_never_overlap():
     ev = Events()
     sp = make(ev)
-    for text in ("line-1", "line-2", "line-3"):
+    for text in ("line-1", "line-2", "line-3"):   # each said once the previous one has started
         sp.say(text)
-    wait_for(lambda: sum(1 for k, _ in ev.items if k == "chat") == 3)
+        wait_for(lambda: ("chat", text) in ev.items)
+    wait_for(lambda: len(ev.journal) == 3)
     sp.close()
     assert [t for k, t in ev.items if k == "chat"] == ["line-1", "line-2", "line-3"]
     assert ev.max_playing == 1
@@ -146,34 +146,96 @@ def test_an_unreachable_inlet_still_sends_the_line():
     assert "inlet unreachable" in ev.journal[0]["silent"]
 
 
-def test_too_many_waiting_lines_are_refused():
-    ev = Events()
-    gate = threading.Event()
+def test_a_line_is_cut_into_sentences_short_ones_ride_along():
+    text = "Да. Я вижу дом у реки, он почти достроен. Крыша ещё не готова, но стены стоят!"
+    parts = split_parts(text)
+    assert parts == ["Да. Я вижу дом у реки, он почти достроен.", "Крыша ещё не готова, но стены стоят!"]
+    assert " ".join(parts) == text
+    long = "раз, " * 60 + "всё."
+    assert all(len(p) <= 180 for p in split_parts(long)) and len(split_parts(long)) > 1
 
-    def slow_synth(text):
-        gate.wait(5)
+
+def test_each_sentence_is_its_own_clip_and_the_chat_line_comes_once_whole():
+    ev = Events()
+    synthesized: list[str] = []
+
+    def synth(text):
+        synthesized.append(text)
         return pcm_for(text), ""
 
-    sp = make(ev, synth=slow_synth, max_pending=2)
-    assert sp.say("a") == 0
-    assert sp.say("b") == 1
-    with pytest.raises(SpeakerBusy):
-        sp.say("c")
-    gate.set()
-    wait_for(lambda: sum(1 for k, _ in ev.items if k == "chat") == 2)
-    assert sp.say("d") == 0  # room again once the lines are said
+    sp = make(ev, synth=synth)
+    line = "Первое предложение здесь. Второе предложение тоже здесь."
+    sp.say(line)
+    wait_for(lambda: len(ev.journal) == 2)
     sp.close()
+    assert synthesized == ["Первое предложение здесь.", "Второе предложение тоже здесь."]
+    assert [t for k, t in ev.items if k == "chat"] == [line]
+    assert [j["ok"] for j in ev.journal] == [True, True]
+    assert "wait_s" in ev.journal[0] and "wait_s" not in ev.journal[1]
 
 
-def test_body_mcp_say_queues_through_the_speaker():
+def test_a_new_line_replaces_the_waiting_one_and_nothing_is_lost():
     ev = Events()
     gate = threading.Event()
-    sp = make(ev, synth=lambda t: (gate.wait(5), (pcm_for(t), ""))[1], max_pending=1)
+
+    def synth(text):
+        if text == "first":
+            gate.wait(5)   # the first line is being synthesized while two more arrive
+        return pcm_for(text), ""
+
+    sp = make(ev, synth=synth)
+    assert sp.say("first") == 0
+    time.sleep(0.05)                # "first" is in synthesis
+    assert sp.say("stale") == 1     # "first" had not started playing: replaced too
+    assert sp.say("newest") == 1    # "stale" never started: replaced, goes to chat as text
+    gate.set()
+    wait_for(lambda: sum(1 for k, _ in ev.items if k == "chat") == 3)
+    wait_for(lambda: len(ev.journal) == 3)
+    sp.close()
+    chats = [t for k, t in ev.items if k == "chat"]
+    assert chats == ["first", "stale", "newest"]
+    assert chats.index("stale") < chats.index("newest")
+    spoken = [t for k, t in ev.items if k == "audio"]
+    assert spoken == ["newest  "]
+    (dropped,) = [j for j in ev.journal if j["text"] == "stale"]
+    assert dropped["ok"] is False and dropped["silent"] == "replaced by a newer line"
+
+
+def test_interrupt_drops_the_waiting_lines_and_lets_the_playing_one_finish():
+    ev = Events()
+    sp = make(ev, play_s=0.3)
+    sp.say("playing")
+    wait_for(lambda: ("chat", "playing") in ev.items)
+    sp.say("waiting")
+    time.sleep(0.05)
+    assert sp.interrupt("Steve spoke") == 1
+    wait_for(lambda: len(ev.journal) == 2)
+    sp.close()
+    assert [t for k, t in ev.items if k == "audio"] == ["playing "]
+    assert ("chat", "waiting") in ev.items
+    assert {j["text"]: j["ok"] for j in ev.journal} == {"playing": True, "waiting": False}
+
+
+def test_body_mcp_say_speaks_through_the_speaker_and_reports_replaced_lines():
+    ev = Events()
+    gate = threading.Event()
+    sp = make(ev, synth=lambda t: (gate.wait(5), (pcm_for(t), ""))[1])
     impl = BodyMcp(SimpleNamespace(bodiless=False), speaker=sp)
-    answer = impl.say("привет")
-    assert answer == {"said": True, "text": "привет", "voice": "queued", "ahead": 0}
-    with pytest.raises(ToolError, match="still speaking"):
-        impl.say("ещё")
+    assert impl.say("привет") == {"said": True, "text": "привет", "voice": "speaking"}
+    time.sleep(0.05)
+    impl.say("ещё")
+    assert impl.say("и ещё") == {"said": True, "text": "и ещё", "voice": "speaking", "replaced": 1}
     gate.set()
     wait_for(lambda: ("chat", "привет") in ev.items)
     sp.close()
+
+
+def test_the_executor_tells_listeners_only_about_other_players():
+    from runtime.mind.executor import Executor
+
+    heard: list[dict] = []
+    x = SimpleNamespace(_username="LastOrder01", _heard=[heard.append])
+    Executor._notify_heard(x, {"from": "LastOrder01", "text": "моя"})
+    Executor._notify_heard(x, {"text": "LastOrder01 was slain"})
+    Executor._notify_heard(x, {"from": "Steve", "text": "эй"})
+    assert heard == [{"from": "Steve", "text": "эй"}]

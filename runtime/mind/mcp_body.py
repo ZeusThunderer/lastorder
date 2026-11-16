@@ -59,7 +59,7 @@ from runtime.mind.jev import JevGate
 from runtime.mind.login import SessionLogin
 from runtime.perception.topics import TopicFilter
 from runtime.perception.translate import Perception
-from runtime.voice.speaker import Speaker, SpeakerBusy
+from runtime.voice.speaker import Speaker
 
 log = logging.getLogger("mcp_body")
 
@@ -726,12 +726,13 @@ class BodyMcp:
             _err(NO_BODY_ERROR)
         cleaned = check_say(text)
         if self._speaker is not None:
-            # the queue cap replaces the 4 s rate: lines wait their turn to be spoken
-            try:
-                ahead = self._speaker.say(cleaned)
-            except SpeakerBusy as exc:
-                _err(str(exc))
-            return {"said": True, "text": cleaned, "voice": "queued", "ahead": ahead}
+            # spoken sentence by sentence; a line still waiting to start is replaced by this
+            # one (and goes to chat as text) instead of queueing behind it (defence-plan W1)
+            replaced = self._speaker.say(cleaned)
+            answer: dict[str, Any] = {"said": True, "text": cleaned, "voice": "speaking"}
+            if replaced:
+                answer["replaced"] = replaced
+            return answer
         now = self._clock()
         if now - self._last_say_at < SAY_MIN_INTERVAL_S:
             _err(f"say: too fast, one line per {SAY_MIN_INTERVAL_S:.0f} s")
@@ -861,8 +862,11 @@ def build_server(
 
     async def say(text: str) -> dict[str, Any]:
         """One line into the player chat (no / or @, limited length and rate).
-        When this body has a voice, the line is spoken aloud and appears in chat
-        as the voice starts; lines are spoken in order, a few may wait their turn."""
+        When this body has a voice, the line is spoken aloud, sentence by sentence,
+        and appears in chat as the voice starts. A new line replaces the ones not
+        started yet (they go to chat unspoken, `replaced` counts them); a player
+        speaking to you does the same. Short lines start sooner: one or two
+        sentences."""
         return await impl._reply("say", {"text": text}, lambda: impl.say(text))
 
     async def server_command(command: str) -> dict[str, Any]:
@@ -1127,7 +1131,6 @@ def voice_from_env(
     host = env("BODY_HOST", default="127.0.0.1") or "127.0.0.1"
     port = int(env("BODY_VOICE_PORT", default="25500") or "25500")
     timeout_s = float(env("TTS_TIMEOUT_S", default="25") or "25")
-    max_pending = int(env("VOICE_MAX_PENDING", default="3") or "3")
 
     def make(executor: Executor) -> Speaker:
         def send_chat(text: str) -> None:
@@ -1136,13 +1139,16 @@ def voice_from_env(
             with executor.body_lock:
                 executor.body.act("chat", {"text": text})
 
-        return Speaker(
+        speaker = Speaker(
             synth=http_synth(tts_url, timeout_s),
             connect=tcp_inlet(host, port),
             send_chat=send_chat,
             journal=call_log,
-            max_pending=max_pending,
         ).start()
+        # someone else spoke to her (chat or voice): what she was still going to say is
+        # stale — the line playing finishes, the waiting ones go to chat as text (W1)
+        executor.on_heard(lambda entry: speaker.interrupt(f"{entry.get('from')} spoke"))
+        return speaker
 
     log.info("voice armed for %s: tts %s, inlet %s:%d", username, tts_url, host, port)
     return make

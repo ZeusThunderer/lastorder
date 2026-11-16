@@ -1,33 +1,37 @@
-"""One sister's voice (ADR-055): her `say` lines, spoken in order, each line in chat at the
-moment its voice starts.
+"""One sister's voice (ADR-055): her `say` lines, spoken sentence by sentence, each line in
+chat at the moment its voice starts.
 
-    say(text) ─► lines ─► [synth thread] tts /speak ─► ready (1 slot) ─► [play thread]
-                                                                          │ connect inlet
-                                                                          │ first chunk
-                                                                          │ chat ◄── here
-                                                                          │ rest, half-close
-                                                                          └ wait EOF = done
+    say(text) ─► parts (sentences) ─► [synth thread] tts /speak ─► ready (1 part ahead)
+                                                                     │ [play thread]
+                                                                     │ connect inlet, first chunk
+                                                                     │ chat ◄── first part only
+                                                                     │ rest, half-close
+                                                                     └ wait EOF = part done
 
 - One `Speaker` per mind, so a sister never talks over herself; two sisters (two minds) may.
-- The next line is synthesized while the current one plays: no gap for the synthesis.
+- A line is cut into sentences (defence-plan W1): the first sentence plays while the next is
+  synthesized, so the first sound comes after one sentence of synthesis, not the whole line,
+  and each request stays well inside the tts timeout.
+- A new line REPLACES the lines still waiting to start, it does not queue behind them: by the
+  time a stale line would be spoken the moment has passed (Pyhtun, showcase §3). The line
+  already playing finishes. `interrupt()` drops the waiting lines the same way — a player
+  spoke to her (§8).
+- A line is never lost: replaced, interrupted, no voice (tts down, too slow, nothing
+  speakable) or no inlet — it goes to chat as text and the journal says why.
 - The body's inlet (`socat` → `paplay`) closes the connection when the audio has drained:
-  that EOF is "finished", the next line starts only after it.
-- A line is never lost: no voice (tts down, too slow, nothing speakable) or no inlet →
-  the line goes to chat silently and the journal says why.
-- More than `max_pending` lines waiting to start → `SpeakerBusy`; the agent hears
-  "still speaking" instead of a growing backlog of stale lines.
+  that EOF is "finished", the next part starts only after it.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 import socket
 import threading
 import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from queue import Queue
 from typing import Any, Protocol
 
 log = logging.getLogger("voice.speaker")
@@ -36,11 +40,38 @@ RATE = 48000                 # PCM s16le mono, what the tts service returns and 
 BYTES_PER_S = RATE * 2
 FIRST_CHUNK = BYTES_PER_S // 10   # 100 ms of audio go out before the chat line
 DRAIN_MARGIN_S = 5.0          # how long past the clip's end the inlet may take to close
-MAX_PENDING = 3
+MIN_PART = 25                 # a shorter sentence rides with the next one ("Да. Иду.")
+MAX_PART = 180                # a longer sentence is cut at a comma or a dash
+
+_SENTENCE = re.compile(r"(?<=[.!?…])\s+")
+_CLAUSE = re.compile(r"(?<=[,;:])\s+|\s+(?=[—–-]\s)")
 
 
-class SpeakerBusy(Exception):
-    """Too many lines are waiting to be spoken."""
+def split_parts(text: str) -> list[str]:
+    """A line as the pieces it is synthesized in: sentences, the short ones joined to the
+    next, the long ones cut at a clause boundary. Joined back with spaces they are the line."""
+    out: list[str] = []
+    for sentence in _SENTENCE.split(text.strip()):
+        if len(sentence) <= MAX_PART:
+            pieces = [sentence]
+        else:
+            pieces, cur = [], ""
+            for clause in _CLAUSE.split(sentence):
+                if cur and len(cur) + 1 + len(clause) > MAX_PART:
+                    pieces.append(cur)
+                    cur = clause
+                else:
+                    cur = f"{cur} {clause}".strip()
+            if cur:
+                pieces.append(cur)
+        for piece in pieces:
+            if out and len(out[-1]) < MIN_PART:
+                out[-1] = f"{out[-1]} {piece}"
+            else:
+                out.append(piece)
+    if len(out) > 1 and len(out[-1]) < MIN_PART:
+        out[-2] = f"{out[-2]} {out.pop()}"
+    return [p for p in out if p]
 
 
 class Journal(Protocol):
@@ -49,9 +80,20 @@ class Journal(Protocol):
 
 @dataclass
 class _Line:
+    id: int
     text: str
+    said_at: float
+    state: str = "waiting"    # waiting → playing → done, or waiting → dropped
+
+
+@dataclass
+class _Part:
+    line: _Line
+    text: str
+    first: bool
+    last: bool
     pcm: bytes | None = None
-    why_silent: str = ""     # set when pcm is None: the reason it goes to chat without voice
+    why_silent: str = ""      # set when pcm is None
     synth_s: float = 0.0
 
 
@@ -94,19 +136,20 @@ class Speaker:
         connect: Callable[[], Any],
         send_chat: Callable[[str], None],
         journal: Journal,
-        max_pending: int = MAX_PENDING,
         drain_margin_s: float = DRAIN_MARGIN_S,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self._synth = synth
         self._connect = connect
         self._send_chat = send_chat
         self._journal = journal
-        self._max_pending = max_pending
         self._drain_margin_s = drain_margin_s
+        self._clock = clock
         self._cv = threading.Condition()
-        self._lines: deque[_Line] = deque()
-        self._waiting = 0             # accepted, not yet in chat
-        self._ready: Queue[_Line | None] = Queue(maxsize=1)
+        self._todo: deque[_Part] = deque()    # not synthesized yet
+        self._ready: deque[_Part] = deque()   # synthesized, not played; one part ahead at most
+        self._inflight: _Part | None = None   # being synthesized right now
+        self._ids = 0
         self._stop = threading.Event()
         self._threads = [
             threading.Thread(target=self._synth_loop, name="voice-synth", daemon=True),
@@ -122,95 +165,147 @@ class Speaker:
         self._stop.set()
         with self._cv:
             self._cv.notify_all()
-        try:
-            self._ready.put_nowait(None)
-        except Exception:
-            pass
 
     def say(self, text: str) -> int:
-        """Queue one line; returns how many lines are ahead of it (0: it is next)."""
+        """Speak one line; the lines still waiting to start are replaced (sent to chat as
+        text). Returns how many lines it replaced."""
+        parts = split_parts(text) or [text]
         with self._cv:
-            if self._waiting >= self._max_pending:
-                raise SpeakerBusy(
-                    f"say: still speaking, {self._waiting} lines waiting; try again after they are said"
-                )
-            ahead = self._waiting
-            self._waiting += 1
-            self._lines.append(_Line(text))
-            self._cv.notify()
-        return ahead
+            dropped = self._drop_waiting()
+            self._ids += 1
+            line = _Line(self._ids, text, self._clock())
+            for i, piece in enumerate(parts):
+                self._todo.append(_Part(line, piece, first=i == 0, last=i == len(parts) - 1))
+            self._cv.notify_all()
+        self._flush_dropped(dropped, "replaced by a newer line")
+        return len(dropped)
+
+    def interrupt(self, why: str = "interrupted") -> int:
+        """Drop the lines still waiting to start (sent to chat as text); the one playing
+        finishes. Returns how many were dropped."""
+        with self._cv:
+            dropped = self._drop_waiting()
+            self._cv.notify_all()
+        self._flush_dropped(dropped, why)
+        return len(dropped)
+
+    # --- dropping ------------------------------------------------------------------------
+
+    def _drop_waiting(self) -> list[_Line]:
+        """Under the lock: every waiting line becomes dropped, its parts leave the queues."""
+        lines: dict[int, _Line] = {}
+        inflight = [self._inflight] if self._inflight is not None else []
+        for part in [*inflight, *self._todo, *self._ready]:
+            if part.line.state == "waiting":
+                lines[part.line.id] = part.line
+        for line in lines.values():
+            line.state = "dropped"
+        for queue in (self._todo, self._ready):
+            kept = [p for p in queue if p.line.state != "dropped"]
+            queue.clear()
+            queue.extend(kept)
+        return sorted(lines.values(), key=lambda line: line.id)
+
+    def _flush_dropped(self, lines: list[_Line], why: str) -> None:
+        for line in lines:
+            try:
+                self._send_chat(line.text)
+            except Exception as exc:
+                self._journal.record("voice", ok=False, text=line.text, error=f"chat failed: {exc}")
+                continue
+            self._journal.record("voice", ok=False, text=line.text, silent=why)
 
     # --- threads ---------------------------------------------------------------------
 
     def _synth_loop(self) -> None:
         while not self._stop.is_set():
             with self._cv:
-                while not self._lines and not self._stop.is_set():
-                    self._cv.wait()
+                while not self._stop.is_set() and (not self._todo or self._ready):
+                    self._cv.wait()   # nothing to do, or one part is already waiting to play
                 if self._stop.is_set():
                     return
-                line = self._lines.popleft()
-            t0 = time.monotonic()
+                part = self._todo.popleft()
+                self._inflight = part
+            t0 = self._clock()
             try:
-                line.pcm, line.why_silent = self._synth(line.text)
+                part.pcm, part.why_silent = self._synth(part.text)
             except Exception as exc:  # the client is ours, but a line must never be lost
-                line.pcm, line.why_silent = None, f"tts error: {exc}"
-            line.synth_s = time.monotonic() - t0
-            self._ready.put(line)  # blocks while the slot is full: one line ahead at most
+                part.pcm, part.why_silent = None, f"tts error: {exc}"
+            part.synth_s = self._clock() - t0
+            with self._cv:
+                self._inflight = None
+                if part.line.state != "dropped":   # replaced while it was being synthesized
+                    self._ready.append(part)
+                    self._cv.notify_all()
 
     def _play_loop(self) -> None:
         while not self._stop.is_set():
-            line = self._ready.get()
-            if line is None:
-                return
+            with self._cv:
+                while not self._stop.is_set() and not self._ready:
+                    self._cv.wait()
+                if self._stop.is_set():
+                    return
+                part = self._ready.popleft()
+                if part.first:
+                    part.line.state = "playing"   # from here on it is not replaced
+                self._cv.notify_all()             # the synth may start the next part
             try:
-                self._speak(line)
+                self._speak(part)
             except Exception:  # pragma: no cover - _speak handles its own failures
-                log.exception("voice: unexpected failure on %r", line.text[:60])
+                log.exception("voice: unexpected failure on %r", part.text[:60])
+            if part.last:
+                with self._cv:
+                    part.line.state = "done"
 
-    def _chat(self, line: _Line) -> bool:
-        with self._cv:
-            self._waiting -= 1
+    def _chat(self, part: _Part) -> bool:
+        if not part.first:
+            return True
         try:
-            self._send_chat(line.text)
+            self._send_chat(part.line.text)
             return True
         except Exception as exc:
-            self._journal.record("voice", ok=False, text=line.text, error=f"chat failed: {exc}")
+            self._journal.record("voice", ok=False, text=part.line.text, error=f"chat failed: {exc}")
             return False
 
-    def _speak(self, line: _Line) -> None:
-        if line.pcm is None:
-            if self._chat(line):
-                self._journal.record("voice", ok=False, text=line.text, silent=line.why_silent,
-                                     synth_s=round(line.synth_s, 2))
+    def _record(self, part: _Part, started: float | None = None, **fields: Any) -> None:
+        extra: dict[str, Any] = {"line": part.line.id}
+        if part.first:
+            # say → first sound (or → the silent chat line): the voice share of the reply
+            # delay (defence-plan W2)
+            at = started if started is not None else self._clock()
+            extra["wait_s"] = round(at - part.line.said_at, 2)
+        self._journal.record("voice", text=part.text, **extra, **fields)
+
+    def _speak(self, part: _Part) -> None:
+        if part.pcm is None:
+            if self._chat(part):
+                self._record(part, ok=False, silent=part.why_silent, synth_s=round(part.synth_s, 2))
             return
-        duration_s = len(line.pcm) / BYTES_PER_S
+        duration_s = len(part.pcm) / BYTES_PER_S
         try:
             sock = self._connect()
         except OSError as exc:
-            if self._chat(line):
-                self._journal.record("voice", ok=False, text=line.text,
-                                     silent=f"inlet unreachable: {exc.__class__.__name__}")
+            if self._chat(part):
+                self._record(part, ok=False, silent=f"inlet unreachable: {exc.__class__.__name__}")
             return
         chatted = False
-        t0 = time.monotonic()
+        t0 = started = self._clock()
         try:
             sock.settimeout(duration_s + self._drain_margin_s)
-            sock.sendall(line.pcm[:FIRST_CHUNK])
-            chatted = self._chat(line)  # the line appears as the voice starts
-            sock.sendall(line.pcm[FIRST_CHUNK:])
+            sock.sendall(part.pcm[:FIRST_CHUNK])
+            started = self._clock()
+            chatted = self._chat(part)  # the line appears as its voice starts
+            sock.sendall(part.pcm[FIRST_CHUNK:])
             sock.shutdown(socket.SHUT_WR)
             while sock.recv(4096):      # paplay drains, exits, the inlet closes: EOF
                 pass
-            self._journal.record("voice", ok=True, text=line.text, duration_s=round(duration_s, 2),
-                                 synth_s=round(line.synth_s, 2),
-                                 played_s=round(time.monotonic() - t0, 2))
+            self._record(part, started, ok=True, duration_s=round(duration_s, 2),
+                         synth_s=round(part.synth_s, 2), played_s=round(self._clock() - t0, 2))
         except OSError as exc:
             if not chatted:
-                chatted = self._chat(line)
-            self._journal.record("voice", ok=False, text=line.text,
-                                 error=f"inlet: {exc.__class__.__name__}: {exc}",
-                                 duration_s=round(duration_s, 2))
+                chatted = self._chat(part)
+            self._record(part, ok=False, error=f"inlet: {exc.__class__.__name__}: {exc}",
+                         duration_s=round(duration_s, 2))
         finally:
             try:
                 sock.close()
