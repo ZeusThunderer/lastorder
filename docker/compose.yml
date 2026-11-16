@@ -785,7 +785,8 @@ services:
       # the password lands in the URL raw (no url-encoding in compose): letters/digits only,
       # see .env.example
       DATABASE_URL: postgresql://litellm:${GATEWAY_DB_PASSWORD:-lastorder}@gateway-db:5432/litellm
-      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"   # the only provider key in the stack
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"   # the provider keys live here and nowhere else
+      OPENCODE_GO_API_KEY: "${OPENCODE_GO_API_KEY:-}" # the fallback provider (config.yaml fallbacks)
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     networks: [default, gateway-internal, svc-1, svc-2, svc-3, svc-lo]
     logging: *default-logging

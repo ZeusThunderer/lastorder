@@ -62,7 +62,8 @@ def test_key_lists_cover_the_stand():
             names.update(block.replace("\\\n", " ").split())
     keyish = {n for n in names if re.search(r"KEY|PASSWORD", n)}
     known = (set(stand_keys.LOCAL_TOKENS) | set(stand_keys.VIRTUAL_KEYS)
-             | set(stand_keys.PROVIDER_KEYS) | set(stand_keys.OPERATOR_KEYS))
+             | set(stand_keys.PROVIDER_KEYS) | set(stand_keys.OPTIONAL_PROVIDER_KEYS)
+             | set(stand_keys.OPERATOR_KEYS))
     # HIVE_*_KEYS maps are assembled by node/up.sh from the per-node keys; ZCODE_API_KEY is the
     # env-only override, the .env name is ZAI_API_KEY. HIVE_INFRA_KEY (T-057) is the executor's
     # own key, set by hand until stand_keys learns it — dev/stand_keys.py was outside T-057.

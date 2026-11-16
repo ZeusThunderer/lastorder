@@ -39,9 +39,22 @@ class TestGatewayConfig:
 
     def test_provider_key_is_an_environment_reference(self):
         for model in GATEWAY_CONFIG["model_list"]:
+            if model["model_name"].startswith("opencode-go/"):
+                assert model["litellm_params"]["api_key"] == "os.environ/OPENCODE_GO_API_KEY"
+                continue
             assert model["litellm_params"]["api_key"] == "os.environ/OPENROUTER_API_KEY"
             # every name routes to the full litellm string of its tier
             assert model["litellm_params"]["model"].startswith("openrouter/")
+
+    def test_tiers_fall_back_to_opencode_go_and_jev_does_not(self):
+        names = {m["model_name"] for m in GATEWAY_CONFIG["model_list"]}
+        fallbacks = {k: v for entry in GATEWAY_CONFIG["router_settings"]["fallbacks"] for k, v in entry.items()}
+        for tier_model in ("LLM_NODE_MODEL", "LLM_SMART_MODEL"):
+            full = env_example_value(tier_model)
+            for name in (full, full.split("/", 1)[1]):
+                assert fallbacks[name] == ["opencode-go/glm-5.3-flash"]
+        assert all(f in names for targets in fallbacks.values() for f in targets)
+        assert not any("jev" in name for name in fallbacks)
 
     def test_each_tier_answers_to_full_and_bare_names(self):
         """The SDK strips the provider prefix under a custom api_base; both forms must route."""
@@ -86,7 +99,8 @@ class TestComposeWiring:
     def test_provider_key_reaches_only_the_gateway(self):
         for name, service in SERVICES.items():
             text = str(service.get("environment", "")) + str(service.get("command", ""))
-            assert "OPENROUTER_API_KEY" not in text or name == "llm-gateway"
+            for key in ("OPENROUTER_API_KEY", "OPENCODE_GO_API_KEY"):
+                assert key not in text or name == "llm-gateway", (name, key)
 
     def test_consumers_point_at_the_gateway_with_their_own_keys(self):
         for name, var in (("mind-1", "GATEWAY_KEY_MIND_1"), ("hive", "GATEWAY_KEY_HIVE")):

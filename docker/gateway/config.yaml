@@ -59,6 +59,29 @@ model_list:
       num_retries: 0
       max_retries: 0
 
+  # The fallback provider (2026-11-16, operator): the OpenCode Go subscription, OpenAI-compatible
+  # endpoint, same GLM model as the smart tier. Not a tier of its own — the router reaches it
+  # only through `fallbacks` below, when OpenRouter errors out or hits its daily key limit.
+  # OpenCode asks clients to send their own user agent and a stable x-opencode-session
+  # (opencode.ai/docs/go).
+  - model_name: opencode-go/glm-5.3-flash
+    litellm_params:
+      model: openai/glm-5.3-flash
+      api_base: https://opencode.ai/inference/go/openai/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      extra_headers:
+        User-Agent: lastorder-gateway
+        x-opencode-session: lastorder-gateway
+
+router_settings:
+  # OpenRouter first, OpenCode Go when it fails (the smart and node tiers, both names of each).
+  # Jev has no fallback: C1 waits 1.5 s and falls back to its rules on its own.
+  fallbacks:
+    - {"openrouter/z-ai/glm-5.3-flash": ["opencode-go/glm-5.3-flash"]}
+    - {"z-ai/glm-5.3-flash": ["opencode-go/glm-5.3-flash"]}
+    - {"openrouter/qwen/qwen3.7-flash": ["opencode-go/glm-5.3-flash"]}
+    - {"qwen/qwen3.7-flash": ["opencode-go/glm-5.3-flash"]}
+
 litellm_settings:
   # consumers send tier-specific extras (reasoning off); anything the provider does not know
   # is dropped instead of failing the call

@@ -66,6 +66,9 @@ VIRTUAL_KEYS = {
 # Read by the gateway / the zcode harness; bought by the operator, never generated here.
 # ZAI_API_KEY is the .env name (docker/node/up.sh lifts it as ZCODE_API_KEY).
 PROVIDER_KEYS = ["OPENROUTER_API_KEY", "ZAI_API_KEY"]
+# Optional, not reported missing: the gateway's fallback provider (docker/gateway/config.yaml);
+# without it the gateway simply has no fallback.
+OPTIONAL_PROVIDER_KEYS = ["OPENCODE_GO_API_KEY"]
 
 # Slot server-login passwords (T-053): OPERATOR-entered values, never generated —
 # a generated password would log every slot into an external server under a
