@@ -1267,3 +1267,58 @@ def test_the_clock_step_holds_still_while_the_body_is_dead() -> None:
         assert not rig.x.termed()  # the death path owns that life
     finally:
         rig.close()
+
+
+# --- T-076 O2: missing cells walled in on every side are named apart -----------------
+
+
+def _check_on(world: dict, blocks: list, box: tuple) -> dict:
+    from types import SimpleNamespace
+
+    from runtime.mind.executor import Executor
+
+    def block_at(x, y, z):
+        name = world.get((x, y, z))
+        return {"id": name, "air": name is None, "replaceable": False}
+
+    stub = SimpleNamespace(_body=SimpleNamespace(block_at=block_at))
+    intent = SimpleNamespace(args={"blocks": blocks, "box": box, "ring": []})
+    return Executor._build_check(stub, intent)
+
+
+def test_build_check_marks_a_walled_in_hole_sealed_and_an_open_one_not():
+    # a 3x3x3 solid cube planned; the world has it all but the centre and one face cell
+    blocks = [[x, y, z, "stone"] for x in range(3) for y in range(3) for z in range(3)]
+    world = {(x, y, z): "stone" for x, y, z, _ in blocks}
+    del world[(1, 1, 1)]  # centre: six stone neighbours
+    del world[(1, 1, 0)]  # face: open to the outside and to the centre
+    check = _check_on(world, blocks, (0, 0, 0, 2, 2, 2))
+    assert sorted(m[:3] for m in check["missing"]) == [[1, 1, 0], [1, 1, 1]]
+    assert check["sealed"] == []  # the face hole is the centre's way in
+
+    world[(1, 1, 0)] = "stone"
+    check = _check_on(world, blocks, (0, 0, 0, 2, 2, 2))
+    assert [m[:3] for m in check["sealed"]] == [[1, 1, 1]]
+
+
+def test_repairable_leaves_out_sealed_cells():
+    from runtime.mind.executor import repairable
+
+    check = {"missing": [[1, 1, 1, "stone"], [5, 5, 5, "stone"]], "extra": [], "scaffold": [[9, 9, 9, "dirt"]],
+             "sealed": [[1, 1, 1, "stone"]]}
+    assert repairable(check) == 2
+
+
+def test_world_verdict_names_sealed_cells_apart_and_does_not_promise_a_repair():
+    from runtime.mind.executor import world_verdict
+
+    only_sealed = {"missing": [[1, 1, 1, "stone"]], "extra": [], "scaffold": [], "sealed": [[1, 1, 1, "stone"]]}
+    verdict, reason = world_verdict(27, only_sealed)
+    assert verdict == "failed"
+    assert "26 of 27 planned blocks in place" in reason
+    assert "1 missing inside, walled in on every side (stone at 1,1,1)" in reason
+    assert "call build again" not in reason
+
+    mixed = {**only_sealed, "missing": [[1, 1, 1, "stone"], [0, 2, 0, "stone"]]}
+    _, reason = world_verdict(27, mixed)
+    assert "1 missing (stone at 0,2,0)" in reason and "call build again" in reason

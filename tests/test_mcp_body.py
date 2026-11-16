@@ -428,6 +428,9 @@ def test_build_with_clear_digs_the_site_top_down_then_builds(stack: Stack) -> No
     stack.wait_until(lambda: any(a[0] == "build_blocks" for a in stack.body.acts), timeout=15)
     digs = [(a[1]["x"], a[1]["y"], a[1]["z"]) for a in stack.body.acts if a[0] == "destroy_block"]
     assert digs == [(12, 66, 12), (11, 65, 10), (10, 64, 10)]  # top-down
+    # every dig step keeps the build's own box from being broken through (O1)
+    protects = {tuple(a[1].get("protect") or ()) for a in stack.body.acts if a[0] == "destroy_block"}
+    assert len(protects) == 1 and protects.pop()[:3] == (10, 64, 10)
     stack.wait_until(lambda: any(
         line.get("kind") == "intent" and line.get("phase") == "failed" for line in stack.log_lines()
     ), timeout=20)

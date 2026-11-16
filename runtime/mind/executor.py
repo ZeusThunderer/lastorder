@@ -104,24 +104,41 @@ BUILD_DEFER_REASONS = {
 }
 
 
+def repairable(check: Mapping[str, list[list[Any]]]) -> int:
+    """Defects a repair round can act on: missing cells that are not sealed in, stray
+    blocks, scaffolding."""
+    sealed = {tuple(c[:3]) for c in check.get("sealed") or ()}
+    open_missing = [m for m in check.get("missing") or () if tuple(m[:3]) not in sealed]
+    return len(open_missing) + len(check.get("extra") or ()) + len(check.get("scaffold") or ())
+
+
 def world_verdict(expected: int, check: Mapping[str, list[list[Any]]]) -> tuple[str, str]:
     """A build judged by the world itself: every planned block in place, nothing stray
-    inside, no scaffolding left around it."""
-    missing, extra, scaffold = (check.get(k) or [] for k in ("missing", "extra", "scaffold"))
+    inside, no scaffolding left around it. Missing cells walled in on all six sides are
+    named apart: calling build again does not reach them."""
+    missing, extra, scaffold, sealed = (
+        check.get(k) or [] for k in ("missing", "extra", "scaffold", "sealed"))
     if not (missing or extra or scaffold):
         return "done", ""
 
     def where(cells: list[list[Any]]) -> str:
         return "; ".join(f"{c[3]} at {c[0]},{c[1]},{c[2]}" for c in cells[:3])
 
+    sealed_at = [c[:3] for c in sealed]
+    open_missing = [m for m in missing if m[:3] not in sealed_at]
     parts = [f"{expected - len(missing)} of {expected} planned blocks in place"]
-    if missing:
-        parts.append(f"{len(missing)} missing ({where(missing)})")
+    if open_missing:
+        parts.append(f"{len(open_missing)} missing ({where(open_missing)})")
+    if sealed:
+        parts.append(f"{len(sealed)} missing inside, walled in on every side ({where(sealed)}): "
+                     "no build call reaches them unless a neighbour is taken out first")
     stray = [c for c in extra if [c[0], c[1], c[2]] not in [m[:3] for m in missing]]
     if stray:
         parts.append(f"{len(stray)} stray block(s) inside ({where(stray)})")
     if scaffold:
         parts.append(f"{len(scaffold)} scaffold block(s) left around it ({where(scaffold)})")
+    if not (open_missing or stray or scaffold):
+        return "failed", "; ".join(parts)
     return "failed", "; ".join(parts) + " — call build again with the same schematic, origin and clear: true to repair"
 
 
@@ -1259,10 +1276,11 @@ class Executor:
         x0, y0, z0, x1, y1, z1 = intent.args.get("box") or (0, 0, 0, -1, -1, -1)
         missing: list[list[Any]] = []
         extra: list[list[Any]] = []
+        seen: dict[tuple[int, int, int], dict[str, Any]] = {}
         for y in range(y1, y0 - 1, -1):
             for x in range(x0, x1 + 1):
                 for z in range(z0, z1 + 1):
-                    cell = self._body.block_at(x, y, z)
+                    cell = seen[(x, y, z)] = self._body.block_at(x, y, z)
                     want = plan.get((x, y, z))
                     if want is None:
                         if not cell.get("air"):
@@ -1276,7 +1294,22 @@ class Executor:
             for x, y, z in intent.args.get("ring") or ()
             if not (cell := self._body.block_at(x, y, z)).get("air")
         ]
-        return {"missing": missing, "extra": extra, "scaffold": scaffold}
+
+        def solid(p: tuple[int, int, int]) -> bool:
+            if p not in seen:
+                seen[p] = self._body.block_at(*p)
+            return not seen[p].get("air") and not seen[p].get("replaceable")
+
+        # an empty missing cell with all six neighbours standing: no ray reaches it, so no
+        # repair round places it (T-076: 5 of 6 missing Birch Cottage cells were such)
+        sealed = [
+            m for m in missing
+            if not solid((m[0], m[1], m[2])) and all(
+                solid((m[0] + dx, m[1] + dy, m[2] + dz))
+                for dx, dy, dz in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
+            )
+        ]
+        return {"missing": missing, "extra": extra, "scaffold": scaffold, "sealed": sealed}
 
     def _build_round_done(self, intent: Intent) -> None:
         """A placing round is over: check the world; dig what does not belong (stray
@@ -1287,8 +1320,8 @@ class Executor:
             self._log.record("intent", phase="check_failed", intent_id=intent.id, error=str(exc))
             self._settle(intent)
             return
-        defects = sum(len(v) for v in check.values())
-        before = sum(len(v) for v in intent.last_check.values()) if intent.last_check else None
+        defects = repairable(check)
+        before = repairable(intent.last_check) if intent.last_check else None
         intent.last_check = check
         helps = before is None or defects < before
         # a round that only ran out of hotbar room is a supply round, not a repair: it
@@ -1337,6 +1370,8 @@ class Executor:
         if intent.clear_left:  # a build clears its site first, one cell per step
             x, y, z = intent.clear_left[0]
             lever, args = DESTROY_LEVER, {"x": x, "y": y, "z": z}
+            if intent.lever == BUILD_LEVER and intent.args.get("box"):
+                args["protect"] = list(intent.args["box"])  # dig the stray, not the house around it
         elif lever == BUILD_LEVER and intent.cleanup_only:  # the closing pass is dug: judge
             try:
                 intent.last_check = self._build_check(intent)
@@ -1346,8 +1381,9 @@ class Executor:
             return
         elif lever == BUILD_LEVER:
             cells = list(args.get("blocks") or ())
-            if intent.last_check is not None:  # a repair places only what is missing
-                todo = {tuple(c[:3]) for c in intent.last_check["missing"]}
+            if intent.last_check is not None:  # a repair places only what is missing and reachable
+                sealed = {tuple(c[:3]) for c in intent.last_check.get("sealed") or ()}
+                todo = {tuple(c[:3]) for c in intent.last_check["missing"]} - sealed
                 cells = [c for c in cells if tuple(c[:3]) in todo]
             elif args.get("todo") is not None:  # the site check's: cells not standing yet
                 todo = {tuple(c[:3]) for c in args["todo"]}

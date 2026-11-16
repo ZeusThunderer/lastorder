@@ -1,6 +1,13 @@
 # T-076. План правок uc для стройки
 
-status: черновик, правки в uc не начаты.
+status: U1–U6 написаны в ветке uc `build-placement-fixes` (2026-11-16, не собраны, на стенде не прогнаны);
+O1, O2 — в `main` проекта, тесты зелёные, на стенде не прогнаны.
+
+Как собрано (2026-11-16): JDK 21 из PrismLauncher (`%APPDATA%/PrismLauncher/java/java-runtime-delta`, с javac),
+Gradle 9.4.1 из `~/.gradle/wrapper/dists` (в клоне нет `gradle-wrapper.jar`, он в .gitignore). Плагина
+`com.replaymod.preprocess:1678b67` на jitpack больше нет (сборка «ok», артефакты 404): собран из исходников
+ReplayMod/preprocessor@1678b67 в `~/.m2`, подключён init-скриптом с `mavenLocal()` в pluginManagement — файлы uc
+не менялись.
 Исходники: uc `main` 6e63f196 (локальная копия `unionclef/`, вне git проекта). В теле — jar 0.95.66;
 шесть коммитов после него `BlockPlaceHelper`, `DestroyBlockTask`, `InputControls` не трогают, строки ниже
 верны для обоих.

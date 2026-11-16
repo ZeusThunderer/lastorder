@@ -209,6 +209,22 @@ class FakeEntryPoint:
         self._rec("holdKey", key, ms)
         return {"ok": True, "key": key, "ms": ms}
 
+    def destroyBlockAt(self, x, y, z):
+        self._rec("destroyBlockAt", x, y, z)
+        return {"ok": True}
+
+    def avoidBreakingBox(self, x1, y1, z1, x2, y2, z2):
+        self._rec("avoidBreakingBox", x1, y1, z1, x2, y2, z2)
+        return {"ok": True}
+
+    def avoidBreakingRegion(self, x, y, z, r):
+        self._rec("avoidBreakingRegion", x, y, z, r)
+        return {"ok": True}
+
+    def allowBreakingAnywhere(self):
+        self._rec("allowBreakingAnywhere")
+        return {"ok": True}
+
 
 class FakeGateway:
     def __init__(self, entry_point):
@@ -592,6 +608,49 @@ def test_act_goto_passes_coordinates():
     body, ep, _, _ = make_body()
     body.act("goto", {"x": 112, "y": 71, "z": -12})
     assert ("gotoXYZ", 112, 71, -12) in ep.log
+
+
+def test_protected_dig_installs_the_box_once_and_digs():
+    body, ep, _, _ = make_body()
+    box = [47, 63, 47, 57, 71, 55]
+    body.act("destroy_block", {"x": 55, "y": 64, "z": 49, "protect": box})
+    body.act("destroy_block", {"x": 50, "y": 70, "z": 46, "protect": box})
+    assert [e for e in ep.log if e[0] == "avoidBreakingBox"] == [("avoidBreakingBox", *box)]
+    assert ("destroyBlockAt", 55, 64, 49) in ep.log
+    assert ("destroyBlockAt", 50, 70, 46) in ep.log
+    assert ("allowBreakingAnywhere",) not in ep.log
+
+
+def test_protection_ends_with_any_other_lever_and_with_stop():
+    body, ep, _, _ = make_body()
+    body.act("destroy_block", {"x": 1, "y": 2, "z": 3, "protect": [0, 0, 0, 4, 4, 4]})
+    body.act("goto", {"x": 9, "y": 64, "z": 9})
+    assert ep.log.count(("allowBreakingAnywhere",)) == 1
+    body.act("destroy_block", {"x": 1, "y": 2, "z": 3, "protect": [0, 0, 0, 4, 4, 4]})
+    body.stop()
+    assert ep.log.count(("allowBreakingAnywhere",)) == 2
+    body.act("goto", {"x": 9, "y": 64, "z": 9})  # nothing protected: nothing to release
+    assert ep.log.count(("allowBreakingAnywhere",)) == 2
+
+
+def test_unprotected_dig_does_not_touch_protection():
+    body, ep, _, _ = make_body()
+    body.act("destroy_block", {"x": 1, "y": 2, "z": 3})
+    assert not [e for e in ep.log if "Breaking" in e[0]]
+
+
+def test_protection_falls_back_to_the_covering_cube_on_an_older_uc():
+    from py4j.protocol import Py4JError
+
+    body, ep, _, _ = make_body()
+
+    def missing(*_):
+        raise Py4JError("Method avoidBreakingBox does not exist")
+
+    ep.avoidBreakingBox = missing
+    body.act("destroy_block", {"x": 1, "y": 2, "z": 3, "protect": [47, 63, 47, 57, 71, 55]})
+    # centre 52,67,51; the farthest face is 5 away on x
+    assert ("avoidBreakingRegion", 52, 67, 51, 5) in ep.log
 
 
 def test_act_chat_sends_text_as_is():

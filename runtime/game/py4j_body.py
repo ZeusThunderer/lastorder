@@ -29,7 +29,7 @@ from py4j.java_gateway import (
     GatewayParameters,
     JavaGateway,
 )
-from py4j.protocol import Py4JNetworkError
+from py4j.protocol import Py4JError, Py4JNetworkError
 
 from runtime.perception.chat import is_service_line
 from runtime.ports import BlockInfo, EntityInfo, Event, GameState, ItemStack
@@ -316,6 +316,20 @@ def _lever_destroy_block(mc, a):
     return mc.destroyBlockAt(int(a["x"]), int(a["y"]), int(a["z"]))
 
 
+def _protect_box(mc, box):
+    # uc avoidBreakingBox (x1,y1,z1,x2,y2,z2): one replaceable slot, released by
+    # allowBreakingAnywhere. A uc without it (<= 0.95.66) gets the cube over the box.
+    x0, y0, z0, x1, y1, z1 = box
+    try:
+        return mc.avoidBreakingBox(x0, y0, z0, x1, y1, z1)
+    except Py4JNetworkError:
+        raise
+    except Py4JError:
+        cx, cy, cz = (x0 + x1) // 2, (y0 + y1) // 2, (z0 + z1) // 2
+        r = max(cx - x0, x1 - cx, cy - y0, y1 - cy, cz - z0, z1 - cz)
+        return mc.avoidBreakingRegion(cx, cy, cz, r)
+
+
 LEVERS: Mapping[str, Callable[[Any, dict[str, Any]], Any]] = {
     "goto": _lever_goto,
     "goto_far": _lever_goto_far,
@@ -436,6 +450,9 @@ class Py4jBody:
         # the reply of the last build_blocks lever; empty until a build ever ran, so the
         # build queue stays out of every busy()/stop() of a body that never builds
         self._last_build: dict[str, Any] = {}
+        # the box a build's dig steps keep from being broken through (see act); None when
+        # nothing is protected
+        self._protected: tuple[int, ...] | None = None
 
     # -- connection ----------------------------------------------------------------
 
@@ -644,6 +661,18 @@ class Py4jBody:
         handler = LEVERS.get(lever)
         if handler is None:
             raise ValueError(f"unknown lever: {lever!r}")
+        # A build digs its site with "protect": its own box. While the steps run, uc breaks
+        # nothing inside the box that only stands in the way (the target itself is still dug):
+        # unprotected, the miner cut through the house wall and the window to reach a stray
+        # block inside (T-076 uc-plan.md, run B against run C). Any other lever ends it.
+        protect = (args or {}).get("protect") if lever == "destroy_block" else None
+        if protect:
+            box = tuple(int(c) for c in protect)
+            if box != self._protected:
+                self._call(lambda mc: _protect_box(mc, box))
+                self._protected = box
+        elif self._protected is not None:
+            self._release_protection()
         result = self._call(lambda mc: handler(mc, dict(args or {})))
         if lever == "build_blocks":
             # the cells skipped as already solid are known only from this reply
@@ -668,6 +697,12 @@ class Py4jBody:
         self._call(lambda mc: mc.punkStop())
         if self._last_build:
             self._call(lambda mc: mc.buildQueueClear())
+        if self._protected is not None:
+            self._release_protection()
+
+    def _release_protection(self) -> None:
+        self._call(lambda mc: mc.allowBreakingAnywhere())
+        self._protected = None
 
     def block_at(self, x: int, y: int, z: int) -> dict[str, Any]:
         """One cell of the loaded world: {"id": "oak_log", "air": False, "replaceable":
