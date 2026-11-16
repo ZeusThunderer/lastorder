@@ -88,7 +88,7 @@ def public_args(args: Mapping[str, Any]) -> dict[str, Any]:
     """Intent args fit for the journal and for Jev: a build's cell lists (up to 2000
     cells) become their counts — the snapshot is the menu, not the ammunition."""
     out = dict(args)
-    for key in ("blocks", "clear", "ring"):
+    for key in ("blocks", "clear", "ring", "todo"):
         if isinstance(out.get(key), list):
             out[key] = len(out[key])
     return out
@@ -1348,6 +1348,9 @@ class Executor:
             cells = list(args.get("blocks") or ())
             if intent.last_check is not None:  # a repair places only what is missing
                 todo = {tuple(c[:3]) for c in intent.last_check["missing"]}
+                cells = [c for c in cells if tuple(c[:3]) in todo]
+            elif args.get("todo") is not None:  # the site check's: cells not standing yet
+                todo = {tuple(c[:3]) for c in args["todo"]}
                 cells = [c for c in cells if tuple(c[:3]) in todo]
             # uc's builder takes blocks from the hotbar only: bring the stacks up first
             needs: dict[str, int] = {}

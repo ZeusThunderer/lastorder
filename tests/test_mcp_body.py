@@ -491,6 +491,9 @@ def test_build_again_bills_only_the_cells_still_missing(stack: Stack) -> None:
     stack.body.extra_items = (ItemStack(name="minecraft:oak_planks", count=2, slot=20),)
     answer = parse(stack.call(lambda c: c.call_tool("build", {"schematic": HUT, "x": 10, "y": 64, "z": 10})))
     assert "short" not in answer
+    stack.wait_until(lambda: any(a[0] == "build_blocks" for a in stack.body.acts), timeout=10)
+    first = [a[1]["blocks"] for a in stack.body.acts if a[0] == "build_blocks"][0]
+    assert sorted(c[:3] for c in first) == sorted(c[:3] for c in cells[:2])  # only the holes
     stack.wait_until(lambda: any(
         line.get("kind") == "intent" and line.get("phase") == "done" for line in stack.log_lines()
     ), timeout=20)

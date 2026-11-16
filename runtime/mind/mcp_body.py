@@ -690,6 +690,8 @@ class BodyMcp:
         }
         if conflicts:
             args["clear"] = [c[:3] for c in conflicts]
+        if len(todo) < len(cells):  # calling again to finish: the first round skips what stands
+            args["todo"] = [c[:3] for c in todo]
         try:
             submitted = self._x.submit(BUILD_LEVER, args)
         except RuntimeError as exc:
