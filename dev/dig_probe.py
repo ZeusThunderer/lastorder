@@ -2,7 +2,10 @@
 
 Runs inside mind-N, through a second py4j client without a callback server:
 
-    docker exec -i lastorder-mind-1-1 python - X Y Z [limit_s] < dev/dig_probe.py
+    docker exec -i lastorder-mind-1-1 python - X Y Z [limit_s [CX CY CZ R]] < dev/dig_probe.py
+
+With CX CY CZ R the cube of radius R around (CX, CY, CZ) is protected from breaking for the run
+(uc avoidBreakingRegion, the avoid set the miner's obstruction clear honours) and released after.
 
 Resets uc's run counters and break-reset trace, starts the dig, samples the body every 0.2 s
 (feet, on-ground, food, the target block) and prints where the time went: uc's near-target
@@ -25,7 +28,7 @@ WANT = ("dbTick", "dbNearTick", "noReach", "air", "hungry", "unsafe", "blockedBy
         "dbReachGoal", "dbBuilderYield", "dbAimWait", "dbToolEquipped", "leafCleared")
 
 
-def main(x: int, y: int, z: int, limit_s: float) -> None:
+def main(x: int, y: int, z: int, limit_s: float, protect: list[int] | None = None) -> None:
     host, port, _, _ = bridge_addresses()
     gw = JavaGateway(gateway_parameters=GatewayParameters(address=host, port=port, auto_convert=True))
     mc = gw.entry_point
@@ -42,13 +45,20 @@ def main(x: int, y: int, z: int, limit_s: float) -> None:
               "target:", block())
         mc.resetRunCounters()
         mc.breakResetStats(True)
+        if protect:
+            print("avoidBreakingRegion:", dict(mc.avoidBreakingRegion(*protect)))
         print("destroyBlockAt:", dict(mc.destroyBlockAt(x, y, z)))
         t0 = time.monotonic()
         last = None
+        takeoffs = 0
+        grounded = True
         while time.monotonic() - t0 < limit_s:
             s = me()
             pos = [round(float(c), 2) for c in str(s.get("pos") or "").split(",") if c]
             row = (pos, s.get("onGround"), block())
+            if grounded and s.get("onGround") is False:
+                takeoffs += 1
+            grounded = s.get("onGround") is not False
             if row != last:
                 print(f"t={time.monotonic() - t0:5.1f} pos={pos} ground={s.get('onGround')} "
                       f"food={s.get('food')} vel={s.get('vel')} target={row[2]}")
@@ -56,16 +66,24 @@ def main(x: int, y: int, z: int, limit_s: float) -> None:
             if row[2] == "air":
                 break
             time.sleep(0.2)
-        print(f"end t={time.monotonic() - t0:.1f}s target={block()}")
+        print(f"end t={time.monotonic() - t0:.1f}s target={block()} takeoffs={takeoffs}")
         stats = str(mc.placeStats())
         print("db:", " ".join(m.group(0) for m in re.finditer(r"(\w+)=(\S+)", stats)
                               if m.group(1) in WANT))
         print("breakResets:", str(mc.breakResetStats(False))[:800])
-        print("breakEvents:", str(mc.breakEvents())[:1500])
+        events = str(mc.breakEvents()).split(" | ")
+        broken = [e.split(" brk=")[0] for e in events if " BREAK " in e]
+        print("broken:", broken[-12:])
+        print("other blocks attacked:", sorted({e.split(" ATTACK ")[1].split(" brk=")[0] for e in events
+                                                if " ATTACK " in e and f"{x}, {y}, {z}" not in e})[:20])
+        print("breakEvents:", " | ".join(events[-30:])[:1500])
     finally:
+        if protect:
+            print("allowBreakingAnywhere:", dict(mc.allowBreakingAnywhere()))
         gw.close()
 
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    main(int(a[0]), int(a[1]), int(a[2]), float(a[3]) if len(a) > 3 else 40.0)
+    main(int(a[0]), int(a[1]), int(a[2]), float(a[3]) if len(a) > 3 else 40.0,
+         [int(v) for v in a[4:8]] if len(a) >= 8 else None)
