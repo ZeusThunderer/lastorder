@@ -1,6 +1,6 @@
 {
-  // unionclef/ and NetTyan/ are read-only references: keep the Java extension from importing
-  // their Gradle projects (it rewrites unionclef/.settings and makes the submodule dirty).
+  // unionclef/ and NetTyan/ are local clones of other repositories (git-ignored here): keep the
+  // Java extension from importing their Gradle projects (it rewrites unionclef/.settings).
   "java.import.exclusions": [
     "**/node_modules/**",
     "**/.metadata/**",

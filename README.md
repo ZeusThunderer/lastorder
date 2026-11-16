@@ -76,7 +76,6 @@ nets. Behaviour lives in instructions and in each sister's own files, which she 
 | `docs/architecture/` | architecture, ADRs (`DECISIONS.md`, in Russian), the knowledge model |
 | `docs/agents/` | development notes, run reports, the task protocol and task files (in Russian) |
 | `tests/` | pytest, about 930 tests; they run without the stand |
-| `unionclef/`, `NetTyan/` | links to other repositories: the Minecraft mod and a reference project |
 
 ## Running the stand
 

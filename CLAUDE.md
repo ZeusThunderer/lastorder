@@ -12,8 +12,10 @@
   после merge; ветки `z/T-NNN-*` остаются локальными. ZCode и headless-надзор не пушат.
 - Правки upstream-файлов aw (`agent/AGENTS.md`, `agent/shared`, `agent/scripts`, `tools/`) делаются
   отдельными коммитами `aw-fix:` / `aw-ext:` (ADR-002).
-- `unionclef/` — только чтение: исходники и документация мода. В образ идёт release-jar 1.21.11.
-- `NetTyan/` — справочник (ADR-005): брать идеи, не запускать, не править.
+- uc и NetTyan — не часть репозитория (подмодули сняты 2026-11-16). Локальные клоны лежат в `unionclef/` и
+  `NetTyan/` (в .gitignore), у каждого свой git. В образ тела идёт release-jar uc 1.21.11 с GitHub.
+  `unionclef/` — исходники и документация мода, правки только по плану оператора (T-076 `uc-plan.md`).
+  `NetTyan/` — справочник (ADR-005): брать идеи, не запускать, не править.
 - Наш код: `runtime/`, `docker/`, `tests/`, `agent/last_order/`, `dev/` (скрипты разработки).
 - Документация: `docs/architecture/` — архитектура, ADR, память сети (KNOWLEDGE.md);
   `docs/agents/` — заметки для агента; `docs/context/` — исходные переписки (большие, читать точечно).
@@ -84,7 +86,7 @@
 - uc отдаёт только сырые имена Minecraft. Перевод в обе стороны — в `runtime/perception`.
 - В `unionclef/.claude/settings.json` стоят bypassPermissions и Stop-хук автономии. Не запускать агента из этой папки.
 - Скрипты aw: `AGENT_NAME` обязателен (по умолчанию не подставляется), запускать из корня. На Windows — Git Bash и `python`.
-- Пути bind-mount в compose разрешает демон, а не шелл (см. unionclef/deploy/compose.test.yml).
+- Пути bind-mount в compose разрешает демон, а не шелл (см. `deploy/compose.test.yml` в uc).
 - `NetTyan/.env*` содержат секреты — не читать. У nt и uc своя git-политика (без Co-Authored-By).
 
 ## Как идёт работа (ADR-047)

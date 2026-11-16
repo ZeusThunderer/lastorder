@@ -49,3 +49,6 @@ docker/run/
 # raw camera-run measurements (dev/camera_run.sh, T-065)
 /.camera-run-data/
 /.stand/
+# local clones of other repositories, not part of this one (submodules removed 2026-11-16)
+/unionclef/
+/NetTyan/
