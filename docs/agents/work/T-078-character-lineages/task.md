@@ -3,7 +3,7 @@ id: T-078
 title: Постоянные личности линий и эталоны персонажей
 owner: supervisor
 stage: I
-status: in_progress
+status: done
 criticality: critical
 after: []
 branch: codex/T-078-character-lineages
