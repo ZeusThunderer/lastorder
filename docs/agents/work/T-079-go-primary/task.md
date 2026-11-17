@@ -3,7 +3,7 @@ id: T-079
 title: OpenCode Go основной маршрут шлюза, OpenRouter резервный
 owner: supervisor
 stage: I
-status: ready
+status: in_progress
 criticality: critical
 after: []
 branch: codex/T-079-go-primary
