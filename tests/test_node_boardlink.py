@@ -61,7 +61,7 @@ def test_post_and_claim_envelopes_use_the_preset_names() -> None:
     assert envelope_lines([post, claim], LAB) == [
         "[board #17 task · from operator · to net · open]"
         " Build a shelter by the spawn before night.",
-        "[board #17 · taken by узел 00012]",
+        "[board #17 · taken by сестра 00012]",
     ]
     assert envelope_lines([claim], MISAKA) == ["[board #17 · taken by Мисака 00012]"]
 
@@ -266,7 +266,7 @@ def test_an_empty_snapshot_is_acked_and_delivery_moves_on() -> None:
     link.poll_once()  # a message addressed to the node now arrives
     assert feed.feed_calls == [None, 9]
     assert mind.batches[0][1] == [
-        "[board #5 message · from operator · to узел 00007 · open] привет"
+        "[board #5 message · from operator · to сестра 00007 · open] привет"
     ]
 
 
@@ -355,8 +355,8 @@ def test_feed_client_error_taxonomy() -> None:
 def test_mind_poster_posts_the_batch_with_the_runner_key() -> None:
     transport = FakeTransport([httpx.Response(200, json={"queued": True})])
     poster = MindEventPoster("http://body-1:8700", runner_key="rk-one", transport=transport)
-    assert poster.event("board", ["[board #17 · taken by узел 00012]"]) == {"queued": True}
+    assert poster.event("board", ["[board #17 · taken by сестра 00012]"]) == {"queued": True}
     assert transport.calls == [
-        ("post", "/runner/event", {"type": "board", "lines": ["[board #17 · taken by узел 00012]"]},
+        ("post", "/runner/event", {"type": "board", "lines": ["[board #17 · taken by сестра 00012]"]},
          {"X-Runner-Key": "rk-one"}),
     ]

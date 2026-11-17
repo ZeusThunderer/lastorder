@@ -75,16 +75,8 @@ def test_core_is_marked_read_only_and_carries_placeholders():
     assert "operator" in raw.lower()
     for placeholder in ("{node_name}", "{speech_style}", "{traits}", "{quirk}"):
         assert placeholder in raw, placeholder
-    # the identity is task1 part 2 section 1, transferred: its anchors survive verbatim
-    for anchor in (
-        "shift handover, not an ending",
-        "dying before writing its will",
-        "Novice-scientist curiosity",
-        "Argues with predecessors",
-        "Rituals from coincidence",
-        "deadpan and understated",
-    ):
-        assert anchor in raw, anchor
+    # Lore content changes by operator decision; structure stays protected.
+    assert "{lineage}" in raw
 
 
 def test_agents_md_teaches_network_life():

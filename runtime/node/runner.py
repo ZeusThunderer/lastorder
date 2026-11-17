@@ -2,7 +2,7 @@
 
 The strict order (NETWORK.md sections 3 and 6, plan reviews P1-1/P1-4):
 
-- birth: `hive.birth` (traits rolled here) → arm the life clock at mind-N
+- birth: `hive.birth` (fixed slot profile selected here) → arm the life clock at mind-N
   (`POST /runner/birth`, BEFORE any session: a sister with bash must not arm another
   serial first) → the workplace from the T-029 template → the long session;
 - life: poll `GET /runner/status`; a dead harness process restarts on the SAME
@@ -46,7 +46,8 @@ from runtime.hive.client import BoardFeedClient, HiveRejected, HiveUnavailable
 from runtime.knowledge.schema import CAUSES, SchemaError, Will, emergency_will
 from runtime.lastorder.naming import NamingPreset, node_name
 from runtime.lastorder.persona import Node, PersonaProvider
-from runtime.lastorder.traits import Traits, roll
+from runtime.lastorder.traits import Traits
+from runtime.lastorder.lineages import lineage
 from runtime.lastorder.will import (
     HEIR_ADDRESSES,
     HEIR_NEUTRAL,
@@ -532,8 +533,8 @@ class NodeRunner:
         return not self.cfg.runner_key and not self.cfg.node_key and not self.cfg.dev_open
 
     def _birth(self) -> LifeState:
-        seed = self._seed_factory()
-        traits = roll(seed, self._quirks)
+        traits = lineage(self.cfg.slot).traits
+        seed = traits.seed
         record = self._retry_forever(
             "birth", lambda: self._hive.birth(self.cfg.slot, traits)
         )
@@ -568,7 +569,7 @@ class NodeRunner:
             serial=serial,
             traits=traits,
             persona=self._persona,
-            node=Node(serial, traits),
+            node=Node(serial, traits, slot=self.cfg.slot),
             body_base=self.cfg.body_base,
             hive_url=self.cfg.hive_url,
             node_key=self.cfg.node_key,

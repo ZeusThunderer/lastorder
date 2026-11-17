@@ -212,7 +212,7 @@ def test_prompt_is_rendered_from_the_real_template():
     llm = StubLLM(reply={"will": GOOD_BODY})
     write(llm)
     system, user = llm.calls[0]
-    assert "узел 00014" in system  # the naming preset (ADR-018), not a hardcoded name
+    assert "сестра 00014" in system  # the naming preset (ADR-018), not a hardcoded name
     assert "считает крипера родственником" in system  # the quirk
     assert "Reply in Russian" in system
     assert '"kind": "death"' in user
@@ -269,7 +269,7 @@ def test_trait_number_detection():
 
 
 def test_heir_address_follows_the_naming_preset():
-    assert heir_address(preset("lab")) == "следующий узел"
+    assert heir_address(preset("lab")) == "следующая сестра"
     assert heir_address(preset("misaka")) == "следующая Мисака"
     assert heir_address(SimpleNamespace(key="future")) == "наследник"
 

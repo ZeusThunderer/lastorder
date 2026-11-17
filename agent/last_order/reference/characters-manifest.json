@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "status": "approved",
+  "approved_on": "2026-11-17",
+  "approval": "Operator: «О вот это хорошо получилось» after lineup v3",
+  "lineup": "/artifacts/characters/references/v1/lineup.png",
+  "evolution": {
+    "enabled": true,
+    "pace": "very slow; tiny details first; no mandatory change each shift",
+    "major_changes": "operator approval"
+  },
+  "characters": {
+    "01": {
+      "reference": "/artifacts/characters/references/v1/01.png",
+      "imgen_attach": "character-01-v1",
+      "development_key": "ent:lineage-01"
+    },
+    "02": {
+      "reference": "/artifacts/characters/references/v1/02.png",
+      "imgen_attach": "character-02-v1",
+      "development_key": "ent:lineage-02"
+    },
+    "03": {
+      "reference": "/artifacts/characters/references/v1/03.png",
+      "imgen_attach": "character-03-v1",
+      "development_key": "ent:lineage-03"
+    },
+    "LO": {
+      "reference": "/artifacts/characters/references/v1/LO.png",
+      "imgen_attach": "character-LO-v1",
+      "development_key": "ent:lineage-LO"
+    }
+  }
+}

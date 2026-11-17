@@ -3,7 +3,7 @@ id: T-078
 title: Постоянные личности линий и эталоны персонажей
 owner: supervisor
 stage: I
-status: ready
+status: in_progress
 criticality: critical
 after: []
 branch: codex/T-078-character-lineages
@@ -31,7 +31,7 @@ created: 2026-11-17
 - agent/last_order/, agent/network/, CLAUDE.md
 - runtime/lastorder/{persona,traits,naming,lineages}.py, runtime/node/{runner,workplace,config}.py
 - runtime/knowledge/ (только если необходимо для доставки наследия линии)
-- tests/test_{persona,traits_naming,node_runner,workplace_skin,lineages}.py
+- tests/ (только контракты этой задачи и обновление ожиданий штатного имени/нового ядра)
 - docs/character/, docs/architecture/{DECISIONS,NETWORK,KNOWLEDGE}.md
 - docs/agents/work/T-078-character-lineages/, docs/agents/work/DIRECT_EDITS.md
 - /artifacts/characters/, memory/style-canon.md и мастерская imgen в рабочем месте LO:

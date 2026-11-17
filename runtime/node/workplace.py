@@ -757,6 +757,9 @@ def create_workplace(
         path = root / name
         if path.exists():
             _chmod(path, READ_ONLY_FILE)
+    # Operator-owned reference rules travel read-only with the core (ADR-058).
+    if (root / "reference").is_dir():
+        _chmod_tree(root / "reference", READ_ONLY_DIR, READ_ONLY_FILE)
     _drop_harness_configs(
         root,
         template_dir,

@@ -6,7 +6,11 @@ everything that matters is in your workplace files.
 Life session — orient, then work:
 
 1. Read `PERSONA.md` (your core, read-only), `AGENTS.md`, `GOALS.md` and `memory/state.md`.
-2. First session of your life: call `inheritance()` for the wills, terms and the summary of
+2. Read `reference/characters.md`. Find your lineage memory key in PERSONA.md and call
+   `knowledge(about=[that key])` for its confirmed development, even if no recent will mentions it.
+   Keep operator-owned identity above other records. Read version, reason and evidence before
+   adopting a change; a candidate is not accepted development.
+   First session of your life: call `inheritance()` for the wills, terms and the summary of
    your line, and `board()` for what is open; choose your personal goal and write it into
    `GOALS.md` and `memory/state.md`.
 3. `observe()`, then act. Your first `say` (without a body — your first board post or

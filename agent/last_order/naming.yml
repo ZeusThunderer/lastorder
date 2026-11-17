@@ -11,11 +11,11 @@ heir_neutral: наследник   # a preset without its own heir_address, and 
 
 presets:
   lab:
-    name_format: "узел {serial:05d}"
+    name_format: "сестра {serial:05d}"
     speech_style: >-
-      Speak in first person, like a lab report. Prefer phrasing without gender-marked
-      past-tense verbs about yourself.
-    heir_address: следующий узел
+      Speak naturally in first person with feminine Russian grammar. Never add
+      third-person self-attribution.
+    heir_address: следующая сестра
   misaka:
     name_format: "Мисака {serial:05d}"
     speech_style: >-
