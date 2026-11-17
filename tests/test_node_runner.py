@@ -423,7 +423,7 @@ def test_birth_arms_clock_before_the_session_and_builds_the_workplace(tmp_path: 
     root = rig.cfg.workplaces / "agent" / f"{state.serial:05d}"
     assert (root / "PERSONA.md").is_file()
     persona = (root / "PERSONA.md").read_text(encoding="utf-8")
-    assert "узел 00001" in persona
+    assert "сестра 00001" in persona
     assert "{" not in persona  # every placeholder rendered
     # the harness configs of BOTH adapters at the root (failover needs no surgery)
     zcode_cfg = json.loads((root / "zcode.json").read_text(encoding="utf-8"))
@@ -2234,3 +2234,38 @@ def test_a_silent_mind_is_asked_back_once_per_boot(tmp_path: Path) -> None:
     rig.runner._mind_unreachable()          # within its boot: no second ask
     assert len(asks) == 1
     assert any(type == "mind.restart_asked" for type, _ in rig.logs)
+
+
+# T-078: a slot's identity survives the serial handover.
+def test_lineage_traits_survive_new_serial_and_seed(tmp_path):
+    rig = Rig(tmp_path)
+    seeds = iter([11, 987654])
+    rig.runner._seed_factory = lambda: next(seeds)
+    first = rig.runner._birth()
+    second = rig.runner._birth()
+    assert first.serial != second.serial
+    assert first.traits == second.traits
+    text = (rig.cfg.workplaces / 'agent' / f'{second.serial:05d}' / 'PERSONA.md').read_text(encoding='utf-8')
+    assert 'ent:lineage-01' in text
+
+
+def test_lineage_profile_follows_slot_not_birth_serial(tmp_path):
+    one = Rig(tmp_path / 'one')
+    two = Rig(tmp_path / 'two')
+    from dataclasses import replace
+    two.runner.cfg = replace(two.cfg, slot='LastOrder02')
+    two.cfg = two.runner.cfg
+    a = one.runner._birth()
+    b = two.runner._birth()
+    assert a.traits != b.traits
+    text = (two.cfg.workplaces / 'agent' / f'{b.serial:05d}' / 'PERSONA.md').read_text(encoding='utf-8')
+    assert 'ent:lineage-02' in text
+    assert 'ent:lineage-01' not in text
+
+
+def test_character_reference_is_protected_at_birth(tmp_path):
+    rig = Rig(tmp_path)
+    state = rig.runner._birth()
+    ref = rig.cfg.workplaces / 'agent' / f'{state.serial:05d}' / 'reference' / 'characters.md'
+    assert ref.exists()
+    assert ref.stat().st_mode & stat.S_IWUSR == 0

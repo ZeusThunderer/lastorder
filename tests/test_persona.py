@@ -29,11 +29,11 @@ def test_template_renders_without_leftover_placeholders():
     prompt = make()
     assert not re.search(r"\{[a-z_]+\}", prompt)
     assert "<!--" not in prompt
-    assert "узел 00007" in prompt
+    assert "сестра 00007" in prompt
     assert "none yet" in prompt  # empty inheritance is spelled out, not left blank
 
 
-@pytest.mark.parametrize("key,name", [("lab", "узел 00007"), ("misaka", "Мисака 00007")])
+@pytest.mark.parametrize("key,name", [("lab", "сестра 00007"), ("misaka", "Мисака 00007")])
 def test_presets_change_name_and_style(key, name):
     prompt = make(key)
     assert name in prompt
@@ -129,7 +129,7 @@ def test_core_template_is_marked_read_only():
 
 
 @pytest.mark.parametrize(
-    "key,name", [("lab", "узел 00007"), ("misaka", "Мисака 00007")]
+    "key,name", [("lab", "сестра 00007"), ("misaka", "Мисака 00007")]
 )
 def test_core_renders_for_both_presets(key, name):
     rendered = core(key)

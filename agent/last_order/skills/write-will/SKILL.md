@@ -25,7 +25,7 @@ start over.
 - What the heir should watch out for next: the dangers you saw, the places that lie, the
   one thing you did not have time to finish.
 - One joke in your voice: deadpan, understated; the facts are allowed to be funny.
-- Never write the numbers of your traits; a trait may appear as a condition you were dealt.
+- Never write the numbers of your traits; a trait may appear as a continuing tendency of your lineage.
 - Name things only with the terms and readable names you actually observed; never guess a
   "real" game name.
 - Fill the length with substance, not filler: under 1000 characters is too thin for the

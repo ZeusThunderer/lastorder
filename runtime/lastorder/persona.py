@@ -21,6 +21,7 @@ from pathlib import Path
 from runtime.config import CHARACTER_DIR, PERCEPTION_MODES, perception_mode
 from runtime.lastorder.naming import NamingPreset, node_name
 from runtime.lastorder.traits import TRAIT_NAMES, Traits
+from runtime.lastorder.lineages import lineage
 
 TEMPLATE_PATH = CHARACTER_DIR / "prompt_template.md"
 CORE_TEMPLATE_PATH = CHARACTER_DIR / "PERSONA.md"
@@ -159,6 +160,7 @@ class Node:
     serial: int
     traits: Traits
     nickname: str | None = None
+    slot: str = ""  # historical callers may omit a slot
 
 
 @dataclass
@@ -199,6 +201,7 @@ class PersonaProvider:
                 "speech_style": self.naming.speech_style,
                 "traits": traits_lines(node.traits),
                 "quirk": node.traits.quirk,
+                "lineage": lineage(node.slot).core() if node.slot else "",
             },
         )
 
@@ -227,5 +230,6 @@ class PersonaProvider:
             **inheritance.values(),
             "knowledge_rule": knowledge_rule(mode),
             "primer": primer_block(primer, mode),
+            "lineage": lineage(node.slot).core() if node.slot else "",
         }
         return render(self.template, values)

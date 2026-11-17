@@ -21,7 +21,7 @@ def test_different_seeds_give_different_nodes():
 
 
 def test_naming_presets():
-    assert node_name(preset("lab"), 7) == "узел 00007"
+    assert node_name(preset("lab"), 7) == "сестра 00007"
     assert node_name(preset("misaka"), 7) == "Мисака 00007"
     with pytest.raises(ValueError):
         preset("nope")
@@ -35,7 +35,7 @@ def test_presets_are_content_of_the_template(tmp_path):
 
     presets, neutral = load_presets(CHARACTER_DIR / "naming.yml")
     assert presets == PRESETS and neutral == HEIR_NEUTRAL == "наследник"
-    assert HEIR_ADDRESSES == {"lab": "следующий узел", "misaka": "следующая Мисака"}
+    assert HEIR_ADDRESSES == {"lab": "следующая сестра", "misaka": "следующая Мисака"}
     assert "сказала Мисака 00007»." in PRESETS["misaka"].speech_style
     with pytest.raises(FileNotFoundError):
         load_presets(tmp_path / "missing.yml")

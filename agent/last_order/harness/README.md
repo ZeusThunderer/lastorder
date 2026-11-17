@@ -10,7 +10,7 @@ to surface the skills as commands.
 1. Copy the whole `agent/last_order/` template into the node's workplace.
 2. Render `PERSONA.md` through `runtime/lastorder/persona.py`
    (`PersonaProvider.render_core`): name and speech manner from the naming preset
-   (ADR-018, both presets render the same file), dealt traits in words, the dealt quirk.
+   (ADR-018, both presets render the same file), persistent slot traits in words, the slot quirk.
    The trait numbers stay in `birth.json`.
 3. Drop the chosen harness's files at the workplace root:
    - ZCode: `harness/zcode/zcode.json` as `zcode.json` (MCP servers; the T-024 spike

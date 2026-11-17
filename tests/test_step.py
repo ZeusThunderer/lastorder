@@ -270,7 +270,7 @@ def test_ceiling_trim_keeps_the_first_about_and_the_first_candidate():
     heavy_goals = tuple(
         NetworkGoal(text=f"цель {i}: " + "обезопасить периметр сети и записать итог в базу знаний " * 2,
                     why="совет требует реакции и проверки")
-        for i in range(33)
+        for i in range(35)
     )
     heavy_slice = slice_(
         network_goals=heavy_goals,
