@@ -15,24 +15,43 @@ model_list:
   # a node's client sends model=qwen/qwen3.7-flash to the gateway), while OpenAI-style
   # callers use the full string — the gateway answers to both with the same deployment.
   #
+  # Compatibility aliases: node and smart use Go GLM first; the old model names remain
+  # stable for existing consumers and virtual-key model allowlists. OpenRouter retains
+  # its original tier models as terminal reserves below.
   # tier `node`: the step model of a node harness
   - model_name: openrouter/qwen/qwen3.7-flash
     litellm_params:
-      model: openrouter/qwen/qwen3.7-flash
-      api_key: os.environ/OPENROUTER_API_KEY
+      model: openai/glm-5.3-flash
+      api_base: https://opencode.ai/inference/go/openai/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      extra_headers:
+        User-Agent: lastorder-gateway
+        x-opencode-session: lastorder-gateway
   - model_name: qwen/qwen3.7-flash
     litellm_params:
-      model: openrouter/qwen/qwen3.7-flash
-      api_key: os.environ/OPENROUTER_API_KEY
+      model: openai/glm-5.3-flash
+      api_base: https://opencode.ai/inference/go/openai/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      extra_headers:
+        User-Agent: lastorder-gateway
+        x-opencode-session: lastorder-gateway
   # tier `smart`: Last Order, wills and network consolidation
   - model_name: openrouter/z-ai/glm-5.3-flash
     litellm_params:
-      model: openrouter/z-ai/glm-5.3-flash
-      api_key: os.environ/OPENROUTER_API_KEY
+      model: openai/glm-5.3-flash
+      api_base: https://opencode.ai/inference/go/openai/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      extra_headers:
+        User-Agent: lastorder-gateway
+        x-opencode-session: lastorder-gateway
   - model_name: z-ai/glm-5.3-flash
     litellm_params:
-      model: openrouter/z-ai/glm-5.3-flash
-      api_key: os.environ/OPENROUTER_API_KEY
+      model: openai/glm-5.3-flash
+      api_base: https://opencode.ai/inference/go/openai/v1
+      api_key: os.environ/OPENCODE_GO_API_KEY
+      extra_headers:
+        User-Agent: lastorder-gateway
+        x-opencode-session: lastorder-gateway
   # tier `jev`: the cloud tactical decider of C1 (T-031, ADR-027). typesafe/jev-router is the
   # current OpenRouter id of the System One Jev model (was typesafe/jev-1.13 in ADR-004).
   # C1 waits for no one: per-deployment `timeout` and `num_retries: 0` override the global
@@ -59,11 +78,8 @@ model_list:
       num_retries: 0
       max_retries: 0
 
-  # The fallback provider (2026-11-16, operator): the OpenCode Go subscription, OpenAI-compatible
-  # endpoint, same GLM model as the smart tier. Not a tier of its own — the router reaches it
-  # only through `fallbacks` below, when OpenRouter errors out or hits its daily key limit.
-  # OpenCode asks clients to send their own user agent and a stable x-opencode-session
-  # (opencode.ai/docs/go).
+  # Direct Go alias, also with an OpenRouter smart-tier reserve. OpenCode asks clients
+  # for their own user agent and stable x-opencode-session (opencode.ai/docs/go).
   - model_name: opencode-go/glm-5.3-flash
     litellm_params:
       model: openai/glm-5.3-flash
@@ -73,14 +89,24 @@ model_list:
         User-Agent: lastorder-gateway
         x-opencode-session: lastorder-gateway
 
+  # Explicit reserves avoid recursing into the compatibility aliases above.
+  - model_name: openrouter-reserve/node
+    litellm_params:
+      model: openrouter/qwen/qwen3.7-flash
+      api_key: os.environ/OPENROUTER_API_KEY
+  - model_name: openrouter-reserve/smart
+    litellm_params:
+      model: openrouter/z-ai/glm-5.3-flash
+      api_key: os.environ/OPENROUTER_API_KEY
+
 router_settings:
-  # OpenRouter first, OpenCode Go when it fails (the smart and node tiers, both names of each).
-  # Jev has no fallback: C1 waits 1.5 s and falls back to its rules on its own.
+  # Go first, then OpenRouter on errors/quota; Jev keeps its independent local fallback.
   fallbacks:
-    - {"openrouter/z-ai/glm-5.3-flash": ["opencode-go/glm-5.3-flash"]}
-    - {"z-ai/glm-5.3-flash": ["opencode-go/glm-5.3-flash"]}
-    - {"openrouter/qwen/qwen3.7-flash": ["opencode-go/glm-5.3-flash"]}
-    - {"qwen/qwen3.7-flash": ["opencode-go/glm-5.3-flash"]}
+    - {"openrouter/z-ai/glm-5.3-flash": ["openrouter-reserve/smart"]}
+    - {"z-ai/glm-5.3-flash": ["openrouter-reserve/smart"]}
+    - {"openrouter/qwen/qwen3.7-flash": ["openrouter-reserve/node"]}
+    - {"qwen/qwen3.7-flash": ["openrouter-reserve/node"]}
+    - {"opencode-go/glm-5.3-flash": ["openrouter-reserve/smart"]}
 
 litellm_settings:
   # consumers send tier-specific extras (reasoning off); anything the provider does not know
