@@ -74,4 +74,4 @@
 | T-068 | Репозиторий к публикации — README и обзор архитектуры на английском, схемы, аудит секретов (надзор) | — | done | normal | c/T-068-github-publication |
 
 | T-078 | Постоянные личности линий и эталоны | I | in_progress | critical | codex/T-078-character-lineages |
-| T-079 | Go основной, OpenRouter резерв | I | ready | critical | codex/T-079-go-primary |
+| T-079 | Go основной, OpenRouter резерв | I | done | critical | codex/T-079-go-primary |

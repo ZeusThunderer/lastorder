@@ -3,7 +3,7 @@ id: T-079
 title: OpenCode Go основной маршрут шлюза, OpenRouter резервный
 owner: supervisor
 stage: I
-status: in_progress
+status: done
 criticality: critical
 after: []
 branch: codex/T-079-go-primary
@@ -37,4 +37,4 @@ GLM-5.3-flash первым для node/smart, OpenRouter с прежними м�
 - Перезапущен только шлюз; доступность и результаты записаны в report.md.
 
 ## Заметки надзора
-D-013: основание 6 — оператор поручил изменение надзору напрямую.
+D-013 · 229ad3c: основание 6 — оператор поручил изменение надзору напрямую.

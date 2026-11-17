@@ -132,3 +132,11 @@
 - Проверки: 1237 passed; пять прежних падений воспроизведены на 7b10fbe, check.py ok.
 - Диалоговые пробы заблокированы квотой Z.ai 429/code1113; не выданы за проверенные.
 - Коммит: runtime: preserve slot character across shifts (ветка codex/T-078-character-lineages).
+
+## D-013 · 2026-11-17 · T-079
+- Основание: 6 — оператор прямо поручил Go основным шлюзом, OpenRouter резервным.
+- Файлы: docker/gateway/config.yaml, .env.example, tests/test_gateway_config.py.
+- Коммит: 229ad3c; merge в main выполнен.
+- Проверки: 1237 passed, прежние 5 failed; check.py ok. Установленный LiteLLM:
+  изолированный Go 429 → OR 200. Живой прежний smart-alias: 200, api-base OpenCode Go.
+- Перезапущен только llm-gateway, health healthy; Jev и Pi не менялись.
