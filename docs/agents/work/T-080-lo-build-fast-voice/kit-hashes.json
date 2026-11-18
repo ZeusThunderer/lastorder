@@ -1,0 +1,17 @@
+{
+  "match": true,
+  "sha256": {
+    "body-reference.md": "d82b51995876e2ed750246fe31bbd6558a4ec3a96ea9cda940e03019cc95ef84",
+    "resource-report.md": "2f8513731861420a2694509ac6d9dcdae60ae3ec3a900053b5110f7f3d6da8ac",
+    "SKILL.md": "1158c94020aa8dfb44e07e70c7dffd52437e161d958df526820bb2963ea0566e",
+    "library/birch-cottage.json": "6acf40b17cc39abd76298760c2165bffad6f5060ba5833ad7ad634c9a3edc5a1",
+    "library/cherry-blossom-mansion.json": "4687d2d29b1375d57e117b40575c854d58b47f7e48201d319e33bf324dec0c31",
+    "library/cobblestone-stepped-pyramid.json": "bf4d3b3742a5f7c8f19a7acbcaff2ea5273669c6ad9519fbefefd2277aa1d1b7",
+    "library/desert-step-pyramid.json": "a68cb1b4712a7f1356c01cc552757d9372577f4c16b7a3784106ef2965f0ab0d",
+    "library/desert-watchtower.json": "9f56cdcf223eafbe16a53ae5e30deb1ef40d92e0508b6dd6498ad994be4eaf07",
+    "library/glass-sandstone-sculpture.json": "34d2258e5b942e90534098d840bf68e30e8e116dcd63176f4c5e29a0e7998593",
+    "library/oak-gallery.json": "fe2553f4587afdcf0de58a6ad4299b1bcf266219d45cb47f5ab33abd17b571da",
+    "library/oak-garden-pavilion.json": "7b75e9de025be876b63dac86afe92c18026bd8bef40a5b8e6c57606884ed3624",
+    "library/tiny-oak-cottage.json": "1533e03a536a4504a333e0516c60e68e196daa66c7b0a9b1041a0864843800f5"
+  }
+}

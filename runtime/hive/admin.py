@@ -984,6 +984,8 @@ class AdminAlarm:
         the Z.ai token the entrypoint materialized for pi, the gateway auth it rendered
         for opencode. Missing means not ready — spawning would only stack failures."""
         if name == "pi":
+            if os.environ.get("PI_API_ROUTE", "zai") == "gateway":
+                return self.cfg.opencode_auth_file.exists()
             return self.cfg.zai_key_file.exists()
         if name == "opencode":
             return self.cfg.opencode_auth_file.exists()

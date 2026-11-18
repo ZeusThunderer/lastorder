@@ -88,6 +88,9 @@ for n in 1 2 3; do
   lift "BODY_VOICE_$n"
   lift "MC_SKIN_COMMAND_$n"
 done
+for key in TTS_BACKEND TTS_QWEN_MODEL TTS_GPU_NAME TTS_DTYPE TTS_STT TTS_STT_MODEL; do
+  lift "$key"
+done
 lift CHAT_TOPICS_PATH
 # player commands (ADR-043, T-053): the common deny list, per-slot extras and the
 # per-slot server login passwords — a password reaches that slot's mind ONLY

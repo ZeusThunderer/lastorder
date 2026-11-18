@@ -120,6 +120,7 @@ function readLinkConfig(agentDir: string, cwd: string): LinkConfig | null {
 
 export default function misakaLink(pi: unknown) {
   const api = pi as {
+    setModel(model: unknown): Promise<boolean>;
     on(event: string, handler: (event: unknown, ctx: unknown) => unknown): void;
     sendUserMessage(content: string, options: { deliverAs: "steer" | "followUp" }): void;
   };
@@ -129,9 +130,18 @@ export default function misakaLink(pi: unknown) {
   api.on("session_start", async (_event: unknown, ctxRaw: unknown) => {
     const ctx = ctxRaw as {
       cwd: string;
+      modelRegistry: { find(provider: string, id: string): unknown };
       isIdle(): boolean;
     };
     const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+    // A resumed session can retain an obsolete provider/model. Honour the
+    // operator-rendered defaults before delivering the first network event.
+    const settingsPath = path.join(agentDir, "settings.json");
+    if (fs.existsSync(settingsPath)) {
+      const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+      const selected = ctx.modelRegistry.find(settings.defaultProvider, settings.defaultModel);
+      if (selected) await api.setModel(selected);
+    }
     const config = readLinkConfig(agentDir, ctx.cwd);
     if (config === null) return;
     // the slot name for the delivery_failing alarm: root-rendered file beside the

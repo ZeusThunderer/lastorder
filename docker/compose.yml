@@ -191,6 +191,7 @@ x-node: &node
     # The base token NEVER enters a sandbox (T-044 R1-1/R1-3): up.sh derives the
     # per-slot `<base>:node-N` form; an empty token keeps the direct-pi of T-066.
     HAPI_URL: http://hapi-hub:3006
+    PI_API_ROUTE: "${PI_API_ROUTE:-gateway}"
     GATEWAY_URL: http://llm-gateway:4000
     ZCODE_MODEL: "${ZCODE_MODEL:-GLM-5.3-Flash}"  # also the Pi and Hermes model by default
     PI_CONTEXT_WINDOW: "${PI_CONTEXT_WINDOW:-96000}"  # the compaction budget (T-066)
@@ -605,6 +606,7 @@ services:
       ADMIN_TEMPLATE_DIR: /app/agent/network
       ADMIN_KNOWLEDGE_DIR: /knowledge
       HIVE_URL: http://hive:8000
+      PI_API_ROUTE: "${PI_API_ROUTE:-gateway}"
       GATEWAY_URL: http://llm-gateway:4000
       HIVE_MCP_LO_KEY: "${HIVE_MCP_LO_KEY:-}"
       ADMIN_MODEL: "${LO_MODEL:-z-ai/glm-5.3-flash}"   # the failover tier through the gateway
@@ -699,10 +701,10 @@ services:
     security_opt: ["no-new-privileges:true"]
     environment:
       HF_HOME: /data/hf
-      TTS_BACKEND: "${TTS_BACKEND:-qwen3}"
-      TTS_QWEN_MODEL: "${TTS_QWEN_MODEL:-Qwen/Qwen3-TTS-12Hz-1.7B-Base}"
-      TTS_GPU_NAME: "${TTS_GPU_NAME:-5070 Ti}"
-      TTS_DTYPE: "${TTS_DTYPE:-bfloat16}"   # float16 on the RTX 2070 (no bf16 on Turing)
+      TTS_BACKEND: "${TTS_BACKEND:-faster-qwen3}"
+      TTS_QWEN_MODEL: "${TTS_QWEN_MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}"
+      TTS_GPU_NAME: "${TTS_GPU_NAME:-RTX 2070}"
+      TTS_DTYPE: "${TTS_DTYPE:-float32}"   # float16 produced NaN probabilities on this RTX 2070; measured float32 fallback
       TTS_VOICE_DIR: /voice
       OPENROUTER_API_KEY: "${TTS_OPENROUTER_KEY:-}"
       TTS_OPENROUTER_MODEL: "${TTS_OPENROUTER_MODEL:-fish-audio/s2.1-pro}"

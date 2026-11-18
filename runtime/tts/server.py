@@ -13,11 +13,13 @@ import logging
 import os
 import threading
 import time
+
+import anyio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from runtime.tts.backends import OUT_RATE, Backend, from_env
@@ -36,7 +38,7 @@ def create_app(backend: Backend | None = None) -> FastAPI:
     """`backend=None` loads the one from env at startup (the model takes ~a minute)."""
     state: dict[str, object] = {}
     lock = threading.Lock()
-    stt_lock = threading.Lock()
+    stt_lock = lock
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -52,7 +54,12 @@ def create_app(backend: Backend | None = None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict[str, str]:
-        return {"backend": state["backend"].name, "rate": str(OUT_RATE)}
+        return {"backend": state["backend"].name, "rate": str(OUT_RATE),
+                "model": str(getattr(state["backend"], "model_id", "")),
+                "gpu": str(getattr(state["backend"], "gpu", "")),
+                "gpu_uuid": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
+                "first_chunk_s": str(state.get("first_chunk_s", "")),
+                "ready": str(getattr(state["backend"], "ready", True))}
 
     @app.post("/transcribe")
     async def transcribe(request: Request) -> dict[str, str]:
@@ -70,6 +77,63 @@ def create_app(backend: Backend | None = None) -> FastAPI:
         text = await run_in_threadpool(run)
         log.info("heard %.1f s in %.2f s: %r", len(pcm) / 2 / OUT_RATE, time.monotonic() - t0, text[:80])
         return {"text": text}
+
+    @app.post("/speak/stream")
+    async def speak_stream(body: SpeakIn):
+        text = normalize(body.text)
+        if not text:
+            return Response(status_code=204)
+        t0 = time.monotonic()
+        engine = state["backend"]
+        def generate():
+            if hasattr(engine, "stream"):
+                yield from engine.stream(text)
+            else:
+                yield engine.synthesize(text)
+        source = generate()
+        sentinel = object()
+
+        def advance():
+            return next(source, sentinel)
+
+        def finish():
+            try:
+                close = getattr(source, "close", None)
+                if close:
+                    close()
+            finally:
+                lock.release()
+
+        # Shield GPU work from cancellation: close the iterator only after its current
+        # CUDA call returns, and always release the shared TTS/STT lock on disconnect.
+        with anyio.CancelScope(shield=True):
+            await run_in_threadpool(lock.acquire)
+            try:
+                first = await run_in_threadpool(advance)
+            except Exception as exc:
+                await run_in_threadpool(finish)
+                raise HTTPException(status_code=502, detail="synthesis failed before audio") from exc
+        if first is sentinel:
+            await run_in_threadpool(finish)
+            return Response(status_code=204)
+        elapsed = time.monotonic() - t0
+        state["first_chunk_s"] = elapsed
+        log.info("first audio chunk in %.3f s", elapsed)
+
+        async def chunks():
+            try:
+                yield first
+                while True:
+                    with anyio.CancelScope(shield=True):
+                        pcm = await run_in_threadpool(advance)
+                    if pcm is sentinel:
+                        break
+                    yield pcm
+            finally:
+                with anyio.CancelScope(shield=True):
+                    await run_in_threadpool(finish)
+        return StreamingResponse(chunks(), media_type="application/octet-stream",
+                                 headers={"X-Audio-Rate": str(OUT_RATE)})
 
     @app.post("/speak")
     def speak(body: SpeakIn) -> Response:

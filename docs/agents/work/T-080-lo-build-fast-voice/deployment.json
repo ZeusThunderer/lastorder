@@ -1,0 +1,18 @@
+{
+  "slot_1": "node/mind/body running",
+  "slots_2_3": "node/mind/body stopped, restart=no",
+  "lo_pi_session": "01a1e6ff-7262-756e-be6c-5d1bcbc1d39b",
+  "node_1_pi_session": "01a1ec1c-d9fa-704e-a790-950e50da8f84",
+  "go_probe": {
+    "status": 200,
+    "text": "GO_OK",
+    "upstream": "https://opencode.ai/inference/go/openai/v1"
+  },
+  "tts": {
+    "backend": "faster-qwen3",
+    "model": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    "dtype": "float32",
+    "gpu_uuid": "GPU-378e96c9-c8c0-8e6a-5665-5dfcddf73b00",
+    "ready": true
+  }
+}

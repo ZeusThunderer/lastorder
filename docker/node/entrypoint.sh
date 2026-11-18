@@ -48,6 +48,8 @@ if [ -n "${GATEWAY_NODE_KEY:-}" ]; then
   printf '{"llm-gateway":{"type":"api","key":"%s"}}' "$GATEWAY_NODE_KEY" \
     > "$SISTER_HOME/.local/share/opencode/auth.json"
   chmod 600 "$SISTER_HOME/.local/share/opencode/auth.json"
+  printf '%s' "$GATEWAY_NODE_KEY" > "$SISTER_HOME/.pi-gateway-key"
+  chmod 400 "$SISTER_HOME/.pi-gateway-key"
 else
   log "no gateway node key: the opencode harness (and failover) will only wait"
 fi

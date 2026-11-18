@@ -535,13 +535,16 @@ def render_pi_configs(
     in the workplace volume — the tmpfs home dies with the container and takes the
     resume key with it (verified live: "No session found matching …")."""
     glm = _glm_model(model)
+    gateway = os.environ.get("PI_API_ROUTE", "zai") == "gateway"
+    if gateway:
+        glm = "z-ai/glm-5.3-flash"
     return {
         "models.json": {
             "providers": {
                 "zai": {
-                    "baseUrl": PI_ZAI_BASE_URL,
+                    "baseUrl": (os.environ.get("GATEWAY_URL", "http://llm-gateway:4000").rstrip("/") + "/v1") if gateway else PI_ZAI_BASE_URL,
                     "api": "openai-completions",
-                    "apiKey": f"!cat {key_file}",
+                    "apiKey": "!cat /home/sister/.pi-gateway-key" if gateway else f"!cat {key_file}",
                     # the endpoint's verified quirks (docs models-configuration.md):
                     # no developer role, thinking rides thinking.type — the same
                     # compat the zai guides prescribe

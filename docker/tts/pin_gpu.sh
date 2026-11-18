@@ -3,7 +3,11 @@
 # takes a UUID, stable where indexes are not (WSL2 reorders them). Empty TTS_GPU_NAME
 # keeps whatever the container sees.
 set -e
-NAME="${TTS_GPU_NAME:-5070 Ti}"
+NAME="${TTS_GPU_NAME:-RTX 2070}"
+if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "pin_gpu: nvidia-smi is required; refusing an unpinned voice service" >&2
+    exit 1
+fi
 if [ -n "$NAME" ] && command -v nvidia-smi >/dev/null 2>&1; then
     UUID=$(nvidia-smi --query-gpu=uuid,name --format=csv,noheader | while IFS=, read -r u n; do
         case "$n" in *"$NAME"*) echo "$u" && break ;; esac

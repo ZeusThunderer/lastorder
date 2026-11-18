@@ -13,7 +13,7 @@ RUN python3 -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 # torch first from the cu128 index, so qwen-tts finds it and does not pull its own
 RUN pip install --no-cache-dir torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
-RUN pip install --no-cache-dir qwen-tts soundfile numpy num2words httpx "fastapi>=0.115" "uvicorn>=0.30"
+RUN pip install --no-cache-dir faster-qwen3-tts==0.5.4 qwen-tts-hf==0.1.1.post1 transformers==5.15.1 soundfile numpy num2words httpx "fastapi>=0.115" "uvicorn>=0.30"
 
 WORKDIR /app
 COPY runtime/__init__.py ./runtime/__init__.py

@@ -1,7 +1,7 @@
 """One sister's voice (ADR-055): her `say` lines, spoken sentence by sentence, each line in
 chat at the moment its voice starts.
 
-    say(text) ─► parts (sentences) ─► [synth thread] tts /speak ─► ready (1 part ahead)
+    say(text) ─► parts (sentences) ─► [synth thread] tts /speak/stream ─► ready (1 part ahead)
                                                                      │ [play thread]
                                                                      │ connect inlet, first chunk
                                                                      │ chat ◄── first part only
@@ -30,7 +30,7 @@ import socket
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -92,29 +92,25 @@ class _Part:
     text: str
     first: bool
     last: bool
-    pcm: bytes | None = None
+    pcm: bytes | Iterator[bytes] | None = None
     why_silent: str = ""      # set when pcm is None
     synth_s: float = 0.0
 
 
-def http_synth(url: str, timeout_s: float) -> Callable[[str], tuple[bytes | None, str]]:
-    """The tts service client: (pcm, "") or (None, reason)."""
+def http_synth(url: str, timeout_s: float) -> Callable[[str], tuple[bytes | Iterator[bytes] | None, str]]:
+    """Lazy bounded PCM stream; network/model errors surface during playback."""
     import httpx
 
     client = httpx.Client(base_url=url.rstrip("/"), timeout=timeout_s)
 
-    def synth(text: str) -> tuple[bytes | None, str]:
-        try:
-            resp = client.post("/speak", json={"text": text})
-        except httpx.TimeoutException:
-            return None, f"tts timeout ({timeout_s:.0f} s)"
-        except httpx.HTTPError as exc:
-            return None, f"tts unreachable: {exc.__class__.__name__}"
-        if resp.status_code == 204:
-            return None, "nothing to voice"
-        if resp.status_code != 200 or not resp.content:
-            return None, f"tts {resp.status_code}: {resp.text[:120]}"
-        return resp.content, ""
+    def synth(text: str):
+        def chunks():
+            with client.stream("POST", "/speak/stream", json={"text": text}) as resp:
+                if resp.status_code == 204:
+                    return
+                resp.raise_for_status()
+                yield from resp.iter_bytes(chunk_size=FIRST_CHUNK)
+        return chunks(), ""
 
     return synth
 
@@ -132,7 +128,7 @@ class Speaker:
     def __init__(
         self,
         *,
-        synth: Callable[[str], tuple[bytes | None, str]],
+        synth: Callable[[str], tuple[bytes | Iterator[bytes] | None, str]],
         connect: Callable[[], Any],
         send_chat: Callable[[str], None],
         journal: Journal,
@@ -148,6 +144,7 @@ class Speaker:
         self._cv = threading.Condition()
         self._todo: deque[_Part] = deque()    # not synthesized yet
         self._ready: deque[_Part] = deque()   # synthesized, not played; one part ahead at most
+        self._active: _Part | None = None
         self._inflight: _Part | None = None   # being synthesized right now
         self._ids = 0
         self._stop = threading.Event()
@@ -195,7 +192,8 @@ class Speaker:
         """Under the lock: every waiting line becomes dropped, its parts leave the queues."""
         lines: dict[int, _Line] = {}
         inflight = [self._inflight] if self._inflight is not None else []
-        for part in [*inflight, *self._todo, *self._ready]:
+        active = [self._active] if self._active is not None else []
+        for part in [*active, *inflight, *self._todo, *self._ready]:
             if part.line.state == "waiting":
                 lines[part.line.id] = part.line
         for line in lines.values():
@@ -246,15 +244,17 @@ class Speaker:
                 if self._stop.is_set():
                     return
                 part = self._ready.popleft()
-                if part.first:
+                self._active = part
+                if part.first and (part.pcm is None or isinstance(part.pcm, bytes)):
                     part.line.state = "playing"   # from here on it is not replaced
                 self._cv.notify_all()             # the synth may start the next part
             try:
                 self._speak(part)
             except Exception:  # pragma: no cover - _speak handles its own failures
                 log.exception("voice: unexpected failure on %r", part.text[:60])
-            if part.last:
-                with self._cv:
+            with self._cv:
+                self._active = None
+                if part.last and part.line.state != "dropped":
                     part.line.state = "done"
 
     def _chat(self, part: _Part) -> bool:
@@ -276,10 +276,51 @@ class Speaker:
             extra["wait_s"] = round(at - part.line.said_at, 2)
         self._journal.record("voice", text=part.text, **extra, **fields)
 
+    def _stream_part(self, part):
+        sock, started, chatted, count = None, None, False, 0
+        try:
+            for pcm in part.pcm:
+                with self._cv:
+                    if part.line.state == "dropped":
+                        return
+                    if pcm and part.first:
+                        part.line.state = "playing"
+                if not pcm:
+                    continue
+                if sock is None:
+                    sock = self._connect()
+                    sock.settimeout(35)
+                sock.sendall(pcm)
+                count += len(pcm)
+                if started is None:
+                    started = self._clock()
+                    chatted = self._chat(part)
+            if sock is None:
+                self._chat(part)
+                self._record(part, ok=False, silent="nothing to voice")
+                return
+            sock.shutdown(socket.SHUT_WR)
+            while sock.recv(4096):
+                pass
+            self._record(part, started, ok=True, duration_s=count / BYTES_PER_S)
+        except Exception as exc:
+            if not chatted and part.line.state != "dropped":
+                self._chat(part)
+            self._record(part, started, ok=False, error=f"stream: {type(exc).__name__}: {exc}")
+        finally:
+            close = getattr(part.pcm, "close", None)
+            if close:
+                close()
+            if sock is not None:
+                sock.close()
+
     def _speak(self, part: _Part) -> None:
         if part.pcm is None:
             if self._chat(part):
                 self._record(part, ok=False, silent=part.why_silent, synth_s=round(part.synth_s, 2))
+            return
+        if not isinstance(part.pcm, bytes):
+            self._stream_part(part)
             return
         duration_s = len(part.pcm) / BYTES_PER_S
         try:

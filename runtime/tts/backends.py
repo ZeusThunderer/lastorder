@@ -95,6 +95,34 @@ class Qwen3Backend:
         return to_pcm48(audio.tobytes(), in_args=["-f", "f32le", "-ar", str(int(sr)), "-ac", "1"])
 
 
+class FasterQwen3Backend:
+    name = "faster-qwen3"
+
+    def __init__(self, ref, *, model_id, device, dtype="float32"):
+        import torch
+        from faster_qwen3_tts import FasterQwen3TTS
+        self.model_id = model_id
+        self.gpu = torch.cuda.get_device_name(0)
+        self._ref = ref
+        self._model = FasterQwen3TTS.from_pretrained(
+            model_id, device=device, dtype=getattr(torch, dtype), attn_implementation="sdpa")
+        self.ready = False
+        list(self.stream("Hello. Testing the voice."))
+        self.ready = True
+
+    def stream(self, text):
+        import numpy as np
+        for chunk, sr, timing in self._model.generate_voice_clone_streaming(
+            text=text, language="Russian", ref_audio=str(self._ref.wav),
+            ref_text=self._ref.text, chunk_size=12, max_new_tokens=512):
+            audio = np.asarray(chunk, dtype=np.float32).reshape(-1)
+            if len(audio):
+                yield to_pcm48(audio.tobytes(), in_args=["-f", "f32le", "-ar", str(int(sr)), "-ac", "1"])
+
+    def synthesize(self, text):
+        return b"".join(self.stream(text))
+
+
 class OpenRouterBackend:
     name = "openrouter"
 
@@ -134,6 +162,8 @@ def from_env() -> Backend:
     """The backend this service runs, from its env (compose `tts`)."""
     ref = VoiceRef.load(Path(os.environ.get("TTS_VOICE_DIR", "/voice")))
     kind = os.environ.get("TTS_BACKEND", "qwen3")
+    if kind == "faster-qwen3":
+        return FasterQwen3Backend(ref, model_id=os.environ.get("TTS_QWEN_MODEL", "Qwen/Qwen3-TTS-12Hz-0.6B-Base"), device=os.environ.get("TTS_DEVICE", "cuda:0"), dtype=os.environ.get("TTS_DTYPE", "float32"))
     if kind == "qwen3":
         return Qwen3Backend(
             ref,
@@ -149,4 +179,4 @@ def from_env() -> Backend:
             base_url=os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
             timeout_s=float(os.environ.get("TTS_OPENROUTER_TIMEOUT_S", "20")),
         )
-    raise ValueError(f"unknown TTS_BACKEND {kind!r}: qwen3 or openrouter")
+    raise ValueError(f"unknown TTS_BACKEND {kind!r}: faster-qwen3, qwen3 or openrouter")

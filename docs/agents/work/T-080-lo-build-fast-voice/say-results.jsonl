@@ -1,0 +1,20 @@
+{"ts": 1794962274.6122909, "kind": "voice", "text": "Привет, я проверяю голос.", "line": 2, "wait_s": 2.59, "ok": true, "duration_s": 2.48}
+{"ts": 1794962281.130555, "kind": "voice", "text": "Я готова начать строительство.", "line": 3, "wait_s": 2.57, "ok": true, "duration_s": 1.92}
+{"ts": 1794962288.3988757, "kind": "voice", "text": "Нужно собрать дерево и камень.", "line": 4, "wait_s": 2.5, "ok": true, "duration_s": 2.0}
+{"ts": 1794962297.5058775, "kind": "voice", "text": "Покажи ближайшую берёзу.", "line": 5, "wait_s": 2.76, "ok": true, "duration_s": 2.56}
+{"ts": 1794962302.6024313, "kind": "voice", "text": "Верстак уже готов.", "line": 6, "wait_s": 2.72, "ok": true, "duration_s": 1.2}
+{"ts": 1794962310.1026437, "kind": "voice", "text": "Я нашла подходящее место для дома.", "line": 7, "wait_s": 2.21, "ok": true, "duration_s": 2.48}
+{"ts": 1794962318.3509285, "kind": "voice", "text": "Сначала построим фундамент.", "line": 8, "wait_s": 2.37, "ok": true, "duration_s": 2.4}
+{"ts": 1794962325.3522487, "kind": "voice", "text": "Мне нужны ещё четыре доски.", "line": 9, "wait_s": 2.95, "ok": true, "duration_s": 1.84}
+{"ts": 1794962339.2593913, "kind": "voice", "text": "Печь работает, скоро будет стекло.", "line": 10, "wait_s": 2.74, "ok": true, "duration_s": 2.88}
+{"ts": 1794962347.0516207, "kind": "voice", "text": "Проверяю инвентарь перед дорогой.", "line": 11, "wait_s": 2.99, "ok": true, "duration_s": 1.92}
+{"ts": 1794962434.9890406, "kind": "voice", "text": "Остановись и подожди меня.", "line": 12, "wait_s": 3.88, "ok": true, "duration_s": 40.96}
+{"ts": 1794962441.5592034, "kind": "voice", "text": "Расскажи, что ты сейчас видишь.", "line": 13, "wait_s": 2.78, "ok": true, "duration_s": 1.84}
+{"ts": 1794962447.6691794, "kind": "voice", "text": "Материалов пока недостаточно.", "line": 14, "wait_s": 2.4, "ok": true, "duration_s": 1.84}
+{"ts": 1794962459.5517168, "kind": "voice", "text": "Я отправила сестре новую схему.", "line": 15, "wait_s": 2.07, "ok": true, "duration_s": 2.96}
+{"ts": 1794962464.900782, "kind": "voice", "text": "Проверим стены и крышу.", "line": 16, "wait_s": 2.14, "ok": true, "duration_s": 1.76}
+{"ts": 1794962469.7123234, "kind": "voice", "text": "Сегодня хорошая погода.", "line": 17, "wait_s": 2.12, "ok": true, "duration_s": 1.52}
+{"ts": 1794962475.4322872, "kind": "voice", "text": "Я слышу тебя во время разговора.", "line": 18, "wait_s": 2.06, "ok": true, "duration_s": 2.0}
+{"ts": 1794962488.3854072, "kind": "voice", "text": "Дом почти готов, осталось окно.", "line": 19, "wait_s": 2.33, "ok": true, "duration_s": 3.28}
+{"ts": 1794962498.6017191, "kind": "voice", "text": "Сохраняю результаты проверки.", "line": 20, "wait_s": 5.31, "ok": true, "duration_s": 2.0}
+{"ts": 1794962506.0694206, "kind": "voice", "text": "Спасибо, проверка завершена.", "line": 21, "wait_s": 2.46, "ok": true, "duration_s": 2.4}
