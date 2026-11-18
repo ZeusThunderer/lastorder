@@ -1,6 +1,6 @@
 ---
 id: T-080
-status: in_progress
+status: review
 branch: codex/T-080-lo-build-fast-voice
 ---
 
