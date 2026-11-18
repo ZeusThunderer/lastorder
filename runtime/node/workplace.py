@@ -537,11 +537,11 @@ def render_pi_configs(
     glm = _glm_model(model)
     gateway = os.environ.get("PI_API_ROUTE", "zai") == "gateway"
     if gateway:
-        glm = "z-ai/glm-5.3-flash"
+        glm = "opencode-go/glm-5.3-flash"
     return {
         "models.json": {
             "providers": {
-                "zai": {
+                ("opencode-go-gateway" if gateway else "zai"): {
                     "baseUrl": (os.environ.get("GATEWAY_URL", "http://llm-gateway:4000").rstrip("/") + "/v1") if gateway else PI_ZAI_BASE_URL,
                     "api": "openai-completions",
                     "apiKey": "!cat /home/sister/.pi-gateway-key" if gateway else f"!cat {key_file}",
@@ -550,7 +550,7 @@ def render_pi_configs(
                     # compat the zai guides prescribe
                     "compat": {"supportsDeveloperRole": False, "thinkingFormat": "zai"},
                     "models": [
-                        {"id": glm, "reasoning": True, "contextWindow": context_window}
+                        *([{ "id": "opencode-go/" + m["id"], "name": m["name"], "reasoning": m.get("capabilities", {}).get("reasoning", {}).get("supported", False), "contextWindow": min(context_window, m["limit"]["context"]), "maxTokens": min(16384, m["limit"]["output"])} for m in json.loads(Path(__file__).with_name("go_models.json").read_text(encoding="utf-8"))] if gateway else [{"id": glm, "reasoning": True, "contextWindow": context_window}])
                     ],
                 }
             }
@@ -572,7 +572,7 @@ def render_pi_configs(
             },
         },
         "settings.json": {
-            "defaultProvider": "zai",
+            "defaultProvider": "opencode-go-gateway" if gateway else "zai",
             "defaultModel": glm,
             "enableInstallTelemetry": False,
             "enableAnalytics": False,

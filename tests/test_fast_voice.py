@@ -7,10 +7,13 @@ from runtime.voice.speaker import Speaker
 def test_pi_go_uses_virtual_key_and_preserves_mcp(monkeypatch):
     monkeypatch.setenv("PI_API_ROUTE", "gateway")
     c = render_pi_configs("GLM-5.3", "http://mind:8700", "http://hive:8000", "node-id")
-    p = c["models.json"]["providers"]["zai"]
+    p = c["models.json"]["providers"]["opencode-go-gateway"]
     assert p["baseUrl"] == "http://llm-gateway:4000/v1"
-    assert p["models"][0]["id"] == "z-ai/glm-5.3-flash"
+    assert p["models"][0]["id"] == "opencode-go/" + __import__("json").loads(__import__("pathlib").Path("runtime/node/go_models.json").read_text())[0]["id"]
     assert "pi-gateway-key" in p["apiKey"]
+    assert "zai" not in c["models.json"]["providers"]
+    assert len(p["models"]) == 32
+    assert c["settings.json"]["defaultProvider"] == "opencode-go-gateway"
     assert "body" in c["mcp.json"]["mcpServers"]
 
 def test_stream_plays_before_generator_finishes():

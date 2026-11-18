@@ -52,3 +52,13 @@ TTS прогревается до readiness, TTS/STT используют общ
 - Первая полная сборка LO упала на загрузке ffmpeg из deb.debian.org; применён слой runtime/agent/entrypoint поверх имевшихся dev-образов. TTS и mind собраны штатными Dockerfile. Временные overlay Dockerfile не входят в результат. После ранней ошибки CRLF entrypoint исправлен на LF и живой LO запущен успешно.
 
 Основная работа находится в отдельном worktree; main не переключался, не правился и не мержился. Задача передаётся с открытыми измеренными ограничениями голоса и ресурсов, не как завершённая оптимизация.
+
+## Дополнение — каталог Go вместо Z.AI (2026-11-18)
+
+По поручению оператора добавлен снимок 32 моделей из https://opencode.ai/inference/go/v1/models (User-Agent lastorder-gateway/1.0; без UA был HTTP 403). В Pi отдельный provider opencode-go-gateway, список Z.AI удалён из конфигурации активного маршрута. Шлюз получил все 32 opencode-go/<id> маршрута. Лимиты виртуальных ключей не менялись. Список — каталог, доступность отдельных моделей зависит от подписки/настроек Go, все 32 генерацией не проверялись.
+
+Живая проверка: ModelRuntime с очищенными ZAI_API_KEY/ZCODE_API_KEY (как у реального Pi) возвращает count=32, providers=[opencode-go-gateway]. Проверка из обычного docker exec без очистки сначала показала 39 моделей из-за Docker env, поэтому её не принимали как результат. Настоящий HAPI log 01:12:15 подтверждает Initial model opencode-go/glm-5.3-flash (provider=opencode-go-gateway), Available models — 32 Go, без Z.AI. Запрос LO к opencode-go/glm-5.3: 200, upstream https://opencode.ai/inference/go/openai/v1. Первый запрос до готовности шлюза получил connection refused; после startup complete повтор прошёл.
+
+Возобновление уже выбранной Go-модели больше не сбрасывает её на default; переход со старого Z.AI мигрирует на Go. Перезапущены llm-gateway, LO и node-1 с прежними сессиями; рабочие места не очищались. Каталог включён в runtime/node/go_models.json и образы. main не правился.
+
+Целевой pytest после каталога: 113 passed, 3 skipped; финальный pytest test_fast_voice: 9 passed; node --test model.test.ts: 1 passed (включая сохранение выбора Go).

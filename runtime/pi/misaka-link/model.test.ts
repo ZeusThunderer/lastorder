@@ -19,6 +19,9 @@ test("a resumed session selects the operator-rendered gateway model", async () =
       assert.equal(provider,"zai"); assert.equal(id,chosen.id); return chosen;
     }}});
     assert.equal(selected,chosen);
+    selected = undefined;
+    await handlers.get("session_start")!({}, {cwd:dir, model:{provider:"opencode-go-gateway", id:"opencode-go/kimi-k3"}, modelRegistry:{find:()=>{throw new Error("must preserve selected Go model");}}});
+    assert.equal(selected,undefined);
   } finally {
     if (old === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR=old;
     fs.unlinkSync(path.join(dir,"settings.json"));

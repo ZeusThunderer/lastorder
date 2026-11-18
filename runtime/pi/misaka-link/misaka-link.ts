@@ -129,6 +129,7 @@ export default function misakaLink(pi: unknown) {
 
   api.on("session_start", async (_event: unknown, ctxRaw: unknown) => {
     const ctx = ctxRaw as {
+      model?: { provider: string };
       cwd: string;
       modelRegistry: { find(provider: string, id: string): unknown };
       isIdle(): boolean;
@@ -137,7 +138,7 @@ export default function misakaLink(pi: unknown) {
     // A resumed session can retain an obsolete provider/model. Honour the
     // operator-rendered defaults before delivering the first network event.
     const settingsPath = path.join(agentDir, "settings.json");
-    if (fs.existsSync(settingsPath)) {
+    if (ctx.model?.provider !== "opencode-go-gateway" && fs.existsSync(settingsPath)) {
       const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
       const selected = ctx.modelRegistry.find(settings.defaultProvider, settings.defaultModel);
       if (selected) await api.setModel(selected);
