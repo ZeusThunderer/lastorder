@@ -1,0 +1,80 @@
+{
+ "name": "Glass and sandstone sculpture",
+ "description": "An arbitrary two-material sculpture Adapted from github.com/rkhazh/jevcraft data/schematics (MIT, (c) 2026 Matt Rubens): stairs and slabs as full blocks, doors as an open doorway.",
+ "size": [
+  3,
+  3,
+  3
+ ],
+ "palette": [
+  "sandstone",
+  "glass"
+ ],
+ "regions": [
+  {
+   "from": [
+    0,
+    0,
+    0
+   ],
+   "to": [
+    2,
+    0,
+    2
+   ],
+   "block": "sandstone"
+  },
+  {
+   "from": [
+    0,
+    1,
+    0
+   ],
+   "to": [
+    0,
+    2,
+    0
+   ],
+   "block": "glass"
+  },
+  {
+   "from": [
+    0,
+    1,
+    2
+   ],
+   "to": [
+    0,
+    2,
+    2
+   ],
+   "block": "glass"
+  },
+  {
+   "from": [
+    2,
+    1,
+    0
+   ],
+   "to": [
+    2,
+    2,
+    0
+   ],
+   "block": "glass"
+  },
+  {
+   "from": [
+    2,
+    1,
+    2
+   ],
+   "to": [
+    2,
+    2,
+    2
+   ],
+   "block": "glass"
+  }
+ ]
+}
