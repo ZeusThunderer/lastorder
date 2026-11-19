@@ -141,9 +141,27 @@ dialog::backdrop { background: rgb(51 52 59 / 43%); }
 .login { min-height: 100dvh; display: grid; align-content: center; justify-content: center; padding: 1.25rem; }
 .login form { background: var(--surface); border: 1px solid var(--rule); padding: 1.5rem; border-radius: .55rem; width: min(100%, 24rem); }
 .monitor-summary { display: grid; gap: .5rem; }
-.monitor-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(17rem, 100%), 1fr)); gap: .85rem; }
-.monitor-grid .panel { display: grid; align-content: start; }
-.slot-actions { padding-top: .25rem; }
+.monitor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+.monitor-grid .panel-body { justify-items: stretch; }
+.monitor-grid .fact { grid-template-columns: minmax(max-content, 32%) minmax(0, 1fr); }
+.monitor-grid dt { overflow-wrap: normal; }
+#services .panel { background: transparent; border: 0; border-radius: 0; border-top: 2px solid var(--ink); }
+#services .panel-heading { padding: .45rem 0; }
+#services .panel-body { padding: .55rem 0; }
+#slots .panel, #execution { scroll-margin-block-start: .75rem; }
+.slot-actions, .slot-setting { display: grid; gap: .45rem; }
+.slot-actions { border-top: 1px solid var(--rule); padding-top: .75rem; gap: .8rem; }
+.slot-setting > button { justify-self: start; }
+.slot-billing { color: var(--muted); font-size: .92rem; }
+.network-heading, .network-jumps { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem 1rem; }
+.network-heading { justify-content: space-between; }
+.network-jumps a { padding-block: .4rem; }
+@media (max-width: 58rem) {
+  #slots { grid-template-columns: 1fr; }
+}
+@media (max-width: 45rem) {
+  #services { grid-template-columns: 1fr; gap: .5rem; }
+}
 @media (min-width: 75rem) {
   .workspace.with-detail { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(21rem, 1fr); gap: 1.15rem; }
   #inline-details { position: sticky; top: .8rem; align-self: start; min-width: 0; }
