@@ -1156,8 +1156,23 @@ def voice_from_env(
             with executor.body_lock:
                 executor.body.act("chat", {"text": text})
 
+        import httpx
+        local = http_synth(tts_url, timeout_s)
+        cloud = http_synth(env("TTS_CLOUD_URL", default="http://tts-cloud:8790"), timeout_s,
+                           gateway_key=env("LLM_API_KEY", default="") or "")
+        assigned = httpx.Client(base_url=env("HIVE_URL", default="http://hive:8000"),
+                                headers={"X-Runner-Key": env("MIND_RUNNER_KEY", default="") or ""},
+                                timeout=2)
+
+        def select_voice():
+            reply = assigned.get(f"/runner/voice/{username}")
+            reply.raise_for_status()
+            source = reply.json()["source"]
+            call_log.record("voice_source", source=source, slot=username)
+            return {"local": local, "openrouter": cloud}[source]
+
         speaker = Speaker(
-            synth=http_synth(tts_url, timeout_s),
+            synth=local, select_synth=select_voice,
             connect=tcp_inlet(host, port),
             send_chat=send_chat,
             journal=call_log,

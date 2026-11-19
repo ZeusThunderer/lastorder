@@ -43,6 +43,14 @@ class VoiceRef:
             raise ValueError(f"{txt} is empty: the clone needs the exact transcript of ref.wav")
         return cls(wav=wav, text=text)
 
+    def openrouter_references(self) -> list[dict]:
+        data = base64.b64encode(self.wav.read_bytes()).decode("ascii")
+        return [
+            {"type": "input_audio", "input_audio": {"data": f"data:audio/wav;base64,{data}"}},
+            {"type": "text", "text": self.text},
+        ]
+
+
 
 class Backend(Protocol):
     name: str
@@ -136,6 +144,9 @@ class FasterQwen3Backend:
 class OpenRouterBackend:
     name = "openrouter"
 
+    def close(self):
+        self._client.close()
+
     def __init__(self, ref: VoiceRef, *, api_key: str, model: str, base_url: str, timeout_s: float):
         import httpx
 
@@ -147,22 +158,14 @@ class OpenRouterBackend:
             timeout=timeout_s,
         )
         self._model = model
-        b64 = base64.b64encode(ref.wav.read_bytes()).decode("ascii")
-        self._refs = [
-            {"type": "input_audio", "input_audio": {"data": f"data:audio/wav;base64,{b64}"}},
-            {"type": "text", "text": ref.text},
-        ]
+        self._refs = ref.openrouter_references()
+
+    def request_body(self, text: str) -> dict:
+        return {"model": self._model, "input": text, "response_format": "mp3",
+                "input_references": self._refs}
 
     def synthesize(self, text: str) -> bytes:
-        resp = self._client.post(
-            "/audio/speech",
-            json={
-                "model": self._model,
-                "input": text,
-                "response_format": "mp3",  # pcm's rate is per provider and undocumented
-                "input_references": self._refs,
-            },
-        )
+        resp = self._client.post("/audio/speech", json=self.request_body(text))
         if resp.status_code != 200:
             raise RuntimeError(f"openrouter {resp.status_code}: {resp.text[:300]}")
         return to_pcm48(resp.content, in_args=[])

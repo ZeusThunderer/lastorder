@@ -130,6 +130,43 @@ def test_stream_timeout_before_audio_falls_back_once():
     assert chat == ["hello"] and records[-1]["ok"] is False
 
 
+def test_live_playback_requires_a_sustained_realtime_supply(monkeypatch):
+    import httpx
+    from contextlib import contextmanager
+    from runtime.voice import speaker
+
+    now = [0.]
+    delay = [0.5]
+    packet = bytes(speaker.FIRST_CHUNK)
+
+    class Reply:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def iter_bytes(self, chunk_size):
+            for _ in range(4):
+                now[0] += delay[0]
+                yield packet
+
+    class Client:
+        @contextmanager
+        def stream(self, *args, **kwargs):
+            yield Reply()
+
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: Client())
+    monkeypatch.setattr(speaker.time, "monotonic", lambda: now[0])
+    synth = speaker.http_synth("http://tts", 25)
+    assert synth("slow")[0].collect(lambda: False)[0] == packet * 4
+    delay[0] = 0.01
+    for _ in range(2):
+        assert synth("fast")[0].collect(lambda: False)[0] == packet * 4
+    delay[0] = 0.5
+    assert list(synth("under load")[0]) == [packet] * 4
+    assert synth("smooth again")[0].collect(lambda: False)[0] == packet * 4
+
+
 def test_new_line_replaces_stream_still_waiting_for_first_audio():
     import threading
     import time

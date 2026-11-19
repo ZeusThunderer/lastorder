@@ -971,6 +971,7 @@ def create_app(
         return {
             "model_catalog": catalog(),
             "slot_models": models.all(),
+            "slot_voice": models.voices(),
             "observed_at": snapshot[0].isoformat() if snapshot else None,
             "freshness": ("stale" if age > 30 else "fresh") if age is not None else "unknown",
             "components": snapshot[1] if snapshot else None,
@@ -992,6 +993,23 @@ def create_app(
         key = request.headers.get("x-node-key", "").strip()
         if not secrets.compare_digest(key.encode("utf-8"), last_order_key.encode("utf-8")):
             raise ApiError(401, "lo_key", "the wake feed opens with the Last Order key alone")
+
+    @app.post("/board/voice/{slot}")
+    def assign_voice(request: Request, slot: str, body: dict) -> dict:
+        _require_operator(request)
+        source = body.get("source")
+        if slot not in models.voices() or source not in ("local", "openrouter"):
+            raise ApiError(422, "voice", "unknown slot or voice source")
+        models.voice(slot, source)
+        return {"slot": slot, "source": source}
+
+    @app.get("/runner/voice/{slot}")
+    def assigned_voice(request: Request, slot: str) -> dict:
+        _require_runner_key(request, slot)
+        sources = models.voices()
+        if slot not in sources:
+            raise ApiError(404, "voice", "unknown slot")
+        return {"source": sources[slot]}
 
     @app.post("/board/models/{slot}")
     def assign_model(request: Request, slot: str, body: dict) -> dict:

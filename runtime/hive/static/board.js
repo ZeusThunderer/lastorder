@@ -889,10 +889,26 @@ function dockerHealth(value) {
   return { healthy: "Проверка пройдена", starting: "Проверка запускается", unhealthy: "Проверка не пройдена" }[value];
 }
 const modelDrafts = new Map();
+const voiceDrafts = new Map();
 function slotControls(slot) {
   const holder = el("div", "button-row slot-actions");
   const slotName = "LastOrder0" + slot;
   const assignment = state.network?.slot_models?.[slotName];
+  const source = state.network?.slot_voice?.[slotName];
+  if (source) {
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Источник голоса слота " + slot);
+    select.add(new Option("Локальный Qwen · своя GPU", "local"));
+    select.add(new Option("OpenRouter · Fish Audio S2.1 Pro · платно", "openrouter"));
+    select.value = voiceDrafts.get(slot) || source;
+    select.onchange = () => voiceDrafts.set(slot, select.value);
+    const apply = button("Применить голос");
+    apply.onclick = () => sendMutation("/board/voice/" + slotName, {source: select.value},
+      {success: () => { voiceDrafts.delete(slot); void loadNetwork(); },
+       failure: message => report($("infra-feedback"), message)});
+    holder.append(el("p", "", "Озвучка: " + (source === "local" ? "локальный Qwen" : "OpenRouter")),
+      select, apply);
+  }
   if (assignment) {
     const select = document.createElement("select");
     select.setAttribute("aria-label", "Модель слота " + slot);

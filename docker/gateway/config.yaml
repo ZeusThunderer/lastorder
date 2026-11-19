@@ -10,6 +10,14 @@
 # the subscription token stays in node-N (ADR-033).
 
 model_list:
+  - model_name: sister-voice
+    litellm_params:
+      model: openai/fish-audio/s2.1-pro
+      api_base: http://tts-cloud:8790/v1
+      api_key: os.environ/OPENROUTER_API_KEY
+      num_retries: 0
+    model_info:
+      mode: audio_speech
   # Each tier is listed twice: under the full litellm name and under the bare provider id.
   # The litellm SDK strips the provider prefix when a custom api_base is set (verified live:
   # a node's client sends model=qwen/qwen3.7-flash to the gateway), while OpenAI-style

@@ -85,6 +85,7 @@ class _Line:
     said_at: float
     state: str = "waiting"    # waiting → playing → done, or waiting → dropped
     heard_at: float | None = None
+    synth: Callable | None = None
 
 
 @dataclass
@@ -96,22 +97,65 @@ class _Part:
     pcm: bytes | Iterator[bytes] | None = None
     why_silent: str = ""      # set when pcm is None
     synth_s: float = 0.0
+    first_pcm_at: float | None = None
 
 
-def http_synth(url: str, timeout_s: float) -> Callable[[str], tuple[bytes | Iterator[bytes] | None, str]]:
-    """Lazy bounded PCM stream; network/model errors surface during playback."""
+@dataclass
+class _Prefetch:
+    chunks: Iterator[bytes]
+
+    def collect(self, cancelled, clock=time.monotonic):
+        data = bytearray()
+        first_at = None
+        try:
+            for block in self.chunks:
+                if cancelled():
+                    break
+                if first_at is None:
+                    first_at = clock()
+                data.extend(block)
+        finally:
+            self.chunks.close()
+        return bytes(data), first_at
+
+
+def http_synth(url: str, timeout_s: float, *, gateway_key: str = ""):
+    """Prefetch phrases until the synthesizer can reliably feed live playback."""
     import httpx
 
-    client = httpx.Client(base_url=url.rstrip("/"), timeout=timeout_s)
+    headers = {"Authorization": f"Bearer {gateway_key}"} if gateway_key else {}
+    client = httpx.Client(base_url=url.rstrip("/"), timeout=timeout_s, headers=headers)
+    fast_runs = 0
+    speed_lock = threading.Lock()
 
     def synth(text: str):
+        first_at = None
+
         def chunks():
+            nonlocal first_at, fast_runs
+            received = 0
+            underrun = 0.0
             with client.stream("POST", "/speak/stream", json={"text": text}) as resp:
                 if resp.status_code == 204:
                     return
                 resp.raise_for_status()
-                yield from resp.iter_bytes(chunk_size=FIRST_CHUNK)
-        return chunks(), ""
+                for block in resp.iter_bytes(chunk_size=FIRST_CHUNK):
+                    now = time.monotonic()
+                    if first_at is None:
+                        first_at = now
+                    underrun = max(underrun, now - first_at - received / BYTES_PER_S)
+                    received += len(block)
+                    yield block
+            if first_at is not None:
+                elapsed = time.monotonic() - first_at
+                fast = underrun < 0.05 and elapsed < 0.8 * received / BYTES_PER_S
+                with speed_lock:
+                    fast_runs = fast_runs + 1 if fast else 0
+        with speed_lock:
+            live = fast_runs >= 2
+        if live:
+            return chunks(), ""
+        return _Prefetch(chunks()), ""
 
     return synth
 
@@ -129,14 +173,16 @@ class Speaker:
     def __init__(
         self,
         *,
-        synth: Callable[[str], tuple[bytes | Iterator[bytes] | None, str]],
+        synth: Callable[[str], tuple[bytes | _Prefetch | Iterator[bytes] | None, str]],
         connect: Callable[[], Any],
         send_chat: Callable[[str], None],
         journal: Journal,
         drain_margin_s: float = DRAIN_MARGIN_S,
         clock: Callable[[], float] = time.monotonic,
+        select_synth: Callable[[], Callable] | None = None,
     ):
         self._synth = synth
+        self._select_synth = select_synth
         self._connect = connect
         self._send_chat = send_chat
         self._journal = journal
@@ -234,7 +280,15 @@ class Speaker:
                 self._inflight = part
             t0 = self._clock()
             try:
-                part.pcm, part.why_silent = self._synth(part.text)
+                if part.line.synth is None:
+                    part.line.synth = self._select_synth() if self._select_synth else self._synth
+                part.pcm, part.why_silent = part.line.synth(part.text)
+                if isinstance(part.pcm, _Prefetch):
+                    data, part.first_pcm_at = part.pcm.collect(
+                        lambda: self._stop.is_set() or part.line.state == "dropped", self._clock)
+                    part.pcm = data or None
+                    if not data:
+                        part.why_silent = "nothing to voice"
             except Exception as exc:  # the client is ours, but a line must never be lost
                 part.pcm, part.why_silent = None, f"tts error: {exc}"
             part.synth_s = self._clock() - t0
@@ -308,10 +362,12 @@ class Speaker:
                 self._chat(part)
                 self._record(part, ok=False, silent="nothing to voice")
                 return
+            sent_at = self._clock()
             sock.shutdown(socket.SHUT_WR)
             while sock.recv(4096):
                 pass
-            timing = {}
+            timing = {"stream_s": round(sent_at - started, 3),
+                      "inlet_drain_s": round(self._clock() - sent_at, 3)}
             if part.first:
                 timing["say_to_pcm_s"] = round(ready_at - part.line.said_at, 3)
                 timing["pcm_to_inlet_s"] = round(started - ready_at, 3)
@@ -355,8 +411,15 @@ class Speaker:
             sock.shutdown(socket.SHUT_WR)
             while sock.recv(4096):      # paplay drains, exits, the inlet closes: EOF
                 pass
+            timing = {}
+            if part.first and part.first_pcm_at is not None:
+                timing["say_to_pcm_s"] = round(part.first_pcm_at - part.line.said_at, 3)
+                timing["pcm_to_inlet_s"] = round(started - part.first_pcm_at, 3)
+                if part.line.heard_at is not None:
+                    timing["last_heard_to_say_s"] = round(part.line.said_at - part.line.heard_at, 3)
             self._record(part, started, ok=True, duration_s=round(duration_s, 2),
-                         synth_s=round(part.synth_s, 2), played_s=round(self._clock() - t0, 2))
+                         synth_s=round(part.synth_s, 2), played_s=round(self._clock() - t0, 2),
+                         **timing)
         except OSError as exc:
             if not chatted:
                 chatted = self._chat(part)

@@ -45,6 +45,19 @@ class Stack:
 # --- the page and its assets are open; the data behind them is not (T-052) ----------------
 
 
+def test_voice_source_requires_operator_and_survives_restart(tmp_path):
+    client = Stack(tmp_path).client
+    op = {"X-Operator-Key": KEY_OP}
+    url = "/board/voice/LastOrder01"
+    assert client.post(url, json={"source": "openrouter"}).status_code == 401
+    assert client.post(url, headers=op, json={"source": "unknown"}).status_code == 422
+    assert client.post(url, headers=op, json={"source": "openrouter"}).json()["source"] == "openrouter"
+    fresh = Stack(tmp_path).client
+    assert fresh.get("/board/status", headers=op).json()["slot_voice"] == {
+        "LastOrder01": "openrouter", "LastOrder02": "local", "LastOrder03": "local"}
+    assert fresh.post(url, headers=op, json={"source": "local"}).json()["source"] == "local"
+
+
 def test_slot_model_delegation_and_stale_receipt(tmp_path):
     client = Stack(tmp_path).client
     op = {"X-Operator-Key": KEY_OP}

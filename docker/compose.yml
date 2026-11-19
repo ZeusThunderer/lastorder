@@ -690,7 +690,25 @@ services:
   # clones the operator's reference voice (.stand/voice/ref.wav + ref.txt, outside git) on
   # the GPU named TTS_GPU_NAME; TTS_BACKEND=openrouter is the cloud fallback (a new kind
   # of spending, the key lives here alone). Raised by the operator, never by the stand.
+  tts-cloud:
+    build:
+      context: ..
+      dockerfile: docker/tts/Dockerfile
+    image: lastorder-tts:dev
+    profiles: [voice]
+    restart: "no"
+    logging: *default-logging
+    entrypoint: ["python", "-m", "uvicorn"]
+    command: ["runtime.tts.cloud:app", "--host", "0.0.0.0", "--port", "8790"]
+    environment:
+      GATEWAY_URL: http://llm-gateway:4000/v1
+      TTS_CLOUD_REFERENCE: "${TTS_CLOUD_REFERENCE:-/voice}"
+    volumes:
+      - ${STAND_DAEMON_ROOT:-..}/.stand/voice:/voice:ro
+
   tts:
+    depends_on:
+      - tts-cloud
     build:
       context: ..
       dockerfile: docker/tts/Dockerfile
@@ -796,7 +814,7 @@ services:
     networks: [default, gateway-internal, svc-1, svc-2, svc-3, svc-lo]
     logging: *default-logging
     volumes:
-      - ${STAND_DAEMON_ROOT:-..}/docker/gateway/config.yaml:/app/config.yaml:ro
+      - ${GATEWAY_CONFIG_PATH:-${STAND_DAEMON_ROOT:-..}/docker/gateway/config.yaml}:/app/config.yaml:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')"]
       interval: 30s

@@ -26,6 +26,18 @@ class SlotModels:
                 state TEXT DEFAULT 'default', error TEXT, delegated INTEGER DEFAULT 0)""")
             db.executemany("INSERT OR IGNORE INTO models(slot) VALUES (?)",
                            [(f"LastOrder0{i}",) for i in range(1, 4)])
+            db.execute("""CREATE TABLE IF NOT EXISTS slot_voice (
+                       slot TEXT PRIMARY KEY REFERENCES models(slot), source TEXT NOT NULL)""")
+
+    def voices(self):
+        with closing(self.connect()) as db:
+            return dict(db.execute("""SELECT models.slot, COALESCE(slot_voice.source, 'local')
+                                   FROM models LEFT JOIN slot_voice USING(slot)"""))
+
+    def voice(self, slot, source):
+        with closing(self.connect()) as db, db:
+            db.execute("""INSERT INTO slot_voice VALUES (?, ?) ON CONFLICT(slot)
+                       DO UPDATE SET source=excluded.source""", (slot, source))
 
     def connect(self):
         db = sqlite3.connect(self.path)
