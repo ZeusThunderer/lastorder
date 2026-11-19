@@ -1,6 +1,7 @@
 import os
 import socket
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from runtime.node.workplace import render_pi_configs
 from runtime.voice.speaker import Speaker
 
@@ -30,7 +31,7 @@ def test_stream_plays_before_generator_finishes():
         yield b"\x00\x00" * 10
     speaker = Speaker(synth=lambda _: None, connect=Sock, send_chat=chat.append,
                       journal=SimpleNamespace(record=lambda *a, **k: records.append(k)))
-    part = SimpleNamespace(pcm=chunks(), first=True, text="hello", line=SimpleNamespace(id=1,text="hello",said_at=0,state="waiting"))
+    part = SimpleNamespace(pcm=chunks(), first=True, text="hello", line=SimpleNamespace(id=1,text="hello",said_at=0,state="waiting",heard_at=None))
     speaker._stream_part(part)
     assert len(sent) == 2 and len(chat) == 1
     assert records[-1]["ok"]
@@ -103,14 +104,14 @@ def test_stream_response_advances_on_demand_and_closes_source():
         app = create_app(Engine())
         async with app.router.lifespan_context(app):
             route = next(r for r in app.routes if r.path == "/speak/stream")
-            response = await route.endpoint(SpeakIn(text="hello"))
+            response = await route.endpoint(SpeakIn(text="hello"), SimpleNamespace(is_disconnected=AsyncMock(return_value=False)))
             assert events == ["first"]
             assert await anext(response.body_iterator) == b"\x00\x00"
             assert events == ["first"]
             await response.body_iterator.aclose()
             assert events == ["first", "closed"]
             # A disconnected response must not leave the inference lock held.
-            response = await asyncio.wait_for(route.endpoint(SpeakIn(text="again")), 2)
+            response = await asyncio.wait_for(route.endpoint(SpeakIn(text="again"), SimpleNamespace(is_disconnected=AsyncMock(return_value=False))), 2)
             await anext(response.body_iterator)
             await response.body_iterator.aclose()
     asyncio.run(run())
@@ -181,12 +182,12 @@ def test_server_error_after_first_chunk_closes_and_releases_lock():
         app = create_app(Engine())
         async with app.router.lifespan_context(app):
             route = next(r for r in app.routes if r.path == "/speak/stream")
-            response = await route.endpoint(SpeakIn(text="one"))
+            response = await route.endpoint(SpeakIn(text="one"), SimpleNamespace(is_disconnected=AsyncMock(return_value=False)))
             await anext(response.body_iterator)
             with pytest.raises(RuntimeError, match="late failure"):
                 await anext(response.body_iterator)
             assert closed == ["one"]
-            response = await asyncio.wait_for(route.endpoint(SpeakIn(text="two")), 2)
+            response = await asyncio.wait_for(route.endpoint(SpeakIn(text="two"), SimpleNamespace(is_disconnected=AsyncMock(return_value=False))), 2)
             await anext(response.body_iterator)
             await response.body_iterator.aclose()
             assert closed == ["one", "two"]

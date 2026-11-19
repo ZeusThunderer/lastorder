@@ -510,6 +510,22 @@ PI_BODY_MCP_TIMEOUT_S = 75
 PI_SISTER_THINKING_LEVEL = "low"
 
 
+def _pi_gateway_provider(context_window: int) -> dict:
+    rows = json.loads(Path(__file__).with_name("go_models.json").read_text(encoding="utf-8"))
+    return {
+        "baseUrl": os.environ.get("GATEWAY_URL", "http://llm-gateway:4000").rstrip("/") + "/v1",
+        "api": "openai-completions", "apiKey": "!cat /home/sister/.pi-gateway-key",
+        "compat": {"supportsDeveloperRole": False, "thinkingFormat": "zai"},
+        "models": [
+            {"id": "opencode-go/" + row["id"], "name": row["name"],
+             "reasoning": row.get("capabilities", {}).get("reasoning", {}).get("supported", False),
+             "contextWindow": min(context_window, row["limit"]["context"]),
+             "maxTokens": min(16384, row["limit"]["output"])}
+            for row in rows
+        ],
+    }
+
+
 def render_pi_configs(
     model: str,
     body_base: str,
@@ -541,17 +557,10 @@ def render_pi_configs(
     return {
         "models.json": {
             "providers": {
-                ("opencode-go-gateway" if gateway else "zai"): {
-                    "baseUrl": (os.environ.get("GATEWAY_URL", "http://llm-gateway:4000").rstrip("/") + "/v1") if gateway else PI_ZAI_BASE_URL,
-                    "api": "openai-completions",
-                    "apiKey": "!cat /home/sister/.pi-gateway-key" if gateway else f"!cat {key_file}",
-                    # the endpoint's verified quirks (docs models-configuration.md):
-                    # no developer role, thinking rides thinking.type — the same
-                    # compat the zai guides prescribe
+                ("opencode-go-gateway" if gateway else "zai"): _pi_gateway_provider(context_window) if gateway else {
+                    "baseUrl": PI_ZAI_BASE_URL, "api": "openai-completions", "apiKey": f"!cat {key_file}",
                     "compat": {"supportsDeveloperRole": False, "thinkingFormat": "zai"},
-                    "models": [
-                        *([{ "id": "opencode-go/" + m["id"], "name": m["name"], "reasoning": m.get("capabilities", {}).get("reasoning", {}).get("supported", False), "contextWindow": min(context_window, m["limit"]["context"]), "maxTokens": min(16384, m["limit"]["output"])} for m in json.loads(Path(__file__).with_name("go_models.json").read_text(encoding="utf-8"))] if gateway else [{"id": glm, "reasoning": True, "contextWindow": context_window}])
-                    ],
+                    "models": [{"id": glm, "reasoning": True, "contextWindow": context_window}],
                 }
             }
         },
@@ -655,6 +664,17 @@ def drop_pi_agent_dir(
             str(agent_dir / workshop_mod.ACTIVE_DIR) if workshop_root is not None else None
         ),
     )
+    providers = configs["models.json"]["providers"]
+    if slot and not hive_mcp_override and os.environ.get("GATEWAY_NODE_KEY"):
+        providers["opencode-go-gateway"] = _pi_gateway_provider(context_window)
+    if slot and zai_key and not hive_mcp_override:
+        providers["zai"] = {
+            "baseUrl": PI_ZAI_BASE_URL, "api": "openai-completions",
+            "apiKey": f"!cat {agent_dir / PI_KEY_FILE}",
+            "compat": {"supportsDeveloperRole": False, "thinkingFormat": "zai"},
+            "models": [{"id": name, "reasoning": True, "contextWindow": context_window}
+                       for name in ("glm-5.3", "glm-5.3-flash")],
+        }
     if hive_mcp_override:
         configs["mcp.json"]["mcpServers"]["hive"]["url"] = hive_mcp_override.rstrip("/")
     for name, config in configs.items():

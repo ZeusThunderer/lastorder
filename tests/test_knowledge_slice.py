@@ -323,6 +323,14 @@ def test_store_goals_read_as_network_goals(tmp_path: Path):
     assert slice_.network_goals == (NetworkGoal(text="проверить болото", why="нужна глина"),)
 
 
+def test_will_head_keeps_promises_after_a_short_greeting():
+    body = "Следующая сестра, здравствуй.\nГость ждёт синий цветок у входа. " + "Продолжение. " * 100
+    will = a_will(9, died_at="2026-10-19T09:00:00+00:00", body=body)
+    notes = build_inheritance(dead=[(9, will)], alive=[], terms=[], catalog="").inherited_notes
+    assert "синий цветок у входа" in notes
+    assert notes.endswith("…") and budget.estimate_tokens(notes) <= budget.INHERITANCE_WILL_TOKENS
+
+
 def test_a_long_will_is_trimmed_to_the_inheritance_head():
     # The operator's 2026-11-13 call: a stored will carries 1000-1500 characters,
     # the birth slice still binds B_INHERITANCE — the heir reads the head, the full

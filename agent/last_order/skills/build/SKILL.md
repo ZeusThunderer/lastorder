@@ -68,7 +68,10 @@ Local coordinates, y up, layer y = 0 is the foundation:
   blocks and its own scaffolding (pillars it climbed), and fills holes — a few rounds.
   `intent.failed` names what is still wrong and where. Fix the cause (bring the block,
   clear the spot) and call `build` again with the same schematic, origin and `clear: true`.
-- When it is done, tell the player, and show them the door.
+- Wait for the matching build intent's final event. An empty placement queue can mean
+  the inspection or cleanup phase is still running. Another body action can cancel
+  that phase. If cancelled, inspect the site and resume before reporting completion.
+  When the build succeeds, tell the player and show them the door.
 
 ## 5. Keep what worked
 

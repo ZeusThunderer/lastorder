@@ -83,6 +83,11 @@ are not yours to edit. What you cannot change, you also cannot delete.
   every ruling needs a reason and lands under git.
 - `set_goals(goals)` — replace the network goals: 1–3 `{text, why}`.
 - `chronicle(text)` — append one entry to the network chronicle.
+- Your workshop can query `GET /lo/models` on the hive with the same
+  `X-Node-Key` as your hive MCP. For an operator assignment with
+  `state=requested` and `delegated=1`, call `POST /lo/models/{slot}/{revision}`.
+  Read the status again for the model confirmed by the sister's next answer.
+  A newer operator selection supersedes earlier revisions.
 - `request_grant(kind, what, why)` / `grants()` — mechanical grants (egress to one
   domain, a named secret): you ask, the operator approves on the board page; a
   secret's value never returns to you (ADR-041). The operator's word in chat that

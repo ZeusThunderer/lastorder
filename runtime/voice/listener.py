@@ -39,7 +39,7 @@ class VoiceListener:
         self._clock = clock
         self._lock = threading.Lock()
         self._open: dict[str, tuple[bytearray, float]] = {}
-        self._phrases: Queue[tuple[str, bytes]] = Queue(maxsize=8)
+        self._phrases: Queue[tuple[str, bytes, float]] = Queue(maxsize=8)
         threading.Thread(target=self._cut_loop, name="voice-cut", daemon=True).start()
         threading.Thread(target=self._stt_loop, name="voice-stt", daemon=True).start()
 
@@ -55,11 +55,11 @@ class VoiceListener:
                 self._close(speaker)
 
     def _close(self, speaker: str) -> None:  # under self._lock
-        buf, _ = self._open.pop(speaker)
+        buf, last_packet = self._open.pop(speaker)
         if len(buf) < MIN_PHRASE_S * BYTES_PER_S:
             return
         try:
-            self._phrases.put_nowait((speaker, bytes(buf)))
+            self._phrases.put_nowait((speaker, bytes(buf), last_packet))
         except Full:
             log.warning("voice: STT behind, phrase of %s dropped", speaker)
 
@@ -73,13 +73,16 @@ class VoiceListener:
 
     def _stt_loop(self) -> None:
         while True:
-            speaker, pcm = self._phrases.get()
+            speaker, pcm, last_packet = self._phrases.get()
+            started = self._clock()
             try:
                 text = self._transcribe(pcm).strip()
             except Exception as exc:
                 log.warning("voice: stt failed for %s: %s", speaker, exc)
                 continue
-            log.info("voice heard: %s (%.1f s): %r", speaker, len(pcm) / BYTES_PER_S, text[:80])
+            log.info("voice heard: %s (%.1f s, end_to_stt=%.3f s, stt=%.3f s): %r",
+                     speaker, len(pcm) / BYTES_PER_S, started - last_packet,
+                     self._clock() - started, text[:80])
             if text:
                 self._emit(speaker, text)
 

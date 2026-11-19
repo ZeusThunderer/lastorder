@@ -29,6 +29,7 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
+from pathlib import Path
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
@@ -622,6 +623,15 @@ class BodyMcp:
             _as_int(z, "build.z", -COORD_ABS_MAX, COORD_ABS_MAX),
         ]
         try:
+            if isinstance(schematic, str) and not schematic.lstrip().startswith(("{", "[")):
+                name = schematic.strip().lower().removeprefix("skills/build/library/").removesuffix(".json")
+                name = name.replace(" ", "-")
+                library = Path(__file__).resolve().parents[2] / "agent/last_order/skills/build/library"
+                entries = {path.stem: path for path in library.glob("*.json")}
+                if name not in entries:
+                    _err("build: choose a library schematic (" + ", ".join(sorted(entries)) +
+                         ") or pass your drawing as a JSON object")
+                schematic = entries[name].read_text(encoding="utf-8")
             plan = parse_schematic(schematic)
         except SchematicError as exc:
             _err(f"build: {exc}")
@@ -696,6 +706,7 @@ class BodyMcp:
             submitted = self._x.submit(BUILD_LEVER, args)
         except RuntimeError as exc:
             raise ToolError(str(exc) or DEAD_ACT_ERROR) from exc
+        self._last_build = submitted
         answer: dict[str, Any] = {
             "intent_id": submitted.id,
             "name": plan.name,
@@ -719,7 +730,13 @@ class BodyMcp:
         if self._x.bodiless:
             _err(NO_BODY_ERROR)
         with self._x.body_lock:
-            return dict(self._x.body.build_status())
+            status = dict(self._x.body.build_status())
+            previous = getattr(self, "_last_build", None)
+            if previous is not None:
+                status.update(intent_id=previous.id, state=previous.state, repair_round=previous.rounds)
+                if previous.last_check:
+                    status["defects"] = {key: len(items) for key, items in previous.last_check.items()}
+            return status
 
     def say(self, text: str) -> dict[str, Any]:
         if self._x.bodiless:
@@ -836,7 +853,7 @@ def build_server(
     async def build(
         schematic: dict[str, Any] | str, x: int, y: int, z: int, clear: bool = False
     ) -> dict[str, Any]:
-        """Build a structure from a schematic, block by block, with this body. The
+        """Build a library schematic by name (e.g. birch-cottage), or your own drawing. The
         schematic is local coordinates [x, y, z], y up: {"name": ..., "size": [w, h, d],
         "palette": ["oak planks", "glass", ...] (at most 16), "regions": [{"from": [0,0,0],
         "to": [4,0,4], "block": "oak planks"}, ...] — inclusive filled boxes applied in
@@ -1147,7 +1164,7 @@ def voice_from_env(
         ).start()
         # someone else spoke to her (chat or voice): what she was still going to say is
         # stale — the line playing finishes, the waiting ones go to chat as text (W1)
-        executor.on_heard(lambda entry: speaker.interrupt(f"{entry.get('from')} spoke"))
+        executor.on_heard(speaker.heard)
         return speaker
 
     log.info("voice armed for %s: tts %s, inlet %s:%d", username, tts_url, host, port)

@@ -18,5 +18,11 @@ if [ -n "$NAME" ] && command -v nvidia-smi >/dev/null 2>&1; then
     fi
     echo "pin_gpu: CUDA_VISIBLE_DEVICES=$UUID ($NAME)"
     export CUDA_VISIBLE_DEVICES=$UUID
+    case "$NAME:${TTS_BACKEND:-faster-qwen3}:${TTS_DTYPE:-float32}" in
+        *2070*:faster-qwen3:float16)
+            echo "pin_gpu: using float32 for stable faster-qwen3 inference on RTX 2070"
+            export TTS_DTYPE=float32
+            ;;
+    esac
 fi
 exec "$@"

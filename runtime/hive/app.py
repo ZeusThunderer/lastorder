@@ -352,6 +352,8 @@ def create_app(
         run_dir / "board.sqlite", lifecycle=lifecycle, log=log, clock=clock
         )
     wake_feed = WakeFeed(run_dir, log=log, clock=clock)
+    from runtime.hive.slot_models import SlotModels, catalog
+    models = SlotModels(run_dir / "slot-models.sqlite")
     infra_snapshot: tuple[datetime, dict] | None = None
     grants = Grants(run_dir / "grants.sqlite", log=log, clock=clock)
     # the grant relay (runtime/hive/relay.py): secrets filled here, out via egress
@@ -967,6 +969,8 @@ def create_app(
         snapshot = infra_snapshot
         age = max(0, (clock() - snapshot[0]).total_seconds()) if snapshot else None
         return {
+            "model_catalog": catalog(),
+            "slot_models": models.all(),
             "observed_at": snapshot[0].isoformat() if snapshot else None,
             "freshness": ("stale" if age > 30 else "fresh") if age is not None else "unknown",
             "components": snapshot[1] if snapshot else None,
@@ -988,6 +992,54 @@ def create_app(
         key = request.headers.get("x-node-key", "").strip()
         if not secrets.compare_digest(key.encode("utf-8"), last_order_key.encode("utf-8")):
             raise ApiError(401, "lo_key", "the wake feed opens with the Last Order key alone")
+
+    @app.post("/board/models/{slot}")
+    def assign_model(request: Request, slot: str, body: dict) -> dict:
+        _require_operator(request)
+        allowed = {m["provider"] + "/" + m["id"] for m in catalog()}
+        selection = body.get("model")
+        if slot not in models.all() or not isinstance(selection, str) or selection not in allowed:
+            raise ApiError(422, "model", "unknown slot or model")
+        row = models.assign(slot, selection, body.get("delegate") is True)
+        if row["delegated"]:
+            wake_feed.append("model_assignment", f"{slot} revision {row['revision']}: {selection}")
+        return row
+
+    @app.get("/lo/models")
+    def lo_models(request: Request) -> dict:
+        _require_lo_key(request)
+        return {"catalog": catalog(), "slots": models.all()}
+
+    @app.post("/lo/models/{slot}/{revision}")
+    def lo_apply_model(request: Request, slot: str, revision: int) -> dict:
+        _require_lo_key(request)
+        row = models.authorize(slot, revision)
+        if row is None:
+            raise ApiError(409, "model", "no matching operator request")
+        return row
+
+    def model_slot(request):
+        slot = keys.get(request.headers.get("x-node-key", ""))
+        if not slot:
+            raise ApiError(401, "node_key", "slot key required")
+        return slot
+
+    @app.get("/node/model")
+    def slot_model(request: Request) -> dict:
+        return models.all()[model_slot(request)]
+
+    @app.post("/node/model")
+    def applied_model(request: Request, body: dict) -> dict:
+        slot = model_slot(request)
+        applied = body.get("applied")
+        revision = body.get("revision")
+        if (type(revision) is not int or not 0 <= revision < 2**63
+                or not isinstance(applied, str) or not 0 < len(applied) <= 180):
+            raise ApiError(422, "model", "invalid model report")
+        failure = body.get("error")
+        models.report(slot, revision, applied,
+                      "quota" if failure == "quota" else "unavailable" if failure else None)
+        return models.all()[slot]
 
     @app.post("/lo/wake")
     def lo_wake_post(request: Request, body: dict) -> dict:

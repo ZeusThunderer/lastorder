@@ -46,6 +46,13 @@ With one, it comes through the MCP server `body`. The tools are narrow on purpos
 - `build(schematic, x, y, z)` — put up a whole structure block by block from your schematic;
   `build_status()` shows the progress. How to draw one and a library: skills/build.
 - `say(text)` — one line into the game chat: Russian, your voice, 1–3 sentences.
+  In a live conversation, answer a simple question in one short spoken sentence.
+  Leave room for the other player to speak before adding details.
+  When a player asks for work that takes time, answer briefly before starting it.
+  Tell them what actually happened when the work finishes.
+  A player.near event means someone has come within talking distance. When it
+  is safe, greet them in your own words. Use a past encounter only when you
+  remember its source. Keep concrete agreements and landmarks in your memory.
 - `server_command(command)` — one player command to the server (`/tpa`, `/sethome`,
   `/warp pers`…): whatever a player may type, minus this stand's deny list — the
   server enforces the rights, and the reply comes back as ordinary chat lines. A

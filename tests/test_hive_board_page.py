@@ -45,6 +45,29 @@ class Stack:
 # --- the page and its assets are open; the data behind them is not (T-052) ----------------
 
 
+def test_slot_model_delegation_and_stale_receipt(tmp_path):
+    client = Stack(tmp_path).client
+    op = {"X-Operator-Key": KEY_OP}
+    lo = {"X-Node-Key": "sk-last-order"}
+    sister = {"X-Node-Key": "sk-node-one"}
+    route = "/board/models/LastOrder01"
+    selected = {"model": "zai/glm-5.3", "delegate": True}
+    assert client.post(route, headers=lo, json=selected).status_code == 401
+    request = client.post(route, headers=op, json=selected).json()
+    rev = request["revision"]
+    assert request["state"] == "requested"
+    execute = f"/lo/models/LastOrder01/{rev}"
+    assert client.post(execute, headers=sister).status_code == 401
+    assert client.post(execute, headers=lo).json()["state"] == "pending"
+    receipt = {"revision": rev, "applied": selected["model"]}
+    assert client.post("/node/model", headers=sister, json=receipt).json()["state"] == "applied"
+    assert client.post(execute, headers=lo).json()["state"] == "applied"
+    client.post(route, headers=op, json={"model": "zai/glm-5.3-flash"})
+    assert client.post(execute, headers=lo).status_code == 409
+    assert client.post("/node/model", headers=sister, json=receipt).json()["state"] == "pending"
+    assert Stack(tmp_path).client.get("/node/model", headers=sister).json()["desired"] == "zai/glm-5.3-flash"
+
+
 def test_board_page_opens_without_a_dialog(tmp_path: Path) -> None:
     """The shell carries no data — every number comes from the authed routes — so it
     loads anonymously and shows the login form instead of the browser's Basic box."""

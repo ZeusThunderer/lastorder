@@ -205,19 +205,17 @@ def build_inheritance(
     # the registry (nodes/<serial>/will.md)
     trimmed: list[str] = []
     for _, will in dead_sorted[:INHERITANCE_WILLS]:
-        kept: list[str] = []
-        for line in will.body.split("\n"):
-            if estimate_tokens("\n".join(kept + [line])) > INHERITANCE_WILL_TOKENS:
-                if kept:  # the head ends here, the marker says it is a head
-                    kept[-1] += " …"
-                else:  # a single line over the budget: hard char cut
-                    cut = len(line)
-                    while cut > 1 and estimate_tokens(line[:cut]) > INHERITANCE_WILL_TOKENS:
-                        cut = int(cut * 0.9)
-                    kept.append(line[:cut].rstrip() + " …")
-                break
-            kept.append(line)
-        trimmed.append("\n".join(kept))
+        text = will.body
+        if estimate_tokens(text) > INHERITANCE_WILL_TOKENS:
+            low, high = 0, len(text)
+            while low < high:
+                cut = (low + high + 1) // 2
+                if estimate_tokens(text[:cut] + " …") <= INHERITANCE_WILL_TOKENS:
+                    low = cut
+                else:
+                    high = cut - 1
+            text = text[:low].rstrip() + " …"
+        trimmed.append(text)
     notes = "\n\n".join(trimmed)
 
     term_lines = [f"{claim} — {key}" for claim, key in terms[:INHERITANCE_TERMS]]

@@ -451,6 +451,8 @@ class Executor:
         self._operator_low = self._operator_name.lower()
         self._perception = perception or Perception(descriptions={}, salt="", mode="plain")
         self._clock = clock
+        self._near_players: set[str] = set()
+        self._next_player_scan = 0.0
         self._wall_clock = wall_clock
         self._sleep = sleep
         self._tick_interval = tick_interval
@@ -718,6 +720,9 @@ class Executor:
                 return  # between death and the runner's respawn C1 holds still (review P1-2)
 
             self._life_clock()
+            if getattr(state, "in_game", False) and self._clock() >= self._next_player_scan:
+                self._next_player_scan = self._clock() + 2
+                self._player_presence()
             busy = bool(self._body.busy())
             request = self._threat_logic(state, hp, busy)
             if request is None:
@@ -792,6 +797,24 @@ class Executor:
                 fields["source"] = self._seen(source.name, "entity", str(source.kind))
             self._emit("game.damage", **fields)
         self._hp = hp
+
+    def _player_presence(self) -> None:
+        scan = getattr(self._body, "player_distances", None)
+        if scan is None:
+            return
+        try:
+            distances = scan()
+        except Exception:
+            log.debug("player scan unavailable", exc_info=True)
+            return
+        nearby = {name for name, distance in distances.items()
+                  if name.casefold() != self._username.casefold()
+                  and distance <= (10 if name in self._near_players else 8)}
+        for name in sorted(nearby - self._near_players):
+            self._emit("player.near", name=name)
+        for name in sorted(self._near_players - nearby):
+            self._emit("player.left", name=name)
+        self._near_players = nearby
 
     def _nearest_hostile(self) -> Any | None:
         hostiles = [e for e in self._body.entities(radius=16) if str(e.kind) in HOSTILE_TYPES]

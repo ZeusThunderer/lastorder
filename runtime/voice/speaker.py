@@ -84,6 +84,7 @@ class _Line:
     text: str
     said_at: float
     state: str = "waiting"    # waiting → playing → done, or waiting → dropped
+    heard_at: float | None = None
 
 
 @dataclass
@@ -147,6 +148,7 @@ class Speaker:
         self._active: _Part | None = None
         self._inflight: _Part | None = None   # being synthesized right now
         self._ids = 0
+        self._last_heard: float | None = None
         self._stop = threading.Event()
         self._threads = [
             threading.Thread(target=self._synth_loop, name="voice-synth", daemon=True),
@@ -171,11 +173,17 @@ class Speaker:
             dropped = self._drop_waiting()
             self._ids += 1
             line = _Line(self._ids, text, self._clock())
+            line.heard_at, self._last_heard = self._last_heard, None
             for i, piece in enumerate(parts):
                 self._todo.append(_Part(line, piece, first=i == 0, last=i == len(parts) - 1))
             self._cv.notify_all()
         self._flush_dropped(dropped, "replaced by a newer line")
         return len(dropped)
+
+    def heard(self, entry: dict) -> None:
+        with self._cv:
+            self._last_heard = self._clock()
+        self.interrupt(f"{entry.get('from')} spoke")
 
     def interrupt(self, why: str = "interrupted") -> int:
         """Drop the lines still waiting to start (sent to chat as text); the one playing
@@ -288,6 +296,7 @@ class Speaker:
                 if not pcm:
                     continue
                 if sock is None:
+                    ready_at = self._clock()
                     sock = self._connect()
                     sock.settimeout(35)
                 sock.sendall(pcm)
@@ -302,7 +311,13 @@ class Speaker:
             sock.shutdown(socket.SHUT_WR)
             while sock.recv(4096):
                 pass
-            self._record(part, started, ok=True, duration_s=count / BYTES_PER_S)
+            timing = {}
+            if part.first:
+                timing["say_to_pcm_s"] = round(ready_at - part.line.said_at, 3)
+                timing["pcm_to_inlet_s"] = round(started - ready_at, 3)
+                if part.line.heard_at is not None:
+                    timing["last_heard_to_say_s"] = round(part.line.said_at - part.line.heard_at, 3)
+            self._record(part, started, ok=True, duration_s=count / BYTES_PER_S, **timing)
         except Exception as exc:
             if not chatted and part.line.state != "dropped":
                 self._chat(part)

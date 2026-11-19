@@ -585,6 +585,11 @@ class Py4jBody:
     def state(self) -> BodyState:
         return parse_game_state(dict(self._call(lambda mc: mc.getGameState())))
 
+    def player_distances(self) -> dict[str, float]:
+        return {str(row["name"]): float(row["distance"])
+                for row in self._call(lambda mc: mc.getPlayersInfo(32))
+                if row.get("name") and row.get("distance") is not None}
+
     def entities(self, radius: int = 16, limit: int = 32) -> tuple[EntityInfo, ...]:
         """Entities within `radius` metres.
 

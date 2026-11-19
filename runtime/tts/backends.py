@@ -112,12 +112,22 @@ class FasterQwen3Backend:
 
     def stream(self, text):
         import numpy as np
+        import soxr
+        converter = None
         for chunk, sr, timing in self._model.generate_voice_clone_streaming(
             text=text, language="Russian", ref_audio=str(self._ref.wav),
-            ref_text=self._ref.text, chunk_size=12, max_new_tokens=512):
+            ref_text=self._ref.text, chunk_size=6, max_new_tokens=512):
             audio = np.asarray(chunk, dtype=np.float32).reshape(-1)
             if len(audio):
-                yield to_pcm48(audio.tobytes(), in_args=["-f", "f32le", "-ar", str(int(sr)), "-ac", "1"])
+                if converter is None:
+                    converter = soxr.ResampleStream(int(sr), OUT_RATE, 1, dtype="float32")
+                samples = converter.resample_chunk(audio)
+                if samples.size:
+                    yield np.clip(np.rint(samples * 32768), -32768, 32767).astype("<i2").tobytes()
+        if converter is not None:
+            tail = converter.resample_chunk(np.empty(0, dtype=np.float32), last=True)
+            if tail.size:
+                yield np.clip(np.rint(tail * 32768), -32768, 32767).astype("<i2").tobytes()
 
     def synthesize(self, text):
         return b"".join(self.stream(text))

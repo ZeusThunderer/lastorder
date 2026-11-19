@@ -1,0 +1,35 @@
+{
+ "name": "\u0411\u0435\u0440\u0451\u0437\u043e\u0432\u044b\u0439 \u043c\u0430\u044f\u043a",
+ "origin": [
+  135,
+  73,
+  38
+ ],
+ "planned": 42,
+ "right": 40,
+ "score": 0.952,
+ "by_block_right": {
+  "birch_planks": 36,
+  "glass": 3,
+  "glowstone": 1
+ },
+ "by_block_planned": {
+  "birch_planks": 37,
+  "glass": 4,
+  "glowstone": 1
+ },
+ "missing": {
+  "birch_planks": 1,
+  "glass": 1
+ },
+ "wrong": {},
+ "stray_inside": {},
+ "scaffold_ring": {
+  "oak_leaves": 3,
+  "birch_planks": 15,
+  "oak_planks": 3,
+  "cobblestone": 2
+ }
+}
+missing (local x,y,z): [[0, 1, 1, 'birch_planks'], [2, 2, 1, 'glass']]
+scaffold (local x,y,z): [[-2, 0, -2, 'oak_leaves'], [-2, 0, 0, 'birch_planks'], [-2, 0, 1, 'birch_planks'], [-2, 0, 2, 'birch_planks'], [-2, 0, 3, 'birch_planks'], [-2, 0, 4, 'birch_planks'], [-1, 0, 0, 'birch_planks'], [-1, 0, 1, 'birch_planks'], [-1, 0, 2, 'birch_planks'], [-1, 0, 3, 'birch_planks'], [-1, 0, 4, 'birch_planks'], [0, 0, 3, 'birch_planks'], [0, 0, 4, 'birch_planks'], [1, 0, 4, 'birch_planks'], [2, 0, 3, 'birch_planks'], [2, 0, 4, 'birch_planks'], [4, 0, 1, 'oak_planks'], [4, 0, 2, 'oak_planks'], [4, 0, 3, 'oak_planks'], [-2, 1, -2, 'oak_leaves'], [0, 1, -1, 'cobblestone'], [3, 1, 1, 'cobblestone'], [-2, 2, -2, 'oak_leaves']]

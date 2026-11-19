@@ -38,7 +38,7 @@ def create_app(backend: Backend | None = None) -> FastAPI:
     """`backend=None` loads the one from env at startup (the model takes ~a minute)."""
     state: dict[str, object] = {}
     lock = threading.Lock()
-    stt_lock = lock
+    stt_lock = threading.Lock() if os.environ.get("TTS_STT_DEVICE") == "cpu" else lock
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -80,7 +80,7 @@ def create_app(backend: Backend | None = None) -> FastAPI:
         return {"text": text}
 
     @app.post("/speak/stream")
-    async def speak_stream(body: SpeakIn):
+    async def speak_stream(body: SpeakIn, request: Request):
         text = normalize(body.text)
         if not text:
             return Response(status_code=204)
@@ -108,8 +108,14 @@ def create_app(backend: Backend | None = None) -> FastAPI:
         # Shield GPU work from cancellation: close the iterator only after its current
         # CUDA call returns, and always release the shared TTS/STT lock on disconnect.
         with anyio.CancelScope(shield=True):
-            await run_in_threadpool(lock.acquire)
+            while not lock.acquire(blocking=False):
+                if await request.is_disconnected():
+                    return Response(status_code=499)
+                await anyio.sleep(0.05)
             try:
+                if await request.is_disconnected():
+                    await run_in_threadpool(finish)
+                    return Response(status_code=499)
                 first = await run_in_threadpool(advance)
             except Exception as exc:
                 await run_in_threadpool(finish)

@@ -706,6 +706,9 @@ services:
       TTS_GPU_NAME: "${TTS_GPU_NAME:-RTX 2070}"
       TTS_DTYPE: "${TTS_DTYPE:-float32}"   # float16 produced NaN probabilities on this RTX 2070; measured float32 fallback
       TTS_VOICE_DIR: /voice
+      TTS_STT_DEVICE: "${TTS_STT_DEVICE:-cpu}"
+      TTS_STT_MODEL: "${TTS_STT_MODEL:-openai/whisper-large-v3-turbo}"
+      TTS_STT: "${TTS_STT:-1}"
       OPENROUTER_API_KEY: "${TTS_OPENROUTER_KEY:-}"
       TTS_OPENROUTER_MODEL: "${TTS_OPENROUTER_MODEL:-fish-audio/s2.1-pro}"
     ports:

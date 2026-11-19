@@ -50,7 +50,10 @@ export class RepeatGuard {
   }
   /** True when this call should be refused. */
   check(toolName: string, input: unknown): boolean {
-    if (/wait_events$/.test(toolName)) return false;
+    if (/wait_events$/.test(toolName)) {
+      if (Number((input as {timeout_s?: number})?.timeout_s) >= 5) this.reset();
+      return false;
+    }
     const key = toolName + JSON.stringify(input ?? null);
     this.count = key === this.last ? this.count + 1 : 1;
     this.last = key;
@@ -125,11 +128,28 @@ export default function misakaLink(pi: unknown) {
     sendUserMessage(content: string, options: { deliverAs: "steer" | "followUp" }): void;
   };
   let stopped = false;
+  let atTurnEnd: (() => Promise<void>) | null = null;
+  api.on("turn_end", async () => { await atTurnEnd?.(); });
   let running: Promise<void> | null = null;
+  type Model = {provider: string; id: string};
+  let pending: {hive: HiveClient; revision: number; desired: string; previous: Model} | null = null;
+  api.on("message_end", async (raw: unknown) => {
+    const message = (raw as {message?: Model & {role: string; model: string; stopReason: string; errorMessage?: string}}).message;
+    const attempt = pending;
+    if (!attempt || message?.role !== "assistant" ||
+        message.provider + "/" + message.model !== attempt.desired) return;
+    if (message.stopReason === "aborted") return;
+    const failed = message.stopReason === "error";
+    if (failed && !await api.setModel(attempt.previous)) return;
+    await attempt.hive.reportModel(attempt.revision, failed ?
+      attempt.previous.provider + "/" + attempt.previous.id : attempt.desired, failed ?
+      (/429|insufficient balance/i.test(message.errorMessage || "") ? "quota" : "unavailable") : undefined);
+    pending = null;
+  });
 
   api.on("session_start", async (_event: unknown, ctxRaw: unknown) => {
     const ctx = ctxRaw as {
-      model?: { provider: string };
+      model?: Model;
       cwd: string;
       modelRegistry: { find(provider: string, id: string): unknown };
       isIdle(): boolean;
@@ -138,7 +158,8 @@ export default function misakaLink(pi: unknown) {
     // A resumed session can retain an obsolete provider/model. Honour the
     // operator-rendered defaults before delivering the first network event.
     const settingsPath = path.join(agentDir, "settings.json");
-    if (ctx.model?.provider !== "opencode-go-gateway" && fs.existsSync(settingsPath)) {
+    if ((!ctx.model || !["opencode-go-gateway", "zai"].includes(ctx.model.provider))
+        && fs.existsSync(settingsPath)) {
       const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
       const selected = ctx.modelRegistry.find(settings.defaultProvider, settings.defaultModel);
       if (selected) await api.setModel(selected);
@@ -168,10 +189,40 @@ export default function misakaLink(pi: unknown) {
       desk: config.desk,
     });
     log("misakalink.start", { agentDir, serial: config.serial, slot: slot || null, desk: config.desk });
+    let syncing = false;
+    const syncModel = async (boundary: boolean) => {
+        if (syncing) return;
+        syncing = true;
+        try {
+          if (slot && !config.desk && (boundary || ctx.isIdle()) && ctx.model) {
+            const row = await config.hive.modelAssignment();
+            const current = ctx.model.provider + "/" + ctx.model.id;
+            if (row.desired && (row.state === "pending" || row.state === "applied" && current !== row.desired)
+                && pending?.revision !== row.revision && (boundary || ctx.isIdle())) {
+              const slash = row.desired.indexOf("/");
+              const next = ctx.modelRegistry.find(row.desired.slice(0, slash), row.desired.slice(slash + 1));
+              const previous = ctx.model;
+              if (next && await api.setModel(next)) {
+                pending = {hive: config.hive, revision: row.revision, desired: row.desired, previous};
+              } else {
+                await config.hive.reportModel(row.revision, current, "unavailable");
+              }
+            } else if (!row.desired && current !== row.applied) {
+              await config.hive.reportModel(row.revision, current);
+            }
+          }
+        } catch (err) {
+          log("misakalink.model_failed", {error: String(err)});
+        } finally {
+          syncing = false;
+        }
+    };
+    atTurnEnd = () => syncModel(true);
     stopped = false;
     running = (async () => {
       while (!stopped) {
         let pause = link.pollS * 1000;
+        await syncModel(false);
         try {
           pause = (await link.pollOnce()) * 1000;
         } catch (err) {

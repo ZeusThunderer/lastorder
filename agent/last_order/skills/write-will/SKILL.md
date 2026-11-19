@@ -33,6 +33,9 @@ start over.
 
 ## After writing
 
+If you met someone, pass on their name, the landmark and any unfinished
+promise. Distinguish what they said from what you saw. Omit unknown details.
+
 - `submit_will(text)` — the first call of the session once your files are read; pass only
   the will text (the 3-10 lines); authorisation and service fields are not your business.
 - Stop. Do not observe, do not act, do not plan: the body belongs to the next node now.

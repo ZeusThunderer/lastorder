@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sys
 from collections import Counter
+from functools import lru_cache
 
 from py4j.java_gateway import GatewayParameters, JavaGateway
 
@@ -27,6 +28,7 @@ def main(schematic: str, origin: tuple[int, int, int]) -> None:
     gw = JavaGateway(gateway_parameters=GatewayParameters(address=host, port=port, auto_convert=True))
     mc = gw.entry_point
     try:
+        @lru_cache(maxsize=None)
         def read(x: int, y: int, z: int) -> str:
             m = dict(mc.getBlockAt(int(x), int(y), int(z)))
             if str(m.get("is_air", "")).lower() == "true":
@@ -66,11 +68,22 @@ def main(schematic: str, origin: tuple[int, int, int]) -> None:
                 scaffold[got] += 1
                 cells["scaffold"].append([x - ox, y - oy, z - oz, got])
         total = len(plan.cells)
+        directions = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
+        open_blocks = {"air", "short_grass", "tall_grass", "water"}
+        sealed = [cell for cell in cells["missing"] if all(
+            read(ox + cell[0] + dx, oy + cell[1] + dy, oz + cell[2] + dz) not in open_blocks
+            for dx, dy, dz in directions)]
+        doorway = None
+        if plan.entrance is not None:
+            ex, ey, ez = plan.entrance
+            doorway = [read(ox + ex, oy + ey + dy, oz + ez) for dy in (0, 1)]
         print(json.dumps({
             "name": plan.name, "origin": origin, "planned": total,
             "right": sum(right.values()), "score": round(sum(right.values()) / total, 3),
             "by_block_right": dict(right), "by_block_planned": dict(plan.materials),
             "missing": dict(missing), "wrong": dict(wrong),
+            "sealed_missing": sealed, "exposed_missing": [c for c in cells["missing"] if c not in sealed],
+            "doorway_feet_head": doorway,
             "stray_inside": dict(stray), "scaffold_ring": dict(scaffold),
         }, indent=1))
         for kind, rows in cells.items():

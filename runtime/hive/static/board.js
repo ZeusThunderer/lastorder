@@ -888,8 +888,31 @@ function tier(value, yes, no) {
 function dockerHealth(value) {
   return { healthy: "Проверка пройдена", starting: "Проверка запускается", unhealthy: "Проверка не пройдена" }[value];
 }
+const modelDrafts = new Map();
 function slotControls(slot) {
   const holder = el("div", "button-row slot-actions");
+  const slotName = "LastOrder0" + slot;
+  const assignment = state.network?.slot_models?.[slotName];
+  if (assignment) {
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Модель слота " + slot);
+    for (const entry of state.network.model_catalog) {
+      select.add(new Option(entry.name + " · " + entry.billing, entry.provider + "/" + entry.id));
+    }
+    select.value = modelDrafts.get(slot) || assignment.desired || assignment.applied || "";
+    select.onchange = () => modelDrafts.set(slot, select.value);
+    const phases = {requested: "ожидает LO", pending: "ожидает ответа модели", applied: "применена",
+      failed: "модель недоступна", default: "по умолчанию"};
+    holder.append(el("p", "", "Текущая модель: " + (assignment.applied || "нет данных") +
+      " · " + (assignment.error === "quota" ? "у провайдера исчерпана квота" : phases[assignment.state])), select);
+    for (const delegate of [false, true]) {
+      const apply = button(delegate ? "Поручить LO" : "Применить модель");
+      apply.onclick = () => select.value && sendMutation("/board/models/" + slotName,
+        {model: select.value, delegate}, {success: () => { modelDrafts.delete(slot); void loadNetwork(); },
+          failure: message => report($("infra-feedback"), message)});
+      holder.append(apply);
+    }
+  }
   const slots = { slot_up: "Поднять", slot_restart: "Перезапустить mind", slot_down: "Остановить" };
   for (const [key, label] of Object.entries(slots)) {
     const control = button(label, key === "slot_down" ? "danger" : "");

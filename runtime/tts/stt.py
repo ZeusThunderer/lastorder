@@ -66,10 +66,11 @@ class WhisperStt:
 def stt_from_env() -> WhisperStt | None:
     if os.environ.get("TTS_STT", "1") != "1":
         return None
+    device = os.environ.get("TTS_STT_DEVICE") or os.environ.get("TTS_DEVICE", "cuda:0")
     return WhisperStt(
         model_id=os.environ.get("TTS_STT_MODEL", "openai/whisper-large-v3-turbo"),
-        device=os.environ.get("TTS_DEVICE", "cuda:0"),
-        dtype="float16",
+        device=device,
+        dtype="float32" if device == "cpu" else "float16",
     )
 
 

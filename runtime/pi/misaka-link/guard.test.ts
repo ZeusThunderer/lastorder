@@ -16,6 +16,10 @@ test("the same call REPEAT_MAX times in a row is refused; waits and varied calls
     assert.equal(h.check("body_wait_events", { timeout_s: 60 }), false);
   }
   for (let i = 0; i < 20; i++) assert.equal(h.check("body_wait_events", { timeout_s: 60 }), false);
+  for (let i = 0; i < 20; i++) {
+    assert.equal(h.check("body_build_status", {}), false);
+    assert.equal(h.check("body_wait_events", { timeout_s: 15 }), false);
+  }
   g.reset();
   assert.equal(g.check("bash", date), false); // a new run starts clean
 });

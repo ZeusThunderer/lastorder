@@ -103,6 +103,14 @@ export class HiveClient {
     return response;
   }
 
+  async modelAssignment() {
+    return (await this.request("GET", "/node/model")).json();
+  }
+
+  async reportModel(revision: number, applied: string, error?: "unavailable" | "quota") {
+    await this.request("POST", "/node/model", { revision, applied, error });
+  }
+
   /** GET /board/feed?since= — the board events after the cursor. */
   async feed(cursor: number | null): Promise<FeedResponse> {
     const path = cursor === null ? "/board/feed" : `/board/feed?since=${cursor}`;

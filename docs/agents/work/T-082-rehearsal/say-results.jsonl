@@ -1,0 +1,20 @@
+{"ts": 1795104785.1759183, "kind": "voice", "text": "Привет, я проверяю голос.", "line": 1, "wait_s": 1.27, "ok": true, "duration_s": 2.88, "say_to_pcm_s": 1.249, "pcm_to_inlet_s": 0.023, "last_heard_to_say_s": 55.087}
+{"ts": 1795104794.5767229, "kind": "voice", "text": "Я готова начать строительство.", "line": 2, "wait_s": 1.77, "ok": true, "duration_s": 2.64, "say_to_pcm_s": 1.767, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104800.6495042, "kind": "voice", "text": "Нужно собрать дерево и камень.", "line": 3, "wait_s": 1.89, "ok": true, "duration_s": 2.32, "say_to_pcm_s": 1.887, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104805.0554478, "kind": "voice", "text": "Покажи ближайшую берёзу.", "line": 4, "wait_s": 1.56, "ok": true, "duration_s": 1.6, "say_to_pcm_s": 1.563, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104811.9482026, "kind": "voice", "text": "Верстак уже готов.", "line": 5, "wait_s": 1.42, "ok": true, "duration_s": 1.12, "say_to_pcm_s": 1.421, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104817.2143912, "kind": "voice", "text": "Я нашла подходящее место для дома.", "line": 6, "wait_s": 1.35, "ok": true, "duration_s": 2.48, "say_to_pcm_s": 1.345, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104822.7455711, "kind": "voice", "text": "Сначала построим фундамент.", "line": 7, "wait_s": 2.42, "ok": true, "duration_s": 2.24, "say_to_pcm_s": 2.416, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104827.7761397, "kind": "voice", "text": "Мне нужны ещё четыре доски.", "line": 8, "wait_s": 1.38, "ok": true, "duration_s": 2.32, "say_to_pcm_s": 1.381, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104833.2317772, "kind": "voice", "text": "Печь работает, скоро будет стекло.", "line": 9, "wait_s": 1.54, "ok": true, "duration_s": 2.48, "say_to_pcm_s": 1.538, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104841.8032658, "kind": "voice", "text": "Проверяю инвентарь перед дорогой.", "line": 10, "wait_s": 1.47, "ok": true, "duration_s": 2.24, "say_to_pcm_s": 1.474, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104846.5848665, "kind": "voice", "text": "Остановись и подожди меня.", "line": 11, "wait_s": 1.45, "ok": true, "duration_s": 2.48, "say_to_pcm_s": 1.448, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104852.8585882, "kind": "voice", "text": "Расскажи, что ты сейчас видишь.", "line": 12, "wait_s": 1.56, "ok": true, "duration_s": 2.88, "say_to_pcm_s": 1.562, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104857.0656552, "kind": "voice", "text": "Материалов пока недостаточно.", "line": 13, "wait_s": 1.47, "ok": true, "duration_s": 1.92, "say_to_pcm_s": 1.469, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104863.702464, "kind": "voice", "text": "Я отправила сестре новую схему.", "line": 14, "wait_s": 1.43, "ok": true, "duration_s": 2.16, "say_to_pcm_s": 1.434, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104867.1045384, "kind": "voice", "text": "Проверим стены и крышу.", "line": 15, "wait_s": 1.36, "ok": true, "duration_s": 1.52, "say_to_pcm_s": 1.357, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104870.4003813, "kind": "voice", "text": "Сегодня хорошая погода.", "line": 16, "wait_s": 1.39, "ok": true, "duration_s": 1.44, "say_to_pcm_s": 1.393, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104877.5478337, "kind": "voice", "text": "Я слышу тебя во время разговора.", "line": 17, "wait_s": 1.54, "ok": true, "duration_s": 2.08, "say_to_pcm_s": 1.54, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104883.2896736, "kind": "voice", "text": "Дом почти готов, осталось окно.", "line": 18, "wait_s": 1.55, "ok": true, "duration_s": 2.72, "say_to_pcm_s": 1.553, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104888.2616265, "kind": "voice", "text": "Сохраняю результаты проверки.", "line": 19, "wait_s": 1.51, "ok": true, "duration_s": 1.84, "say_to_pcm_s": 1.505, "pcm_to_inlet_s": 0.0}
+{"ts": 1795104894.7504807, "kind": "voice", "text": "Спасибо, проверка завершена.", "line": 20, "wait_s": 1.43, "ok": true, "duration_s": 2.8, "say_to_pcm_s": 1.427, "pcm_to_inlet_s": 0.0}
