@@ -257,15 +257,19 @@ button.primary:not(:disabled):hover { background:var(--teal); }
 .lo-portrait {
   grid-area:portrait;
   display:block;
-  height:clamp(4rem,6vw,6rem);
-  width:auto;
+  height:clamp(104px,15vw,152px);
+  width:clamp(115px,18vw,196px);
+  object-view-box:inset(0% 20% 36% 8%);
+  object-fit:cover;
+  object-position:center 25%;
   mix-blend-mode:multiply;
 }
 @media(max-width:56rem) {
-  .top { grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"identity portrait" "actions actions"; row-gap:.4rem; }
+  .top { grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"identity portrait" "actions portrait"; row-gap:.4rem; }
   .top-actions { width:100%; justify-content:space-between; }
 }
-@media(max-width:25rem) { .identity { gap:.55rem; } .imprint { padding-right:.55rem; } .identity h1 { font-size:1.8rem; } }
+@media(max-width:36rem) { .identity { align-items:start; flex-direction:column; gap:.3rem; } .imprint { border:0; } .top { grid-template-areas:"identity portrait" "actions actions"; } }
+@media(max-width:25rem) { .identity { gap:.3rem; } .imprint { padding-right:.55rem; } .identity h1 { font-size:1.8rem; } }
 @media(max-width:36rem) {
   .top::after { left:67%; width:1.1rem; border-inline-width:2px; }
   #navigation a,#logout { padding-inline:.38rem; font-size:.88rem; }
