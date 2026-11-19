@@ -719,10 +719,11 @@ services:
     security_opt: ["no-new-privileges:true"]
     environment:
       HF_HOME: /data/hf
-      TTS_BACKEND: "${TTS_BACKEND:-faster-qwen3}"
+      TTS_BACKEND: "${TTS_BACKEND:-f5-russian}"
       TTS_QWEN_MODEL: "${TTS_QWEN_MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-Base}"
-      TTS_GPU_NAME: "${TTS_GPU_NAME:-RTX 2070}"
+      TTS_GPU_NAME: "${TTS_GPU_NAME:-5070 Ti}"
       TTS_DTYPE: "${TTS_DTYPE:-float32}"   # float16 produced NaN probabilities on this RTX 2070; measured float32 fallback
+      TTS_F5_WEIGHTS: "${TTS_F5_WEIGHTS:-}"
       TTS_VOICE_DIR: /voice
       TTS_STT_DEVICE: "${TTS_STT_DEVICE:-cpu}"
       TTS_STT_MODEL: "${TTS_STT_MODEL:-openai/whisper-large-v3-turbo}"

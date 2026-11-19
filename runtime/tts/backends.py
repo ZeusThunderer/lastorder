@@ -173,6 +173,9 @@ class OpenRouterBackend:
 
 def from_env() -> Backend:
     """The backend this service runs, from its env (compose `tts`)."""
+    if os.environ.get("TTS_BACKEND") == "f5-russian":
+        from runtime.tts.russian_f5 import RussianF5
+        return RussianF5(os.environ.get("TTS_F5_REFERENCE", "/voice/cloud"))
     ref = VoiceRef.load(Path(os.environ.get("TTS_VOICE_DIR", "/voice")))
     kind = os.environ.get("TTS_BACKEND", "qwen3")
     if kind == "faster-qwen3":

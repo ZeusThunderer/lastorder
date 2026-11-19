@@ -898,7 +898,7 @@ function slotControls(slot) {
   if (source) {
     const select = document.createElement("select");
     select.setAttribute("aria-label", "Источник голоса слота " + slot);
-    select.add(new Option("Локальный Qwen · своя GPU", "local"));
+    select.add(new Option("Локальный TTS · своя GPU", "local"));
     select.add(new Option("OpenRouter · Fish Audio S2.1 Pro · платно", "openrouter"));
     select.value = voiceDrafts.get(slot) || source;
     select.onchange = () => voiceDrafts.set(slot, select.value);
@@ -906,7 +906,7 @@ function slotControls(slot) {
     apply.onclick = () => sendMutation("/board/voice/" + slotName, {source: select.value},
       {success: () => { voiceDrafts.delete(slot); void loadNetwork(); },
        failure: message => report($("infra-feedback"), message)});
-    holder.append(el("p", "", "Озвучка: " + (source === "local" ? "локальный Qwen" : "OpenRouter")),
+    holder.append(el("p", "", "Озвучка: " + (source === "local" ? "локальный TTS" : "OpenRouter")),
       select, apply);
   }
   if (assignment) {

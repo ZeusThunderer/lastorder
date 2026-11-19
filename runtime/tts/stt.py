@@ -39,13 +39,12 @@ class WhisperStt:
 
     def __init__(self, *, model_id: str, device: str, dtype: str):
         import torch
-        from transformers import pipeline
+        from transformers import AutoProcessor, WhisperForConditionalGeneration
 
         log.info("loading %s on %s", model_id, device)
-        self._pipe = pipeline(
-            "automatic-speech-recognition", model=model_id,
-            torch_dtype=getattr(torch, dtype), device=device,
-        )
+        self.processor = AutoProcessor.from_pretrained(model_id)
+        self.model = WhisperForConditionalGeneration.from_pretrained(
+            model_id, dtype=getattr(torch, dtype)).to(device).eval()
 
     def transcribe(self, pcm48: bytes) -> str:
         audio = to_16k_float(pcm48)
@@ -53,11 +52,12 @@ class WhisperStt:
             return ""
         if float(np.abs(audio).max()) < 0.01:  # silence: Whisper would invent a caption
             return ""
-        out = self._pipe(
-            {"raw": audio, "sampling_rate": STT_RATE},
-            generate_kwargs={"language": "russian", "task": "transcribe"},
-        )
-        text = str(out.get("text", "")).strip()
+        import torch
+        features = self.processor.feature_extractor(audio, sampling_rate=STT_RATE, return_tensors="pt")
+        with torch.inference_mode():
+            tokens = self.model.generate(features.input_features.to(self.model.device, self.model.dtype),
+                                         language="russian", task="transcribe")
+        text = self.processor.batch_decode(tokens, skip_special_tokens=True)[0].strip()
         if any(h in text.lower() for h in HALLUCINATIONS):
             return ""
         return text

@@ -15,6 +15,8 @@ ENV PATH=/opt/venv/bin:$PATH
 RUN pip install --no-cache-dir torch==2.8.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 RUN pip install --no-cache-dir faster-qwen3-tts==0.5.4 qwen-tts-hf==0.1.1.post1 transformers==5.15.1 soxr==1.1.0 soundfile numpy num2words httpx "fastapi>=0.115" "uvicorn>=0.30"
 
+RUN pip install --no-cache-dir f5-tts==1.1.22 ruaccent==1.5.8.3
+
 WORKDIR /app
 COPY runtime/__init__.py ./runtime/__init__.py
 COPY runtime/tts ./runtime/tts
