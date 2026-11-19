@@ -53,13 +53,14 @@ def create_app(backend: Backend | None = None) -> FastAPI:
     app = FastAPI(lifespan=lifespan)
 
     @app.get("/health")
-    def health() -> dict[str, str]:
+    def health() -> dict[str, str | bool]:
         return {"backend": state["backend"].name, "rate": str(OUT_RATE),
                 "model": str(getattr(state["backend"], "model_id", "")),
                 "gpu": str(getattr(state["backend"], "gpu", "")),
                 "gpu_uuid": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
                 "first_chunk_s": str(state.get("first_chunk_s", "")),
-                "ready": str(getattr(state["backend"], "ready", True))}
+                "ready": str(getattr(state["backend"], "ready", True)),
+                "stt_ready": state.get("stt") is not None}
 
     @app.post("/transcribe")
     async def transcribe(request: Request) -> dict[str, str]:

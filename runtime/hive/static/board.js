@@ -1,689 +1,1097 @@
 "use strict";
-// The operator's board (T-049, docs/architecture/TASKBOARD.md section 12).
-// Vanilla JS, no build step, no external resources, same-origin relative paths.
-// Agent-supplied text reaches the DOM through textContent alone — never through
-// a markup sink — so a hostile entry can only render as plain text.
 
-const ENTRIES_LIMIT = 200;
+const $ = (id) => document.getElementById(id);
+const sections = {
+  overview: "Обзор", tasks: "Задачи", requests: "Запросы",
+  events: "События", history: "История", network: "Состояние сети",
+};
+const kinds = { task: "Задача", request: "Запрос", message: "Сообщение", alarm: "Тревога" };
+const statuses = {
+  open: "Открыто", taken: "В работе", needs_input: "Ждёт уточнения",
+  done: "Выполнено", failed: "Не выполнено", declined: "Отказ", canceled: "Отменено",
+  approved: "Одобрено", denied: "Отклонено", answered: "Есть ответ",
+  acked: "Получение подтверждено", cleared: "Снято",
+};
+const lanes = {
+  alarms: { title: "Открытые тревоги", section: "events", empty: "Открытых тревог нет.", link: "К открытым тревогам" },
+  decisions: { title: "Запросы на решение", section: "requests", empty: "Запросов на решение нет.", link: "К запросам на решение" },
+  clarify: { title: "Нужны уточнения", section: "tasks", empty: "Задач, ожидающих вашего уточнения, нет.", link: "К задачам, ожидающим уточнения" },
+  execution: { title: "Очередь исполнения", section: "requests", empty: "Заявок на исполнение нет.", link: "К очереди исполнения" },
+};
+const filterStatuses = {
+  tasks: ["open", "taken", "needs_input"], requests: ["open", "taken"], events: ["open"],
+  history: ["done", "failed", "declined", "canceled", "approved", "denied", "answered", "acked", "cleared"],
+};
+const alarmTypes = {
+  harness_failover: "Сменился исполнитель сессии", session_missing: "Сессия недоступна",
+  stuck: "Сессия зависла", delivery_failing: "Сбой доставки", quota: "Лимит исчерпан",
+  emergency_will: "Аварийное завещание", mind_outdated: "Устаревшая версия mind",
+};
+const actionSpecs = {
+  reply: { label: "Ответить", required: true },
+  clarify: { label: "Уточнить задачу", target: "taken", required: true, primary: true },
+  approve: { label: "Одобрить", target: "approved", primary: true },
+  edit: { label: "Одобрить с правкой", target: "approved" },
+  deny: { label: "Отклонить", target: "denied", required: true, danger: true },
+  respond: { label: "Дать решение", target: "answered", required: true },
+  ack: { label: "Подтвердить получение", target: "acked", primary: true, noText: true },
+  cancel: { label: "Отменить запись", target: "canceled", danger: true },
+  revoke: { label: "Отозвать грант", danger: true, noText: true },
+};
+const wide = matchMedia("(min-width: 75rem)");
+const dateFormat = new Intl.DateTimeFormat("ru-RU", {
+  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+});
+const detailDateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
+const activeFilter = ["lane", "status", "to"];
+const state = {
+  route: readRoute(), q: "", view: null, entry: null, seenAt: null,
+  listFresh: false, detailFresh: false, monitorFresh: false, network: null,
+  source: null, connected: false, loading: false, initialError: false, pending: false,
+  listSeq: 0, detailSeq: 0, statusSeq: 0, pages: 1, busy: false,
+  action: null, returnFocus: null, returnScroll: 0, targetLost: false,
+};
+history.scrollRestoration = "manual";
 
-const state = { entries: [], alive: [], filter: "" };
-
-const KIND_LABEL = { task: "задача", request: "запрос", message: "сообщение", alarm: "тревога" };
-const TERMINAL = new Set([
-  "done", "failed", "declined", "canceled", "approved", "denied", "answered", "acked",
-  "cleared",
-]);
-
-// --- small DOM helpers -----------------------------------------------------------------
-
-function el(tag, cls, text) {
+function el(tag, className, text) {
   const node = document.createElement(tag);
-  if (cls) node.className = cls;
+  if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
 }
-
-function liveSerials() {
-  return new Set(state.alive.map((brief) => String(brief.serial)));
+function button(label, className) {
+  const node = el("button", className, label);
+  node.type = "button";
+  return node;
 }
-
-// A board name is `operator` | `last-order` | `net` | `system` | `runner:<slot>`
-// | a plain digit string (a node serial). Serials carry no name preset (ADR-018);
-// the slot label from /registry/alive is infrastructure, not the persona name.
-function whoTag(who) {
-  if (who === "operator") return { label: "оператор", dead: false };
-  if (who === "last-order") return { label: "Last Order", dead: false };
-  if (who === "net") return { label: "net", dead: false };
-  if (who === "system") return { label: "system", dead: false };
-  if (who === "infra") return { label: "инфра-исполнитель", dead: false };
-  if (typeof who === "string" && who.startsWith("runner:")) {
-    return { label: who, dead: false };
+function report(node, message) {
+  node.textContent = message || "";
+  node.hidden = !message;
+}
+function say(message) { $("announcement").textContent = message; }
+function formatDate(iso, format = dateFormat) {
+  const value = new Date(iso || NaN);
+  return Number.isFinite(value.getTime()) ? format.format(value) : "Время неизвестно";
+}
+function time(iso) {
+  const node = el("time", "", formatDate(iso));
+  if (iso) node.dateTime = iso;
+  return node;
+}
+function serial(value) {
+  return String(value).padStart(5, "0");
+}
+function actor(value) {
+  const labels = { operator: "Оператор", "last-order": "LO", net: "Вся сеть", system: "Система", infra: "Исполнитель" };
+  if (/^\d+$/.test(value)) return "Сестра " + serial(value);
+  if (value?.startsWith("runner:")) return "Раннер " + value.slice(7);
+  return Object.hasOwn(labels, value) ? labels[value] : String(value ?? "—");
+}
+function statusText(entry) {
+  const node = el("span", "status-text", entry.kind === "message" ? "Сообщение" : statuses[entry.status] || entry.status);
+  node.dataset.status = entry.status;
+  return node;
+}
+function readRoute() {
+  const query = new URLSearchParams(location.search);
+  const name = query.get("section");
+  const section = Object.hasOwn(sections, name) ? name : "overview";
+  const lane = query.get("lane");
+  const status = query.get("status");
+  const to = query.get("to");
+  const id = Number(query.get("entry"));
+  return {
+    section, lane: Object.hasOwn(lanes, lane) && lanes[lane].section === section ? lane : "",
+    status: filterStatuses[section]?.includes(status) ? status : "",
+    to: filterStatuses[section] && /^(?:net|last-order|operator|\d+)$/.test(to || "") ? to : "",
+    id: Number.isSafeInteger(id) && id > 0 ? id : null,
+  };
+}
+function address(route) {
+  const query = new URLSearchParams();
+  if (route.section !== "overview") query.set("section", route.section);
+  for (const key of activeFilter) if (route[key]) query.set(key, route[key]);
+  if (route.id) query.set("entry", route.id);
+  return "/board" + (query.size ? "?" + query : "");
+}
+function listKey(route) {
+  return [route.section, route.lane, route.status, route.to].join("|");
+}
+function navigate(route, { replace = false, pop = false, trigger = null } = {}) {
+  const previous = state.route;
+  const changedList = listKey(previous) !== listKey(route);
+  const changedEntry = previous.id !== route.id;
+  if (!pop && (changedList || changedEntry)) {
+    history[replace ? "replaceState" : "pushState"](null, "", address(route));
   }
-  if (typeof who === "string" && /^\d+$/.test(who)) {
-    const brief = state.alive.find((b) => String(b.serial) === who);
-    return { label: brief ? who + " · " + brief.slot : who, dead: !brief };
+  state.route = route;
+  $("menu").setAttribute("aria-expanded", "false");
+  if (changedList) {
+    if (route.section !== previous.section) {
+      state.q = "";
+      $("search").value = "";
+    }
+    state.pages = 1;
+    state.view = null;
+    state.listFresh = false;
+    state.listSeq++;
+    $("list").replaceChildren();
+    state.initialError = false;
+    renderView();
+    if (!route.id) {
+      window.scrollTo(0, 0);
+      $("section-heading").focus({ preventScroll: true });
+    }
   }
-  return { label: String(who), dead: false };
-}
-
-function nameSpan(who) {
-  const tag = whoTag(who);
-  return el("span", tag.dead ? "dead" : null, tag.label);
-}
-
-function fmtTime(iso) {
-  const at = new Date(iso);
-  if (isNaN(at.getTime())) return "";
-  return at.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-}
-
-// --- API --------------------------------------------------------------------------------
-
-const KEY_STORAGE = "lo_board_key";
-state.key = sessionStorage.getItem(KEY_STORAGE) || "";
-
-async function api(path, method, body) {
-  const options = method === "GET"
-    ? {}
-    : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) };
-  if (state.key) {
-    options.headers = Object.assign({}, options.headers, { "X-Operator-Key": state.key });
+  if (changedEntry) {
+    if (!previous.id && route.id) {
+      state.returnFocus = trigger || document.activeElement;
+      state.returnScroll = window.scrollY;
+    }
+    state.entry = null;
+    state.detailFresh = false;
+    state.detailSeq++;
+    closeAction();
+    $("recovered").replaceChildren();
+    report($("action-feedback"), "");
+    report($("detail-state"), "");
+    placeDetails(true);
+    annotateSelection();
+    if (!changedList && route.id) loadDetail();
+    if (previous.id && !route.id && !changedList) {
+      window.scrollTo(0, state.returnScroll);
+      (state.returnFocus?.isConnected ? state.returnFocus : $("section-heading")).focus({ preventScroll: true });
+    }
   }
-  const response = await fetch(path, options);
+  if (changedList) refresh();
+}
+function gotoSection(section, lane = "") {
+  navigate({ section, lane, status: "", to: "", id: null });
+}
+function linkFor(section, lane = "") {
+  const link = el("a", "", sections[section]);
+  link.href = address({ section, lane });
+  link.dataset.section = section;
+  if (lane) link.dataset.lane = lane;
+  return link;
+}
+function sameTab(event) {
+  return event.button === 0 && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey;
+}
+function updateNav() {
+  for (const link of $("navigation").querySelectorAll("[data-section]")) {
+    if (link.dataset.section === state.route.section) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+    const count = link.querySelector(".nav-count");
+    if (count) count.textContent = state.view?.counts?.[link.dataset.section] ?? "";
+  }
+  $("menu").textContent = sections[state.route.section];
+}
+
+async function api(path, { method = "GET", body, signal } = {}) {
+  const timeout = AbortSignal.timeout(8000);
+  let response;
+  try {
+    response = await fetch(path, {
+      method, cache: "no-store", signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      ...(body !== undefined ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
+    });
+  } catch (cause) {
+    throw Object.assign(new Error("Недоступна связь с доской"), { cause, network: true });
+  }
   if (!response.ok) {
-    if (response.status === 401 && state.key) {
-      // the stored key no longer opens the board (changed on the stand): re-login
-      sessionStorage.removeItem(KEY_STORAGE);
-      state.key = "";
-      showLogin("пароль больше не подходит — войди заново");
-    }
-    let note = response.status + " " + response.statusText;
-    try {
-      const data = await response.json();
-      if (data && data.error) note = data.error.kind + ": " + data.error.message;
-    } catch (notJson) {
-      // keep the status line
-    }
-    throw new Error(note);
+    const payload = await response.json().catch(() => ({}));
+    throw Object.assign(new Error("Доска отклонила запрос"), {
+      status: response.status, kind: payload.error?.kind, network: response.status >= 500,
+    });
   }
   return response.json();
 }
 
-async function doAction(path, body) {
+function openStream() {
+  if (state.source) return;
+  const source = new EventSource("/board/stream");
+  state.source = source;
+  source.onopen = () => {
+    state.connected = true;
+    refresh();
+  };
+  source.onerror = () => {
+    state.connected = false;
+    state.listFresh = state.detailFresh = state.monitorFresh = false;
+    updateConnection();
+    queueRefresh();
+  };
+  source.addEventListener("board", queueRefresh);
+}
+let refreshTimer;
+function queueRefresh() {
+  if (refreshTimer) return;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    refresh();
+  }, 350);
+}
+function setBoardAvailable() {
+  $("board").hidden = false;
+  $("login").hidden = true;
+  $("login-password").value = "";
+}
+function showLogin(message = "") {
+  state.source?.close();
+  state.source = null;
+  state.connected = state.listFresh = state.detailFresh = state.monitorFresh = false;
+  state.listSeq++;
+  state.detailSeq++;
+  state.statusSeq++;
+  $("detail-dialog").close();
+  $("composer").close();
+  closeAction();
+  $("board").hidden = true;
+  $("detail").hidden = true;
+  $("login").hidden = false;
+  report($("login-error"), message);
+  $("login-password").focus();
+}
+function updateConnection() {
+  const current = state.listFresh;
+  const header = $("connection");
+  header.textContent = state.connected && current ? "Связь активна"
+    : current ? "Связь: снимок обновлён" : state.seenAt || state.initialError ? "Связь прервана" : "Связь проверяется";
+  header.dataset.state = current ? "live" : state.seenAt || state.initialError ? "offline" : "";
+  $("ribbon").hidden = current || !state.seenAt;
+  const offline = !current && state.seenAt
+    ? "Связь прервана. Последнее обновление " + formatDate(state.seenAt) + "." : "";
+  report($("ribbon-text"), offline);
+  $("compose-connection").hidden = !offline;
+  report($("compose-connection-text"), offline);
+  $("detail-retry").hidden = !state.route.id || (current && (state.detailFresh || !state.entry));
+  $("create").disabled = !current || state.pending;
+  updateComposer();
+  updateAction();
+  updateInfraControls();
+}
+
+function viewPath(route, cursor) {
+  const params = new URLSearchParams({ section: route.section === "network" ? "requests" : route.section });
+  if (route.section === "network") params.set("lane", "execution");
+  else for (const key of activeFilter) if (route[key]) params.set(key, route[key]);
+  if (cursor) params.set("before", cursor);
+  return "/board/view?" + params;
+}
+async function loadView({ more = false } = {}) {
+  if (more && !state.view?.next_cursor) return false;
+  const seq = ++state.listSeq;
+  const route = { ...state.route };
+  const q = state.q.trim();
+  const search = q ? { method: "POST", body: { q } } : {};
+  const depth = state.pages;
+  let cursor = more ? state.view?.next_cursor : null;
+  let entries = more ? [...state.view.entries] : [];
+  let view;
+  state.loading = !state.view;
+  state.busy = true;
+  $("more").disabled = true;
+  if (seq === state.listSeq && state.loading) renderView();
   try {
-    await api(path, "POST", body);
-    await refresh(); // the SSE event will call it again; better twice than late
+    for (let page = 0; page < (more ? 1 : depth); page++) {
+      view = await api(viewPath(route, cursor), search);
+      if (seq !== state.listSeq) return false;
+      entries.push(...view.entries);
+      cursor = view.next_cursor;
+      if (!cursor) break;
+    }
+    state.view = { ...view, entries: [...new Map(entries.map((entry) => [entry.id, entry])).values()] };
+    if (more) state.pages++;
+    state.listFresh = true;
+    state.seenAt = new Date().toISOString();
+    state.initialError = false;
+    setBoardAvailable();
+    if (state.route.id && $("detail").hidden) placeDetails(true);
+    openStream();
     return true;
   } catch (error) {
-    toast(String(error.message || error));
-    return false; // the caller keeps the form with its typed text
+    if (seq !== state.listSeq) return false;
+    if (error.status === 401) showLogin(state.seenAt ? "Войдите снова, чтобы открыть доску." : "");
+    state.listFresh = false;
+    state.initialError = true;
+    return false;
+  } finally {
+    if (seq === state.listSeq) {
+      state.loading = state.busy = false;
+      renderView();
+      updateConnection();
+    }
   }
 }
-
-let toastTimer = null;
-
-function toast(message) {
-  const box = document.getElementById("toast");
-  box.textContent = message;
-  box.hidden = false;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { box.hidden = true; }, 7000);
-}
-
-// --- data -------------------------------------------------------------------------------
-
 async function refresh() {
+  if (!$("login").hidden) return false;
+  const tasks = [loadView()];
+  if (state.route.id) tasks.push(loadDetail());
+  if (state.route.section === "network") tasks.push(loadNetwork());
+  const [view] = await Promise.all(tasks);
+  return view;
+}
+
+function options(select, items, target) {
+  const signature = JSON.stringify(items);
+  if (select.dataset.options !== signature) {
+    select.replaceChildren(...items.map(([value, label]) => new Option(label, value)));
+    select.dataset.options = signature;
+  }
+  select.value = target;
+}
+function renderFilters() {
+  const { section, lane, status, to } = state.route;
+  const available = Object.entries(lanes).filter(([, item]) => item.section === section);
+  $("lane-label").hidden = !available.length;
+  options($("lane"), [["", "Все очереди"], ...available.map(([key, item]) => [key, item.title])], lane);
+  options($("filter-status"), [["", "Все статусы"], ...(filterStatuses[section] || []).map((key) => [key, statuses[key]])], status);
+  const nodes = (state.view?.alive || []).map((brief) => [String(brief.serial), actor(String(brief.serial))]);
+  const toChoices = [["", "Все адресаты"], ["last-order", "LO"], ["net", "Вся сеть"], ["operator", "Оператор"], ...nodes];
+  if (to && !toChoices.some(([value]) => value === to)) toChoices.push([to, actor(to)]);
+  options($("filter-to"), toChoices, to);
+}
+function renderView() {
+  const { section, lane, status, to } = state.route;
+  const listing = section !== "overview" && section !== "network";
+  $("section-heading").textContent = section === "overview" ? "Требует внимания" : sections[section];
+  $("filters").hidden = !listing;
+  $("network").hidden = section !== "network";
+  $("list").hidden = section === "network";
+  renderFilters();
+  updateNav();
+  renderRecipients();
+  const current = state.view;
+  let notice = "";
+  if (!current) notice = state.initialError ? "Не удалось загрузить доску." : "Загружаем доску…";
+  else if (listing && !current.entries.length) {
+    notice = lane || status || to || state.q ? "По этим условиям ничего не найдено." : "В этом разделе пока нет записей.";
+  }
+  report($("list-state"), notice);
+  if (state.initialError && !state.seenAt) {
+    const retry = button("Повторить");
+    retry.addEventListener("click", refresh);
+    $("list-state").append(" ", retry);
+  }
+  const more = $("more");
+  more.hidden = !listing || !current?.next_cursor;
+  more.disabled = !state.listFresh || state.busy;
+  if (!current) return;
+
+  if (section === "overview") {
+    $("list").querySelector('[data-all-entries]')?.remove();
+    for (const key of ["alarms", "decisions", "clarify"]) {
+      renderQueue($("list"), key, current.attention[key]);
+    }
+  } else if (section === "network") {
+    renderQueue($("execution"), "execution", {
+      entries: current.entries.slice(0, 2), count: current.attention.execution.count,
+    });
+  } else if (current.entries.length) {
+    let wrap = $("list").querySelector('[data-all-entries]');
+    if (!wrap) {
+      wrap = el("div", "panel");
+      wrap.dataset.allEntries = "true";
+      wrap.append(el("ul", "entry-list"));
+      $("list").append(wrap);
+    }
+    renderRows(wrap.firstElementChild, current.entries);
+  } else {
+    $("list").replaceChildren();
+  }
+  annotateSelection();
+}
+function renderQueue(parent, key, data) {
+  let panel = parent.querySelector('[data-queue="' + key + '"]');
+  if (!panel) {
+    panel = el("section", "panel");
+    panel.dataset.queue = key;
+    const heading = el("div", "panel-heading");
+    const title = el("h3", "", lanes[key].title);
+    title.append(el("span"));
+    const link = linkFor(lanes[key].section, key);
+    heading.append(title, link);
+    panel.append(heading, el("ul", "entry-list"), el("p", "empty", lanes[key].empty));
+    parent.append(panel);
+  }
+  panel.querySelector("h3 span").textContent = data.count;
+  const link = panel.querySelector("a");
+  link.textContent = "Все " + data.count;
+  link.setAttribute("aria-label", lanes[key].link + ", всего " + data.count);
+  link.hidden = data.count === 0;
+  panel.lastElementChild.hidden = data.entries.length > 0;
+  renderRows(panel.querySelector("ul"), data.entries);
+}
+function renderRows(parent, entries) {
+  const old = new Map([...parent.children].map((row) => [Number(row.firstElementChild.dataset.entry), row]));
+  for (const [index, entry] of entries.entries()) {
+    const row = old.get(entry.id) || el("li");
+    old.delete(entry.id);
+    const link = row.firstElementChild || el("a", "entry");
+    if (!row.firstElementChild) row.append(link);
+    link.dataset.entry = entry.id;
+    link.href = address({ ...state.route, id: entry.id });
+    const metadata = el("div", "entry-meta");
+    metadata.append(el("span", "entry-no", "#" + entry.id));
+    if (entry.alarm) {
+      const alarm = entry.alarm;
+      metadata.append(el("span", "alarm-indicator", [
+        alarmTypes[alarm.type] || alarm.type,
+        alarm.slot ? "слот " + alarm.slot : "",
+        alarm.serial ? "№ " + serial(alarm.serial) : "",
+        "×" + alarm.count,
+      ].filter(Boolean).join(" · ")));
+    }
+    metadata.append(el("span", "", actor(entry.from) + " → " + actor(entry.to)), statusText(entry),
+      time(entry.alarm?.at || entry.updated_at), el("span", "", "Ответы: " + entry.reply_count));
+    const copy = el("div", "entry-copy", entry.text);
+    link.replaceChildren(copy, metadata);
+    if (parent.children[index] !== row) {
+      const focused = document.activeElement === link;
+      parent.insertBefore(row, parent.children[index] || null);
+      if (focused) link.focus({ preventScroll: true });
+    }
+  }
+  for (const row of old.values()) {
+    if (document.activeElement === row.firstElementChild) $("section-heading").focus({ preventScroll: true });
+    row.remove();
+  }
+}
+function annotateSelection() {
+  for (const link of $("workspace").querySelectorAll("[data-entry]")) {
+    if (Number(link.dataset.entry) === state.route.id) link.setAttribute("aria-current", "true");
+    else link.removeAttribute("aria-current");
+  }
+}
+
+function placeDetails(focus = false) {
+  const dialog = $("detail-dialog");
+  const detail = $("detail");
+  const visible = !!state.route.id && !$("board").hidden;
+  $("workspace").classList.toggle("with-detail", visible);
+  if (!visible) {
+    dialog.close();
+    detail.hidden = true;
+    return;
+  }
+  const holder = wide.matches ? $("inline-details") : dialog;
+  const focused = detail.contains(document.activeElement) && document.activeElement;
+  if (detail.parentElement !== holder) holder.append(detail);
+  detail.hidden = false;
+  if (wide.matches) dialog.close();
+  else if (!dialog.open) dialog.showModal();
+  renderDetail();
+  if (focus) $("detail-title").focus({ preventScroll: true });
+  else if (focused) focused.focus({ preventScroll: true });
+}
+function dismissDetail() {
+  navigate({ ...state.route, id: null }, { replace: true });
+}
+async function loadDetail() {
+  const id = state.route.id;
+  if (!id) return;
+  const seq = ++state.detailSeq;
   try {
-    const [entries, alive] = await Promise.all([
-      api("/board/entries?limit=" + ENTRIES_LIMIT, "GET"),
-      api("/registry/alive", "GET"),
-    ]);
-    state.entries = entries;
-    state.alive = alive;
-    await loadThreads(visibleEntries());
-    render();
+    const entry = await api("/board/entries/" + id);
+    if (seq !== state.detailSeq) return;
+    state.entry = entry;
+    state.detailFresh = true;
+    report($("detail-state"), "");
   } catch (error) {
-    toast(String(error.message || error));
-  }
-  // the infra executor switch (T-057): its own catch — a stand without the bridge
-  // key keeps the rest of the page working, the panel just stays hidden
-  api("/board/infra/switch", "GET")
-    .then((sw) => { state.infra = sw; })
-    .catch(() => { state.infra = null; })
-    .finally(renderInfraSwitch);
-}
-
-// TASKBOARD.md section 9: the listing carries no threads — only the one-entry call
-// does. The page fetches the thread of every visible entry in parallel (loopback,
-// one debounced burst per update); a `with_thread` param on the list would spare
-// the round-trips, but runtime/hive/board.py is outside this task's scope.
-async function loadThreads(entries) {
-  const threads = await Promise.all(entries.map((entry) =>
-    api("/board/entries/" + entry.id, "GET")
-      .then((full) => full.thread || [])
-      .catch(() => [])
-  ));
-  entries.forEach((entry, i) => { entry.thread = threads[i]; });
-}
-
-function visibleEntries() {
-  return state.entries.filter((entry) => !state.filter || entry.to === state.filter);
-}
-
-let refreshTimer = null;
-
-function scheduleRefresh() {
-  if (refreshTimer) return; // one refetch per SSE burst
-  refreshTimer = setTimeout(() => { refreshTimer = null; refresh(); }, 250);
-}
-
-function openStream() {
-  const conn = document.getElementById("conn");
-  const source = new EventSource("/board/stream");
-  source.onopen = () => { conn.textContent = "живое обновление"; conn.classList.remove("off"); };
-  source.onerror = () => {
-    conn.textContent = "связь потеряна, переподключение…";
-    conn.classList.add("off");
-  };
-  source.addEventListener("board", scheduleRefresh);
-}
-
-// SSE carries board changes alone: a closed life (retire) changes liveness — who may
-// be addressed, which cards go gray — without touching the board, so no event comes.
-// A light poll re-renders only when the alive set actually changed.
-function watchLiveness() {
-  setInterval(async () => {
-    try {
-      const alive = await api("/registry/alive", "GET");
-      if (JSON.stringify(alive) !== JSON.stringify(state.alive)) {
-        state.alive = alive;
-        render();
-      }
-    } catch (error) {
-      toast(String(error.message || error)); // the next tick tries again
+    if (seq !== state.detailSeq) return;
+    state.detailFresh = false;
+    const absent = error.status === 404;
+    if (absent) {
+      state.entry = null;
+      recoverAction("Эта запись больше недоступна.");
     }
-  }, 10000);
+    report($("detail-state"), absent ? "Запись не найдена." : "Не удалось обновить запись. Повторите загрузку.");
+  }
+  renderDetail();
+  updateConnection();
 }
-
-// --- render -----------------------------------------------------------------------------
-
-function render() {
-  // An update must not eat the operator's open inline forms: the typed deny reason,
-  // a needs_input answer, edited args. The form elements are carried into the fresh
-  // cards (moving a DOM node keeps its textarea state).
-  const openForms = new Map();
-  for (const form of document.querySelectorAll(".entry .inline-form")) {
-    const card = form.closest(".entry");
-    if (card) openForms.set(Number(card.dataset.id), form);
-  }
-  buildFilter();
-  buildAddressees();
-  const visible = visibleEntries();
-  const columns = { task: [], request: [], info: [] };
-  for (const entry of visible) {
-    if (entry.kind === "task") columns.task.push(entry);
-    else if (entry.kind === "request") columns.request.push(entry);
-    else columns.info.push(entry);
-  }
-  fillColumn("col-task", columns.task, openForms);
-  fillColumn("col-request", columns.request, openForms);
-  fillColumn("col-info", columns.info, openForms);
+function addFact(list, key, value) {
+  if (value === undefined || value === null || value === "") return;
+  const row = el("div", "fact");
+  const content = el("dd");
+  if (value instanceof Node) content.append(value);
+  else content.textContent = String(value);
+  row.append(el("dt", "", key), content);
+  list.append(row);
 }
-
-function fillColumn(id, entries, openForms) {
-  const cards = document.querySelector("#" + id + " .cards");
-  const nodes = entries.map((entry) => entryCard(entry, openForms));
-  if (!nodes.length) nodes.push(el("div", "empty", "пусто"));
-  cards.replaceChildren(...nodes);
+function newFacts(items) {
+  const list = el("dl", "facts");
+  for (const [key, value] of items) addFact(list, key, value);
+  return list;
 }
-
-function entryCard(entry, openForms) {
-  const card = el("article", "entry");
-  card.dataset.id = entry.id;
-  const live = liveSerials();
-  // the whole card goes gray when a node it names is dead (TASKBOARD.md 12);
-  // the individual name spans gray out the same way inside the route line
-  const namesDead = [entry.from, entry.to, entry.claimed_by].some(
-    (who) => typeof who === "string" && /^\d+$/.test(who) && !live.has(who)
-  );
-  if (namesDead) card.classList.add("dead");
-  if (TERMINAL.has(entry.status)) card.classList.add("terminal");
-
-  const head = el("div", "head");
-  head.append(el("span", "id", "#" + entry.id));
-  head.append(el("span", null, KIND_LABEL[entry.kind] || entry.kind));
-  head.append(el("span", "badge " + entry.status, entry.status));
-  head.append(el("span", "time", fmtTime(entry.created_at)));
-  card.append(head);
-
-  const route = el("div", "route");
-  route.append(nameSpan(entry.from), document.createTextNode(" → "), nameSpan(entry.to));
-  if (entry.readdressed_from) {
-    route.append(document.createTextNode(" (был адресат: "), nameSpan(entry.readdressed_from),
-      document.createTextNode(")"));
-  }
-  card.append(route);
-
-  if (entry.claimed_by) {
-    card.append(el("div", "claimer", "взята: " + whoTag(entry.claimed_by).label));
-  }
-
-  card.append(el("p", "text", entry.text));
-
-  if (entry.kind === "request" && entry.request) {
-    card.append(requestBox(entry.request, entry.grant));
-  }
-  if (entry.kind === "alarm" && entry.alarm) {
-    card.append(alarmBox(entry.alarm));
-  }
-  if (entry.thread && entry.thread.length) {
-    card.append(threadBox(entry.thread));
-  }
-  // the carried form (an update re-rendered the cards around the operator's typing)
-  // rides along only while its action still exists on the card (review R2-1)
-  const actions = actionsRow(entry, openForms ? openForms.get(entry.id) : null);
-  card.append(actions.row);
-  if (actions.form) card.append(actions.form);
-  return card;
-}
-
-function requestBox(request, grant) {
-  const box = el("div", "args");
-  box.append(el("span", "arg", "action: " + (request.action || "")));
-  for (const key of Object.keys(request.args || {})) {
-    const arg = el("span", "arg");
-    arg.append(el("span", "k", key + ": "), document.createTextNode(String(request.args[key])));
-    box.append(arg);
-  }
-  // the grant is a top-level entry field (board.py strips it out of request_json)
-  if (grant) {
-    box.append(el("span", "arg grant-line",
-      "grant: " + grant.kind + " " + grant.what));
-  }
-  if (request.why) box.append(el("span", "arg why", "почему: " + request.why));
-  return box;
-}
-
-function alarmBox(alarm) {
-  const bits = [String(alarm.type || "")];
-  if (alarm.count > 1) bits.push("×" + alarm.count);
-  if (alarm.slot) bits.push("slot " + alarm.slot);
-  if (alarm.serial) bits.push("serial " + alarm.serial);
-  return el("div", "alarm-meta", bits.join(" · "));
-}
-
-function threadBox(thread) {
-  const box = el("div", "thread");
-  for (const reply of thread) {
-    const row = el("div", "reply");
-    const meta = el("span", "meta");
-    meta.append(document.createTextNode(whoTag(reply.from).label + " · " + fmtTime(reply.at) + "  "));
-    row.append(meta);
-    if (reply.status_change) {
-      row.append(el("span", "change",
-        reply.status_change.from + " → " + reply.status_change.to + "  "));
-    }
-    row.append(el("span", "rtext", reply.text));
-    box.append(row);
-  }
-  return box;
-}
-
-// --- actions (one request each; the server decides the rights) --------------------------
-
-function actionsRow(entry, carriedForm) {
-  const row = el("div", "actions");
-
-  const button = (label, cls, opens) => {
-    const node = el("button", cls, label);
-    node.type = "button";
-    node.dataset.opens = opens; // a carried form survives while its action does (R2-1)
-    row.append(node);
-    return node;
-  };
-
-  let openForm = null;
-
-  const toggle = (form) => {
-    if (openForm) openForm.remove();
-    if (openForm === form) { openForm = null; return; }
-    openForm = form;
-    row.after(form);
-  };
-
-  const wire = (node, buildForm) =>
-    node.addEventListener("click", () => toggle(buildForm()));
-
-  if (entry.kind === "task") {
-    if (["open", "taken", "needs_input"].includes(entry.status)) {
-      wire(button("отменить", "danger", "canceled"),
-        () => transitionForm(entry, "canceled", "отменить задачу"));
-    }
-    if (entry.status === "needs_input") {
-      wire(button("ответить", "primary", "taken"),
-        () => transitionForm(entry, "taken", "ответить и вернуть во взятые", { needText: true }));
-    }
-  }
-  if (entry.kind === "request" && entry.status === "open") {
-    const allowed = (entry.request && entry.request.allowed)
-      || ["approve", "deny", "respond", "edit"];
-    if (allowed.includes("approve")) {
-      wire(button("одобрить", "primary", "approved"),
-        () => transitionForm(entry, "approved", "одобрить"));
-    }
-    if (allowed.includes("edit")) {
-      wire(button("правка и одобрить", "primary", "approved"),
-        () => transitionForm(entry, "approved", "одобрить с правкой", { editArgs: true }));
-    }
-    if (allowed.includes("deny")) {
-      wire(button("отклонить", "danger", "denied"),
-        () => transitionForm(entry, "denied", "отклонить", { needText: true }));
-    }
-    if (allowed.includes("respond")) {
-      wire(button("ответить", null, "answered"),
-        () => transitionForm(entry, "answered", "ответить", { needText: true }));
-    }
-  }
-  if (entry.kind === "alarm" && entry.status === "open") {
-    const ack = el("button", "primary", "снять");
-    ack.type = "button";
-    ack.addEventListener("click", () => {
-      doAction("/board/entries/" + entry.id + "/transition", { to_status: "acked" });
-    });
-    row.append(ack);
-  }
-  // the grant is a top-level entry field, not part of request (the wire shape)
-  const grant = entry.grant;
-  if (entry.kind === "request" && entry.status === "approved" && grant) {
-    // TASKBOARD.md 5.3: the entry keeps `approved`, the grant record flips to revoked
-    const revoke = el("button", "danger", "отозвать грант");
-    revoke.type = "button";
-    revoke.addEventListener("click", () => {
-      doAction("/grants/revoke", { kind: grant.kind, what: grant.what });
-    });
-    row.append(revoke);
-  }
-  wire(button("реплика", null, "reply"), () => replyForm(entry));
-  // the carried form stays open on the fresh card only if the entry still offers
-  // its move: a status change may have removed the button that opened it (R2-1)
-  if (carriedForm && row.querySelector(`[data-opens="${carriedForm.dataset.opens}"]`)) {
-    openForm = carriedForm;
-  }
-  return { row, form: openForm };
-}
-
-// A transition form: optional or required text, optionally the corrected args
-// (approve-with-edit, TASKBOARD.md 5.2 — the agent receives exactly these args).
-function transitionForm(entry, toStatus, label, options) {
-  const opts = options || {};
-  const form = el("form", "inline-form");
-  form.dataset.opens = toStatus; // matched against the fresh card's buttons (R2-1)
-  const inputs = { text: null, args: {}, secret: null };
-
-  if (opts.editArgs && entry.request) {
-    for (const key of Object.keys(entry.request.args || {})) {
-      const row = el("label", "arg-row");
-      row.append(el("span", "k", key + ":"));
-      const input = document.createElement("input");
-      input.type = "text";
-      input.value = String(entry.request.args[key]);
-      inputs.args[key] = input;
-      row.append(input);
-      form.append(row);
-    }
-  }
-  // the grant is a top-level entry field, not part of request (the wire shape)
-  const grant = entry.grant;
-  if (toStatus === "approved" && grant && grant.kind === "secret") {
-    // T-046: the operator types the secret here; it reaches the vault alone
-    const row = el("label", "arg-row");
-    row.append(el("span", "k", "значение секрета:"));
-    const input = document.createElement("input");
-    input.type = "password";
-    input.autocomplete = "new-password";
-    input.required = true;
-    inputs.secret = input;
-    row.append(input);
-    form.append(row);
-  }
-  if (toStatus !== "acked") {
-    const area = document.createElement("textarea");
-    area.maxLength = 400;
-    if (opts.needText) area.required = true;
-    area.placeholder = opts.needText ? "обязательный текст" : "текст (необязательно)";
-    inputs.text = area;
-    form.append(area);
-  }
-
-  const send = el("button", "primary", label);
-  send.type = "submit";
-  const hide = el("button", "cancel-inline", "скрыть");
-  hide.type = "button";
-  hide.addEventListener("click", () => form.remove());
-  form.append(send, hide);
-
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const body = { to_status: toStatus };
-    if (inputs.text && inputs.text.value.trim()) body.text = inputs.text.value;
-    if (inputs.secret) body.secret = inputs.secret.value;
-    if (opts.editArgs) {
-      body.args = {};
-      for (const key of Object.keys(inputs.args)) body.args[key] = inputs.args[key].value;
-    }
-    if (await doAction("/board/entries/" + entry.id + "/transition", body)) {
-      form.remove(); // sent: closed; on a refusal the typed text stays (R2-1)
-    }
-  });
-  return form;
-}
-
-function replyForm(entry) {
-  const form = el("form", "inline-form");
-  form.dataset.opens = "reply"; // the reply button lives on every card (R2-1)
-  const area = document.createElement("textarea");
-  area.maxLength = 400;
-  area.required = true;
-  area.placeholder = "реплика (до 400 символов)";
-  form.append(area);
-  const send = el("button", "primary", "отправить");
-  send.type = "submit";
-  const hide = el("button", "cancel-inline", "скрыть");
-  hide.type = "button";
-  hide.addEventListener("click", () => form.remove());
-  form.append(send, hide);
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (await doAction("/board/entries/" + entry.id + "/reply", { text: area.value })) {
-      form.remove(); // sent: closed; on a refusal the typed text stays (R2-1)
-    }
-  });
-  return form;
-}
-
-// --- the infra executor switch (T-057, TASKBOARD.md 5.4) ---------------------------------
-// Off — the executor takes nothing: infra requests wait, and the reason rides the
-// switch for Last Order (her `infra_state`). On — it polls and runs again.
-
-function renderInfraSwitch() {
-  const panel = document.getElementById("infra-switch");
-  const sw = state.infra;
-  if (!sw) {
-    panel.hidden = true;
+function renderDetail() {
+  const entry = state.entry;
+  const body = $("detail-body");
+  const thread = $("thread");
+  if (!entry) {
+    $("detail-title").textContent = "Запись #" + state.route.id;
+    if ($("detail-state").hidden) report($("detail-state"), "Загружаем запись…");
+    body.replaceChildren();
+    delete body.dataset.entry;
+    thread.hidden = true;
+    $("entry-actions").replaceChildren();
     return;
   }
-  panel.hidden = false;
-  const label = document.getElementById("infra-state");
-  const button = document.getElementById("infra-toggle");
-  if (sw.on) {
-    label.textContent = "исполнитель инфраструктуры: работает";
-    label.classList.remove("off");
-    button.textContent = "выключить";
-    button.className = "";
+  const signature = JSON.stringify(entry);
+  if (body.dataset.entry !== signature) {
+    body.dataset.entry = signature;
+    $("detail-title").textContent = kinds[entry.kind] + " #" + entry.id;
+    const facts = newFacts([
+      ["Статус", statusText(entry)], ["От кого", actor(entry.from)], ["Кому", actor(entry.to)],
+      ["Исполнитель", entry.claimed_by ? actor(entry.claimed_by) : null],
+      ["Создано", formatDate(entry.created_at, detailDateFormat)],
+      ["Обновлено", entry.updated_at !== entry.created_at ? formatDate(entry.updated_at, detailDateFormat) : null],
+    ]);
+    if (entry.alarm) {
+      addFact(facts, "Тревога", alarmTypes[entry.alarm.type] || entry.alarm.type);
+      addFact(facts, "Слот", entry.alarm.slot);
+      addFact(facts, "Серийный номер", entry.alarm.serial ? serial(entry.alarm.serial) : null);
+      addFact(facts, "Срабатывания", entry.alarm.count);
+      addFact(facts, "Последнее срабатывание", entry.alarm.at ? formatDate(entry.alarm.at, detailDateFormat) : null);
+    }
+    const grant = entry.grant;
+    const request = entry.request;
+    const items = [facts, el("p", "full-text", entry.text)];
+    if (request) {
+      const labels = { slot_up: "Запуск слота", slot_restart: "Перезапуск mind", slot_down: "Остановка слота" };
+      const params = [["Действие", labels[request.action] || request.action], ["Причина", request.why]];
+      params.push(...Object.entries(request.args || {}));
+      if (grant) {
+        params.push(["Получатель доступа", actor(entry.from)],
+          ["Доступ", (grant.kind === "secret" ? "Секрет " : "Сетевой ресурс ") + grant.what]);
+      }
+      items.push(el("h3", "", "Параметры запроса"), newFacts(params));
+    }
+    body.replaceChildren(...items);
+    const comments = entry.thread || [];
+    thread.hidden = !comments.length;
+    $("thread-heading").textContent = "Обсуждение · " + comments.length;
+    $("thread-body").replaceChildren(...comments.map((item) => {
+      const reply = el("article", "reply");
+      const meta = el("div", "entry-meta");
+      meta.append(el("strong", "", actor(item.from)), time(item.at));
+      if (item.status_change) {
+        const { from, to } = item.status_change;
+        meta.append(el("span", "", (statuses[from] || from) + " → " + (statuses[to] || to)));
+      }
+      reply.append(meta, el("p", "reply-text", item.text));
+      return reply;
+    }));
+  }
+  if (state.action && !state.pending) validateAction();
+  renderActions();
+  updateAction();
+}
+function renderActions() {
+  const holder = $("entry-actions");
+  const allowed = state.entry?.operator_actions || [];
+  const signature = allowed.join("|");
+  if (holder.dataset.actions !== signature || holder.childElementCount !== allowed.length) {
+    holder.dataset.actions = signature;
+    const focus = holder.contains(document.activeElement) ? document.activeElement.dataset.action : null;
+    holder.replaceChildren(...allowed.map((key) => {
+      const spec = actionSpecs[key];
+      const control = button(spec.label, spec.primary ? "primary" : spec.danger ? "danger" : "");
+      control.dataset.action = key;
+      control.addEventListener("click", () => openAction(key));
+      return control;
+    }));
+    if (focus) holder.querySelector('[data-action="' + focus + '"]')?.focus({ preventScroll: true });
+  }
+}
+function field(label, control, suffix) {
+  const wrapper = el("label", "", label);
+  wrapper.append(control);
+  if (suffix) wrapper.append(suffix);
+  return wrapper;
+}
+function limit(area, count, max) {
+  const chars = Array.from(area.value);
+  if (chars.length > max) area.value = chars.slice(0, max).join("");
+  count.textContent = Math.min(chars.length, max) + " из " + max;
+}
+function closeAction(restoreFocus = false) {
+  const action = state.action;
+  if (!action) return;
+  if (action.secret) action.secret.value = "";
+  state.action = null;
+  $("action-form").replaceChildren();
+  if (restoreFocus) $("entry-actions").querySelector('[data-action="' + action.key + '"]')?.focus();
+}
+function recoverAction(message) {
+  if (!state.action) return;
+  const hadFocus = $("action-form").contains(document.activeElement);
+  const draft = state.action.area?.value || "";
+  closeAction();
+  if (draft) {
+    const recovered = el("textarea");
+    recovered.value = draft;
+    recovered.readOnly = true;
+    $("recovered").replaceChildren(field("Сохранённый текст для копирования", recovered));
+    if (hadFocus) recovered.focus({ preventScroll: true });
+  } else if (hadFocus) $("detail-title").focus({ preventScroll: true });
+  report($("action-feedback"), message);
+}
+function validateAction() {
+  const action = state.action;
+  const entry = state.entry;
+  if (!entry?.operator_actions.includes(action.key) ||
+      (action.key !== "reply" && action.updated !== entry.updated_at)) {
+    recoverAction("Запись изменилась: " + (entry ? statuses[entry.status] || entry.status : "недоступна") + ".");
+  }
+}
+function openAction(key) {
+  if (state.pending || !state.detailFresh || !state.listFresh || !state.entry?.operator_actions.includes(key)) return;
+  if (state.action?.key === key) {
+    state.action.form.querySelector("textarea, input, button").focus();
+    return;
+  }
+  closeAction();
+  report($("action-feedback"), "");
+  const entry = state.entry;
+  const spec = actionSpecs[key];
+  const form = el("form", "stack action-form");
+  const action = { key, form, updated: entry.updated_at, args: new Map() };
+  form.append(el("h3", "", spec.label));
+  if (key === "edit") {
+    for (const [name, value] of Object.entries(entry.request.args || {})) {
+      const input = el("input");
+      input.value = value;
+      action.args.set(name, input);
+      form.append(field(name, input));
+    }
+  }
+  if ((key === "approve" || key === "edit") && entry.grant) {
+    const grant = entry.grant;
+    form.append(el("p", "", actor(entry.from) + " получит доступ к " +
+      (grant.kind === "secret" ? "секрету " : "ресурсу ") + grant.what + "."));
+    if (grant.kind === "secret") {
+      action.secret = el("input");
+      action.secret.type = "password";
+      action.secret.autocomplete = "new-password";
+      action.secret.required = true;
+      action.secret.addEventListener("input", updateAction);
+      form.append(field("Значение секрета", action.secret));
+    }
+  }
+  if (!spec.noText) {
+    action.area = el("textarea");
+    action.area.rows = 3;
+    action.area.required = !!spec.required;
+    const count = el("span", "count", "0 из 400");
+    count.id = "reply-count";
+    action.area.setAttribute("aria-describedby", count.id);
+    action.area.addEventListener("input", () => {
+      limit(action.area, count, 400);
+      updateAction();
+    });
+    form.append(field(spec.required ? "Текст" : "Комментарий (необязательно)", action.area, count));
+  }
+  const controls = el("div", "button-row");
+  action.send = button(spec.noText ? spec.label : "Отправить", "primary");
+  action.send.type = "submit";
+  const dismiss = button("Закрыть форму");
+  dismiss.addEventListener("click", () => closeAction(true));
+  controls.append(action.send, dismiss);
+  form.append(controls);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitAction(entry, action);
+  });
+  state.action = action;
+  $("action-form").replaceChildren(form);
+  updateAction();
+  (action.secret || action.area || action.send).focus();
+}
+function updateAction() {
+  const enabled = state.detailFresh && state.listFresh && !state.pending;
+  for (const control of $("entry-actions").querySelectorAll("button")) {
+    control.disabled = !enabled;
+  }
+  const action = state.action;
+  if (!action) return;
+  const spec = actionSpecs[action.key];
+  action.send.disabled = !enabled || (spec.required && !action.area?.value.trim()) ||
+    (!!action.secret && !action.secret.value.trim());
+}
+async function submitAction(entry, action) {
+  if (state.action !== action || action.send.disabled) return;
+  const base = "/board/entries/" + entry.id;
+  const text = action.area?.value || "";
+  const spec = actionSpecs[action.key];
+  let path = base + "/transition";
+  let body = { to_status: spec.target, text, expected_update: action.updated };
+  if (action.key === "reply") {
+    path = base + "/reply";
+    body = { text };
+  } else if (action.key === "revoke") {
+    path = "/board/grants/revoke";
+    body = { kind: entry.grant.kind, what: entry.grant.what, entry_id: entry.id };
   } else {
-    label.textContent = "исполнитель выключен" + (sw.reason ? " — " + sw.reason : "");
-    label.classList.add("off");
-    button.textContent = "включить";
-    button.className = "primary";
+    if (action.key === "edit") body.args = Object.fromEntries([...action.args].map(([key, input]) => [key, input.value]));
+    if (action.secret) body.secret = action.secret.value;
+  }
+  await sendMutation(path, body, {
+    success: () => {
+      if (state.action === action) closeAction();
+      if (state.route.id === entry.id) {
+        $("detail-title").focus({ preventScroll: true });
+        report($("action-feedback"), "");
+      }
+      say("Действие выполнено.");
+    },
+    failure: (message, error) => {
+      if (state.action !== action) return;
+      if (error.status === 409) recoverAction("Запись изменилась. " + (state.entry ?
+        "Текущий статус — " + (statuses[state.entry.status] || state.entry.status) + "." : ""));
+      else {
+        validateAction();
+        if (state.action === action) report($("action-feedback"), message);
+      }
+    },
+  });
+}
+async function sendMutation(path, body, { success, failure }) {
+  if (state.pending || !state.listFresh) return;
+  state.pending = true;
+  updateConnection();
+  try {
+    const result = await api(path, { method: "POST", body });
+    success(result);
+    await refresh();
+  } catch (error) {
+    if (error.status === 401) {
+      showLogin("Войдите снова для продолжения.");
+      return;
+    }
+    state.listFresh = state.detailFresh = state.monitorFresh = false;
+    updateConnection();
+    await refresh();
+    const message = error.network
+      ? "Не удалось подтвердить отправку. Проверьте обновлённый список перед повтором."
+      : error.status === 409 ? "Состояние изменилось. Проверьте текущие данные."
+      : error.status === 422 ? "Проверьте введённые данные." : "Действие недоступно.";
+    failure(message, error);
+  } finally {
+    state.pending = false;
+    updateConnection();
   }
 }
 
-function wireInfraSwitch() {
-  document.getElementById("infra-toggle").addEventListener("click", () => {
-    if (state.infra && state.infra.on) {
-      document.getElementById("infra-off-form").hidden = false;
-      document.getElementById("infra-reason").focus();
-    } else {
-      doAction("/board/infra/switch", { on: true });
-    }
+function renderRecipients() {
+  const select = $("new-to");
+  const message = $("new-kind").value === "message";
+  if (message) {
+    options(select, [["net", "Вся сеть"]], "net");
+    return;
+  }
+  const original = select.value;
+  const nodes = (state.view?.alive || []).map((brief) => [
+    String(brief.serial), actor(String(brief.serial)) + " · " + brief.slot,
+  ]);
+  const choices = [["", "Выберите адресата"], ["last-order", "LO"], ["net", "Вся сеть"], ...nodes];
+  let target = original;
+  if (state.view && original && !choices.some(([key]) => key === original)) {
+    target = "";
+    state.targetLost = true;
+    report($("compose-feedback"), "Адресат вышел из реестра. Выберите нового. Текст сохранён.");
+  } else if (!state.view && original && !choices.some(([key]) => key === original)) choices.push([original, actor(original)]);
+  options(select, choices, target);
+  select.options[0].disabled = true;
+}
+function updateComposer() {
+  const message = $("new-kind").value === "message";
+  const submit = $("compose-form").querySelector('[type="submit"]');
+  submit.textContent = message ? "Отправить сообщение" : "Создать задачу";
+  submit.disabled = !state.listFresh || state.pending || !$("new-to").value || !$("new-text").value.trim();
+}
+function openComposer() {
+  if (!state.listFresh || $("composer").open) return;
+  renderRecipients();
+  updateComposer();
+  $("composer").showModal();
+}
+async function createEntry(event) {
+  event.preventDefault();
+  if ($("compose-form").querySelector('[type="submit"]').disabled) return;
+  const body = { kind: $("new-kind").value, to: $("new-to").value, text: $("new-text").value };
+  await sendMutation("/board/entries", body, {
+    success: (entry) => {
+      $("composer").close();
+      $("compose-form").reset();
+      $("new-to").value = "";
+      limit($("new-text"), $("new-count"), 800);
+      report($("compose-feedback"), "");
+      state.targetLost = false;
+      const section = entry.kind === "task" ? "tasks" : "events";
+      navigate({ section, lane: "", status: "", to: "", id: entry.id }, { trigger: $("create") });
+      say(kinds[entry.kind] + " #" + entry.id + " создана на доске.");
+    },
+    failure: (message) => {
+      if (!state.targetLost) report($("compose-feedback"), message);
+    },
   });
-  document.getElementById("infra-off-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const reason = document.getElementById("infra-reason").value;
-    if (await doAction("/board/infra/switch", { on: false, reason })) {
-      document.getElementById("infra-off-form").hidden = true;
-      document.getElementById("infra-reason").value = "";
-    }
-  });
-  document.querySelector("#infra-off-form .cancel-inline").addEventListener("click", () => {
-    document.getElementById("infra-off-form").hidden = true;
-  });
-  wireSlotButtons();
 }
 
-// --- the operator's slot buttons (ADR-050) -----------------------------------------------
-// A slot is a sister and her mind; the mind raises its own body. Each button posts an
-// operator infra request — on the board like Last Order's, run by the executor.
-
-const SLOT_ACTIONS = [
-  { action: "slot_up", label: "▲", title: "поднять слот: ум, затем сестра" },
-  { action: "slot_restart", label: "↻", title: "перезапустить ум (сестра живёт дальше)" },
-  { action: "slot_down", label: "▼", title: "снять слот: сестра, ум и тело", confirm: true },
-];
-
-function wireSlotButtons() {
-  const holder = document.getElementById("infra-slots");
-  if (!holder || holder.childElementCount) return;
-  for (const slot of ["1", "2", "3"]) {
-    const group = document.createElement("span");
-    group.className = "infra-slot";
-    group.append("слот " + slot + " ");
-    for (const spec of SLOT_ACTIONS) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = spec.label;
-      button.title = spec.title;
-      button.addEventListener("click", () => {
-        if (spec.confirm && !window.confirm(
-          "Снять слот " + slot + "? Живая сестра умрёт без завещания.")) return;
-        doAction("/board/entries", {
-          kind: "request", to: "operator",
-          text: "оператор: " + spec.action + " слота " + slot,
-          request: { action: spec.action, args: { slot }, why: "кнопка оператора на доске" },
-        });
+function renderComponent(title, facts, controls) {
+  const panel = el("section", "panel");
+  const heading = el("div", "panel-heading");
+  heading.append(el("h3", "", title));
+  const body = el("div", "panel-body");
+  body.append(newFacts(facts));
+  if (controls) body.append(controls);
+  panel.append(heading, body);
+  return panel;
+}
+function tier(value, yes, no) {
+  return value === true ? el("span", "healthy", yes) : value === false ? no : "Нет данных";
+}
+function dockerHealth(value) {
+  return { healthy: "Проверка пройдена", starting: "Проверка запускается", unhealthy: "Проверка не пройдена" }[value];
+}
+function slotControls(slot) {
+  const holder = el("div", "button-row slot-actions");
+  const slots = { slot_up: "Поднять", slot_restart: "Перезапустить mind", slot_down: "Остановить" };
+  for (const [key, label] of Object.entries(slots)) {
+    const control = button(label, key === "slot_down" ? "danger" : "");
+    control.dataset.slot = slot;
+    control.dataset.slotAction = key;
+    control.setAttribute("aria-label", label + " · слот " + slot);
+    control.addEventListener("click", () => {
+      if (control.disabled) return;
+      if (key === "slot_down" && !window.confirm("Остановить слот " + slot +
+        "? Остановятся сестра, mind и тело. Живая сестра умрёт без завещания.")) return;
+      sendMutation("/board/entries", {
+        kind: "request", to: "operator", text: label + " · слот " + slot,
+        request: { action: key, args: { slot }, why: "Запрос оператора с доски" },
+      }, {
+        success: (entry) => navigate({ ...state.route, id: entry.id }, { trigger: control }),
+        failure: (message) => report($("infra-feedback"), message),
       });
-      group.append(button);
-    }
-    holder.append(group);
+    });
+    holder.append(control);
+  }
+  return holder;
+}
+function renderNetwork() {
+  const box = $("snapshot");
+  const status = state.network;
+  const data = status?.components;
+  const freshness = !data ? "Нет данных" : status.freshness === "stale" || !state.monitorFresh ? "Устарели" : "Снимок обновлён";
+  const focus = document.activeElement?.dataset;
+  const focusKey = focus?.slot ? '[data-slot="' + focus.slot + '"][data-slot-action="' + focus.slotAction + '"]' : "";
+  const summary = el("div", "monitor-summary");
+  summary.append(el("p", state.monitorFresh && status?.freshness === "fresh" ? "healthy" : "muted",
+    "Данные мониторинга: " + freshness + (status?.observed_at ? " · " + formatDate(status.observed_at) : "")));
+  if (!state.monitorFresh && state.network) summary.append(el("p", "muted", "Не удалось обновить состояние сети."));
+  if (data?.docker === false) summary.append(el("p", "muted", "Docker недоступен для проверки."));
+  const grid = el("div", "monitor-grid");
+  grid.append(
+    renderComponent("LO", [["Процесс", tier(data?.lo.process, "Процесс LO запущен", "Процесс LO остановлен")],
+      ["Контейнер", dockerHealth(data?.lo.health)]]),
+    renderComponent("Голос", [
+      ["TTS", data?.voice.reachable === false ? "Сервис недоступен" : tier(data?.voice.tts_ready, "Готов", "Не готов")],
+      ["STT", data?.voice.reachable === false ? "Сервис недоступен" : tier(data?.voice.stt_ready, "Готов", "Не готов")],
+      ["Бэкенд TTS", data?.voice.backend], ["Модель TTS", data?.voice.model], ["GPU", data?.voice.gpu],
+    ]),
+    renderComponent("Инфраструктура", [
+      ["Исполнитель", data?.executor.busy && data.executor.running ? "Выполняет заявку" :
+        tier(data?.executor.running, "Запущен", "Остановлен")],
+      ["Контейнер", dockerHealth(data?.executor.health)],
+    ]),
+  );
+  for (const slot of ["1", "2", "3"]) {
+    const item = data?.slots?.[slot];
+    const registry = status?.registry?.filter((brief) => brief.slot === "LastOrder0" + slot);
+    const stopped = item?.mind.running === false && item?.node.running === false && item?.body.running === false;
+    const runner = item?.runner;
+    const body = runner?.body === "attached" ? el("span", "healthy", "Подключено") :
+      runner?.body === "none" ? "Не подключено" : stopped ? "Остановлено" : "Нет данных";
+    grid.append(renderComponent("Слот " + slot, [
+      ["Сестра в реестре", !registry ? "Нет данных" : registry.length
+        ? registry.map((brief) => actor(String(brief.serial))).join(", ") : "Отсутствует"],
+      ["Состояние слота", stopped ? "Остановлен" :
+        item?.mind.running || item?.node.running ? "Запущен" : item?.body.running ? "Запущено только тело" : "Нет данных"],
+      ["mind", tier(item?.mind.running, "Запущен", "Остановлен")],
+      ["Сестра", tier(item?.node.running, "Контейнер запущен", "Контейнер остановлен")],
+      ["Тело", body],
+      ["Жизнь в mind", runner?.term ? "Срок завершён" : runner?.dead ? "Тело погибло" :
+        runner?.serial ? "#" + serial(runner.serial) : null],
+    ], slotControls(slot)));
+  }
+  box.replaceChildren(summary, grid);
+  if (focusKey) box.querySelector(focusKey)?.focus({ preventScroll: true });
+  renderInfraSwitch();
+}
+async function loadNetwork() {
+  const seq = ++state.statusSeq;
+  try {
+    const status = await api("/board/status");
+    if (seq !== state.statusSeq) return;
+    state.network = status;
+    state.monitorFresh = true;
+  } catch {
+    if (seq !== state.statusSeq) return;
+    state.monitorFresh = false;
+  }
+  renderNetwork();
+}
+function renderInfraSwitch() {
+  const value = state.network?.executor_switch;
+  $("infra-switch-state").textContent = !value ? "Настройка недоступна" :
+    value.on ? "Приём заявок включён" : "Приём заявок выключен";
+  report($("infra-switch-reason"), value?.reason);
+  if (value) $("infra-toggle").textContent = value.on ? "Выключить приём" : "Включить приём";
+  if (!value?.on && !$("infra-off-form").hidden) {
+    $("infra-off-form").hidden = true;
+    report($("infra-feedback"), "Приём заявок уже выключен.");
+  }
+  updateInfraControls();
+}
+function updateInfraControls() {
+  const value = state.network?.executor_switch;
+  const up = !!value && state.monitorFresh && state.listFresh && !state.pending;
+  $("infra-toggle").disabled = !up;
+  $("infra-off-form").querySelector('[type="submit"]').disabled = !up;
+  for (const control of $("snapshot").querySelectorAll("[data-slot-action]")) {
+    control.disabled = !up || state.network.freshness !== "fresh" || !state.network.components?.docker;
   }
 }
-
-// --- the top bar: filter and the new entry form -----------------------------------------
-
-function buildFilter() {
-  const select = document.getElementById("filter");
-  const keep = state.filter;
-  const options = [{ value: "", label: "все адресаты" }];
-  for (const brief of state.alive) {
-    options.push({ value: String(brief.serial), label: brief.serial + " · " + brief.slot });
-  }
-  options.push({ value: "net", label: "net" });
-  options.push({ value: "last-order", label: "Last Order" });
-  select.replaceChildren(...options.map((o) => new Option(o.label, o.value)));
-  state.filter = options.some((o) => o.value === keep) ? keep : "";
-  select.value = state.filter;
-}
-
-function buildAddressees() {
-  const toSelect = document.getElementById("new-to");
-  const previous = toSelect.value; // an update while the operator types must not retarget it
-  const options = [];
-  if (document.getElementById("new-kind").value === "task") {
-    for (const brief of state.alive) {
-      options.push({ value: String(brief.serial), label: brief.serial + " · " + brief.slot });
-    }
-    options.push({ value: "net", label: "net" });
-    options.push({ value: "last-order", label: "Last Order" });
-  } else {
-    // the rights matrix (section 3.3): an operator message goes to the net alone
-    options.push({ value: "net", label: "net" });
-  }
-  toSelect.replaceChildren(...options.map((o) => new Option(o.label, o.value)));
-  if (options.some((o) => o.value === previous)) toSelect.value = previous;
-}
-
-// --- init (the script tag is deferred: the DOM is ready) --------------------------------
-
-// The login form (T-052): the page opens without the browser's Basic dialog; the
-// password is checked by POST /board/login (which sets the SSE-riding cookie) and
-// kept in sessionStorage for the X-Operator-Key header of every fetch.
-function showLogin(note) {
-  document.getElementById("login").hidden = false;
-  const error = document.getElementById("login-error");
-  error.hidden = !note;
-  error.textContent = note || "";
-  document.getElementById("login-password").focus();
-}
-
-async function tryLogin(password) {
-  const response = await fetch("/board/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
+async function toggleInfra(on) {
+  if ($("infra-toggle").disabled) return;
+  const reason = on ? "" : $("infra-reason").value;
+  await sendMutation("/board/infra/switch", { on, reason }, {
+    success: () => {
+      $("infra-off-form").hidden = true;
+      $("infra-reason").value = "";
+      report($("infra-feedback"), "");
+      say(on ? "Приём заявок включён." : "Приём заявок выключен.");
+    },
+    failure: (message) => report($("infra-feedback"), message),
   });
-  if (!response.ok) {
-    let note = "неправильный пароль";
-    try {
-      const data = await response.json();
-      if (data && data.error && data.error.kind === "operator_key" && !/wrong/.test(data.error.message)) {
-        note = data.error.message; // e.g. HIVE_OPERATOR_KEY is not configured
-      }
-    } catch (notJson) {
-      // keep the default note
-    }
-    showLogin(note);
-    return;
-  }
-  sessionStorage.setItem(KEY_STORAGE, password);
-  state.key = password;
-  document.getElementById("login").hidden = true;
-  document.getElementById("logout").hidden = false;
-  refresh();
-  openStream();
-  watchLiveness();
 }
 
 function init() {
-  wireInfraSwitch();
-  document.getElementById("filter").addEventListener("change", (event) => {
-    state.filter = event.target.value;
-    render();
-  });
-  document.getElementById("new-kind").addEventListener("change", buildAddressees);
-  document.getElementById("new-entry").addEventListener("submit", async (event) => {
+  for (const key of Object.keys(sections).filter((section) => section !== "network")) {
+    const link = linkFor(key);
+    link.append(el("span", "nav-count"));
+    $("sections").append(link);
+  }
+  document.addEventListener("click", (event) => {
+    if (!sameTab(event)) return;
+    const link = event.target.closest("a[data-section], a[data-entry]");
+    if (!link) return;
     event.preventDefault();
-    const body = {
-      kind: document.getElementById("new-kind").value,
-      to: document.getElementById("new-to").value,
-      text: document.getElementById("new-text").value,
-    };
+    if (link.dataset.entry) {
+      navigate({ ...state.route, id: Number(link.dataset.entry) }, { trigger: link });
+    } else gotoSection(link.dataset.section, link.dataset.lane);
+  });
+  $("menu").addEventListener("click", () => {
+    const menu = $("menu");
+    menu.setAttribute("aria-expanded", String(menu.getAttribute("aria-expanded") !== "true"));
+  });
+  for (const [id, key] of [["lane", "lane"], ["filter-status", "status"], ["filter-to", "to"]]) {
+    $(id).addEventListener("change", () => navigate({ ...state.route, [key]: $(id).value }));
+  }
+  $("filters").addEventListener("submit", (event) => event.preventDefault());
+  let searchTimer;
+  $("search").addEventListener("input", () => {
+    state.q = $("search").value;
+    state.listSeq++;
+    state.pages = 1;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(loadView, 240);
+  });
+  $("more").addEventListener("click", () => {
+    if (state.view?.next_cursor && !state.busy) loadView({ more: true });
+  });
+  $("retry").addEventListener("click", refresh);
+  $("detail-retry").addEventListener("click", refresh);
+  $("compose-retry").addEventListener("click", refresh);
+  $("create").addEventListener("click", openComposer);
+  $("compose-close").addEventListener("click", () => $("composer").close());
+  $("compose-form").addEventListener("submit", createEntry);
+  $("new-kind").addEventListener("change", () => {
+    $("new-to").value = "";
+    renderRecipients();
+    updateComposer();
+  });
+  $("new-to").addEventListener("change", () => {
+    state.targetLost = false;
+    report($("compose-feedback"), "");
+    updateComposer();
+  });
+  $("new-text").addEventListener("input", () => {
+    limit($("new-text"), $("new-count"), 800);
+    updateComposer();
+  });
+  $("detail-close").addEventListener("click", dismissDetail);
+  $("detail-dialog").addEventListener("cancel", (event) => {
+    event.preventDefault();
+    dismissDetail();
+  });
+  wide.addEventListener("change", () => placeDetails());
+  window.addEventListener("popstate", () => navigate(readRoute(), { pop: true }));
+  window.addEventListener("online", refresh);
+  window.addEventListener("offline", () => {
+    state.connected = state.listFresh = state.detailFresh = state.monitorFresh = false;
+    updateConnection();
+  });
+  $("infra-toggle").addEventListener("click", () => {
+    if (state.network?.executor_switch?.on) {
+      $("infra-off-form").hidden = false;
+      $("infra-reason").focus();
+    } else toggleInfra(true);
+  });
+  $("infra-off-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    toggleInfra(false);
+  });
+  $("infra-off-cancel").addEventListener("click", () => {
+    $("infra-off-form").hidden = true;
+    $("infra-toggle").focus();
+  });
+  $("login-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const control = $("login-form").querySelector('button[type="submit"]');
+    control.disabled = true;
     try {
-      await api("/board/entries", "POST", body);
-      document.getElementById("new-text").value = "";
-      await refresh();
+      await api("/board/login", { method: "POST", body: { password: $("login-password").value } });
+      setBoardAvailable();
+      refresh();
     } catch (error) {
-      toast(String(error.message || error));
+      report($("login-error"), error.status === 401 ? "Пароль не принят." : "Не удалось связаться с доской.");
+    } finally {
+      control.disabled = false;
     }
   });
-  document.getElementById("login-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const field = document.getElementById("login-password");
-    await tryLogin(field.value);
-    field.value = "";
+  $("logout").addEventListener("click", async () => {
+    try {
+      await api("/board/logout", { method: "POST" });
+      state.entry = state.view = state.network = state.seenAt = null;
+      $("compose-form").reset();
+      limit($("new-text"), $("new-count"), 800);
+      $("recovered").replaceChildren();
+      showLogin();
+    } catch {
+      say("Не удалось выйти. Повторите попытку.");
+    }
   });
-  document.getElementById("logout").addEventListener("click", async () => {
-    sessionStorage.removeItem(KEY_STORAGE);
-    await fetch("/board/logout", { method: "POST" }).catch(() => {});
-    location.reload();
-  });
-  if (!state.key) {
-    showLogin();
-    return;
-  }
-  document.getElementById("logout").hidden = false;
+  // Older releases stored the password in the tab. Authentication now uses only the login cookie.
+  try { sessionStorage.removeItem("lo_board_key"); } catch { /* Storage is optional. */ }
+  setInterval(() => {
+    if (!$("login").hidden || document.hidden) return;
+    if (!state.connected || $("composer").open) refresh();
+    else if (state.route.section === "network") loadNetwork();
+  }, 10000);
+  $("board").hidden = false;
+  renderView();
   refresh();
-  openStream();
-  watchLiveness();
 }
-
 init();

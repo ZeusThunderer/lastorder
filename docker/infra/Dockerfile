@@ -1,6 +1,6 @@
 # The infra executor (ADR-050): the Docker CLI, compose, bash and python — nothing else.
-# The code is the repo's own (dev/infra_bridge.py, runtime/hive/infra.py, docker/node/up.sh),
-# mounted read-only at the daemon's path, so the image carries tools, not logic.
+# The stand checkout stays mounted at the daemon path for commands and settings.
+# Bake the bridge and monitor together so an updated bridge can run from any checkout.
 # Compose is pinned to the host's version: both sides then compute the same container
 # configs and never recreate each other's containers over a version difference.
 FROM docker:29.9.2-cli-alpine3.24
@@ -17,5 +17,6 @@ RUN apk add --no-cache bash python3 curl ca-certificates \
  && docker compose version | grep -q "${COMPOSE_VERSION#v}" \
  && apk del curl
 
+COPY dev/infra_bridge.py dev/board_monitor.py /opt/lastorder/
 ENTRYPOINT []
-CMD ["python3", "dev/infra_bridge.py"]
+CMD ["python3", "/opt/lastorder/infra_bridge.py"]

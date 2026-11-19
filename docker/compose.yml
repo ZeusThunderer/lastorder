@@ -518,7 +518,7 @@ services:
     build:
       context: ..
       dockerfile: docker/mind/Dockerfile
-    image: lastorder-mind:dev
+    image: lastorder-hive:dev
     # no depends_on mc-server (ADR-050): the world runs on demand and the lifetime
     # bookkeeping never needs it anymore
     environment:
@@ -902,17 +902,20 @@ services:
   # compose computes resolve on the daemon side; it writes only .stand/ (the recorded
   # moves). Core: it is what raises everything else after a reboot.
   infra:
-    build: ./infra
+    build:
+      context: ..
+      dockerfile: docker/infra/Dockerfile
     image: lastorder-infra:dev
     restart: unless-stopped
     init: true
     depends_on:
       hive: {condition: service_healthy}
     working_dir: ${STAND_DAEMON_ROOT:-/stand}
-    command: ["python3", "dev/infra_bridge.py", "--interval", "10"]
+    command: ["python3", "/opt/lastorder/infra_bridge.py", "--interval", "10", "--monitor"]
     environment:
       HIVE_URL: http://hive:8000
       HIVE_INFRA_KEY: "${HIVE_INFRA_KEY:-}"
+      COMPOSE_PROJECT_NAME: "${COMPOSE_PROJECT_NAME:-lastorder}"
       STAND_DAEMON_ROOT: "${STAND_DAEMON_ROOT:-/stand}"
       INFRA_HEARTBEAT: /tmp/heartbeat
       HOME: /tmp

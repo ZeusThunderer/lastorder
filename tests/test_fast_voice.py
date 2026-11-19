@@ -61,6 +61,7 @@ def test_stream_http_pcm_and_empty_text():
             yield b"\x01\x00" * 4
             yield b"\x02\x00" * 4
     with TestClient(create_app(Engine())) as c:
+        assert c.get("/health").json()["stt_ready"] is False
         r = c.post("/speak/stream", json={"text": "hello"})
         assert r.content == b"\x01\x00" * 4 + b"\x02\x00" * 4
         assert r.headers["x-audio-rate"] == "48000"

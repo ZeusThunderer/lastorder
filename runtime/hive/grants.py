@@ -153,14 +153,16 @@ class Grants:
             })
             return self._record(grant_id)
 
-    def revoke(self, *, kind: str, what: str, actor: str) -> dict:
+    def revoke(self, *, kind: str, what: str, actor: str, entry_id: int | None = None) -> dict:
         at = self._now()
         with self._lock:
             row = self._conn.execute(
-                "SELECT id, status FROM grant WHERE kind=? AND what=?", (kind, what)
+                "SELECT id, status, entry_id FROM grant WHERE kind=? AND what=?", (kind, what)
             ).fetchone()
             if row is None:
                 raise GrantError(404, "unknown_grant", f"no {kind} grant for {what!r}")
+            if entry_id is not None and row["entry_id"] != entry_id:
+                raise GrantError(409, "entry_changed", "the active grant belongs to a different entry")
             if row["status"] == "revoked":
                 return self._record(row["id"])
             self._conn.execute("BEGIN IMMEDIATE")
@@ -203,6 +205,12 @@ class Grants:
         with self._lock:
             rows = self._conn.execute("SELECT * FROM grant ORDER BY id").fetchall()
             return [self._strip(r) for r in rows]
+
+    def active_for_entry(self, entry_id: int) -> bool:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT 1 FROM grant WHERE entry_id=? AND status='approved'", (entry_id,),
+            ).fetchone() is not None
 
     def egress_domains(self) -> list[str]:
         """What the proxy may open right now (the active egress grants alone)."""

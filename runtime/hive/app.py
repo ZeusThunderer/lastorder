@@ -351,6 +351,7 @@ def create_app(
         run_dir / "board.sqlite", lifecycle=lifecycle, log=log, clock=clock
         )
     wake_feed = WakeFeed(run_dir, log=log, clock=clock)
+    infra_snapshot: tuple[datetime, dict] | None = None
     grants = Grants(run_dir / "grants.sqlite", log=log, clock=clock)
     # the grant relay (runtime/hive/relay.py): secrets filled here, out via egress
     relay = Relay(grants, log=log, proxy=env("HIVE_EGRESS_PROXY") or None)
@@ -782,7 +783,30 @@ def create_app(
 
     @app.get("/board/entries/{entry_id}")
     def board_entry(request: Request, entry_id: int) -> dict:
-        return board.entry_for(_board_actor(request), entry_id)
+        actor = _board_actor(request)
+        entry = board.entry_for(actor, entry_id)
+        if actor == OPERATOR and entry["grant"] and entry["status"] == "approved":
+            if grants.active_for_entry(entry_id):
+                entry["operator_actions"].append("revoke")
+        return entry
+
+    def operator_view(section: str, lane: str, status: str, to: str,
+                      before: int | None, query: str = "") -> dict:
+        view = board.operator_view(section, lane=lane, status=status, to=to, before=before, query=query)
+        view["alive"] = [node_brief_to_json(brief) for brief in view["alive"]]
+        return view
+
+    @app.get("/board/view")
+    def board_view(request: Request, section: str = "overview", lane: str = "",
+                   status: str = "", to: str = "", before: int | None = None) -> dict:
+        _require_operator(request)
+        return operator_view(section, lane, status, to, before)
+
+    @app.post("/board/view")
+    def board_search(request: Request, body: dict, section: str = "overview", lane: str = "",
+                     status: str = "", to: str = "", before: int | None = None) -> dict:
+        _require_operator(request)
+        return operator_view(section, lane, status, to, before, body.get("q", ""))
 
     @app.post("/board/entries")
     def board_post(request: Request, body: dict) -> dict:
@@ -799,9 +823,12 @@ def create_app(
         _no_from_in(body)
         if "secret" in body and not isinstance(body.get("secret"), str):
             raise ApiError(422, "validation", "secret must be a string")
+        expected = body.get("expected_update")
+        if expected is not None and not isinstance(expected, str):
+            raise ApiError(422, "validation", "expected_update must be a string")
         return board.transition(
             OPERATOR, entry_id, body.get("to_status"), text=body.get("text", ""),
-            args=body.get("args"), secret=body.get("secret"),
+            args=body.get("args"), secret=body.get("secret"), expected_update=expected,
         )
 
     @app.post("/board/entries/{entry_id}/reply")
@@ -920,6 +947,32 @@ def create_app(
         _require_operator(request)
         return board.infra_switch_set(OPERATOR, body.get("on"), body.get("reason", ""))
 
+    @app.post("/board/infra/status")
+    def infra_status_post(request: Request, body: dict) -> dict:
+        from runtime.hive.board_status import read_snapshot
+
+        _require_infra_key(request)
+        nonlocal infra_snapshot
+        try:
+            snapshot = read_snapshot(body)
+        except ValueError as exc:
+            raise ApiError(422, "validation", "invalid infrastructure snapshot") from exc
+        infra_snapshot = (clock(), snapshot)
+        return {"ok": True}
+
+    @app.get("/board/status")
+    def board_status(request: Request) -> dict:
+        _require_operator(request)
+        snapshot = infra_snapshot
+        age = max(0, (clock() - snapshot[0]).total_seconds()) if snapshot else None
+        return {
+            "observed_at": snapshot[0].isoformat() if snapshot else None,
+            "freshness": ("stale" if age > 30 else "fresh") if age is not None else "unknown",
+            "components": snapshot[1] if snapshot else None,
+            "executor_switch": board.infra_switch_get(),
+            "registry": [node_brief_to_json(brief) for brief in service.alive()],
+        }
+
     # --- the desk's wake feed (T-043, ADR-041) ------------------------------------------------
     # The environment's own wake reasons for the one long Last Order session: the
     # alarm appends (death/proposals/operator/timer), the session's misaka-link
@@ -1007,10 +1060,14 @@ def create_app(
         )
 
     @app.post("/grants/revoke")
+    @app.post("/board/grants/revoke")
     def grants_revoke(request: Request, body: dict) -> dict:
         _require_operator(request)
+        entry_id = body.get("entry_id")
+        if entry_id is not None and type(entry_id) is not int:
+            raise ApiError(422, "validation", "entry_id must be an integer")
         record = grants.revoke(
-            kind=body.get("kind"), what=body.get("what"), actor=OPERATOR
+            kind=body.get("kind"), what=body.get("what"), actor=OPERATOR, entry_id=entry_id,
         )
         try:  # the board note rides the entry; a missing one never undoes the revoke
             board.reply(OPERATOR, record["entry_id"], "грант отозван")

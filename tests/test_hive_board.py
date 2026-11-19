@@ -562,6 +562,62 @@ def test_runner_alarm_repeats_fold_then_expire(rstack: RunnerStack) -> None:
     assert len(rstack.board.entries(kind="alarm")) == 2
 
 
+def test_operator_view_uses_whole_board_and_pages_by_id(rstack: RunnerStack) -> None:
+    old = rstack.board.post(
+        "last-order", kind="request", to="operator", text="Проверить СЕВЕРНУЮ дорогу",
+        request={"action": "inspect_route"},
+    )
+    serial = rstack.birth()
+    task = rstack.op_task(to=str(serial))
+    rstack.board.transition(str(serial), task["id"], "taken")
+    rstack.board.transition(str(serial), task["id"], "needs_input", text="Какой берег выбрать?")
+    execution = rstack.post_op(
+        kind="request", to="operator", text="Остановить слот",
+        request={"action": "slot_down", "args": {"slot": "2"}},
+    )
+    alarm_payload = {"type": "stuck", "text": "Узел не отвечает", "slot": "LastOrder01", "serial": serial}
+    for _ in range(2):
+        alarm = rstack.client.post(
+            "/board/alarms", json=alarm_payload, headers={"X-Runner-Key": RKEY1},
+        ).json()
+    for number in range(207):
+        rstack.post_op(kind="message", to="net", text=f"Уведомление {number}")
+    rstack.board.reply("operator", old["id"], "Проверю утром")
+
+    assert rstack.client.get("/board/view").status_code == 401
+    view = rstack.op("GET", "/board/view").json()
+    assert view["counts"] == {"tasks": 1, "requests": 2, "events": 208, "history": 0}
+    queues = view["attention"]
+    assert [item["id"] for item in queues["decisions"]["entries"]] == [old["id"]]
+    assert queues["decisions"]["entries"][0]["reply_count"] == 1
+    assert "thread" not in queues["decisions"]["entries"][0]
+    assert queues["alarms"]["entries"][0]["alarm"] == alarm["alarm"]
+    assert queues["clarify"]["entries"][0]["id"] == task["id"]
+    assert rstack.op("GET", "/board/view?section=requests&lane=execution").json()["entries"][0]["id"] == execution["id"]
+    assert "approve" not in rstack.op("GET", f"/board/entries/{execution['id']}").json()["operator_actions"]
+
+    for query in ("северную", f"#{old['id']}"):
+        found = rstack.op("POST", "/board/view?section=requests", {"q": query}).json()["entries"]
+        assert [item["id"] for item in found] == [old["id"]]
+    assert rstack.op("POST", "/board/view?section=requests", {"q": "#99999"}).json()["entries"] == []
+    seen = []
+    path = "/board/view?section=events"
+    while path:
+        page = rstack.op("GET", path).json()
+        assert len(page["entries"]) <= 50
+        seen.extend(item["id"] for item in page["entries"])
+        cursor = page["next_cursor"]
+        path = f"/board/view?section=events&before={cursor}" if cursor else ""
+    assert len(seen) == 208 and seen == sorted(set(seen), reverse=True)
+
+    rstack.clock.advance(minutes=1)
+    path = f"/board/entries/{alarm['id']}/transition"
+    assert rstack.op("POST", path, {"to_status": "acked", "expected_update": alarm["updated_at"]}).status_code == 200
+    stale = rstack.op("POST", path, {"to_status": "acked", "expected_update": alarm["updated_at"]})
+    assert stale.status_code == 409 and error_of(stale)["kind"] == "entry_changed"
+    assert rstack.op("GET", "/board/view?section=history").json()["entries"][0]["id"] == alarm["id"]
+
+
 def test_alarm_rights(rstack: RunnerStack) -> None:
     serial = rstack.birth()
     # admin rides the Last Order key: harness_failover is its type

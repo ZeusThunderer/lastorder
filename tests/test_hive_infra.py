@@ -13,7 +13,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -68,6 +68,7 @@ class Stack:
         self.board = self.app.state.board
         self.client = TestClient(self.app)
 
+
     def birth(self) -> int:
         response = self.client.post(
             "/registry/birth", json={"slot": "LastOrder01", "traits": traits().as_dict()}
@@ -83,6 +84,65 @@ class Stack:
         )
         return entry
 
+
+def test_board_status_keys_freshness_and_field_allowlist(tmp_path: Path) -> None:
+    stack = Stack(tmp_path)
+    client = stack.client
+    assert client.get("/board/status", headers=INFRA).status_code == 401
+    assert client.get("/board/status", headers=OP).json()["freshness"] == "unknown"
+    snapshot = {
+        "lo": {"running": True, "process": False, "session_id": "discard"},
+        "voice": {"running": True, "reachable": False, "stt_ready": False, "env": "discard"},
+        "executor": {"running": True, "busy": True},
+        "slots": {"1": {"mind": {"running": True}, "runner": {"body": "attached", "serial": 2}}},
+    }
+    assert client.post("/board/infra/status", json=snapshot, headers=OP).status_code == 401
+    assert client.post("/board/infra/status", json=snapshot, headers=INFRA).status_code == 200
+    result = client.get("/board/status", headers=OP).json()
+    assert result["freshness"] == "fresh"
+    assert result["components"]["executor"]["busy"] is True
+    assert result["components"]["voice"]["reachable"] is False
+    assert "discard" not in str(result)
+    assert client.post("/board/infra/status", json={"lo": {"process": "yes"}}, headers=INFRA).status_code == 422
+    stack.clock.now += timedelta(seconds=31)
+    outdated = client.get("/board/status", headers=OP).json()
+    assert outdated["freshness"] == "stale"
+    assert outdated["components"] == result["components"]
+
+
+def test_collector_distinguishes_stopped_service_from_probe_timeout() -> None:
+    from dev.board_monitor import observe
+
+    lo_id, mind_id, voice_id = ("a" * 64, "b" * 64, "c" * 64)
+
+    def docker(argv, *, text, capture_output, timeout):
+        assert text and capture_output and timeout == 3
+        action = argv[1]
+        if action == "ps":
+            assert "label=com.docker.compose.project=fixture" in argv
+            output = "\n".join(ident[:12] for ident in (lo_id, mind_id, voice_id))
+        elif action == "inspect":
+            output = (
+                f"last-order {lo_id} true healthy\n"
+                f"mind-1 {mind_id} true starting\n"
+                f"tts {voice_id} true unhealthy\n"
+            )
+        elif action == "top":
+            assert argv[2] == lo_id
+            output = "COMMAND\n/app/.venv/bin/python -m runtime.hive.admin\n"
+        elif argv[2] == mind_id:
+            assert argv[-1].endswith("/runner/status")
+            output = '{"serial": 4, "dead": false, "term": false, "body": "attached"}'
+        else:
+            assert argv[2] == voice_id and argv[-1].endswith("/health")
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return subprocess.CompletedProcess(argv, 0, stdout=output, stderr="")
+
+    status = observe("fixture", busy=True, run=docker)
+    assert status["lo"]["process"] is True and status["executor"]["busy"] is True
+    assert status["voice"]["running"] is True and status["voice"]["reachable"] is False
+    assert status["slots"]["1"]["runner"]["body"] == "attached"
+    assert status["slots"]["2"]["mind"]["running"] is False
 
 def error_of(response) -> dict:
     body = response.json()

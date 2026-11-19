@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -38,7 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(os.environ.get("STAND_DAEMON_ROOT") or Path(__file__).resolve().parent.parent)
 sys.path.insert(0, str(ROOT))
 from runtime.hive.infra import (  # noqa: E402  (dev/ is not a package; same trick as tests)
     BODY_KINDS,
@@ -514,6 +515,7 @@ def main_with(
     once: bool = False,
     project: str = "",
     runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    busy: threading.Event | None = None,
 ) -> int:
     """The poll loop against an injected board — the tests drive a fake one."""
     echo(f"infra bridge: {hive.base} · interval {interval}s" + (" · dry run" if dry_run else ""))
@@ -540,7 +542,13 @@ def main_with(
                 # the operator may switch off mid-batch: re-read before each take
                 if not dry_run and not hive.call("GET", "/board/infra/switch")[1].get("on"):
                     break
-                process(hive, request, project=project, dry=dry_run, runner=runner)
+                if busy is not None:
+                    busy.set()
+                try:
+                    process(hive, request, project=project, dry=dry_run, runner=runner)
+                finally:
+                    if busy is not None:
+                        busy.clear()
         if dry_run or once:
             return 0
         time.sleep(interval)
@@ -556,14 +564,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="print commands, touch nothing")
     parser.add_argument("--once", action="store_true", help="one poll cycle and exit")
     parser.add_argument("--project", "-p", default="", help="a parallel stand's compose project")
+    parser.add_argument("--monitor", action="store_true", help="publish stand status alongside the executor")
     args = parser.parse_args(argv)
     if not args.key:
         print("infra_bridge: --key or HIVE_INFRA_KEY is required", file=sys.stderr)
         return 2
-    return main_with(
-        Hive(args.url, args.key),
-        interval=args.interval, dry_run=args.dry_run, once=args.once, project=args.project,
-    )
+    stop, busy = threading.Event(), threading.Event()
+    watcher = None
+    if args.monitor and not (args.dry_run or args.once):
+        if __package__:
+            from .board_monitor import monitor
+        else:
+            from board_monitor import monitor
+        project = args.project or os.environ.get("COMPOSE_PROJECT_NAME") or "lastorder"
+        watcher = threading.Thread(
+            target=monitor, args=(Hive(args.url, args.key, timeout_s=3), project, stop, busy, echo),
+            daemon=True, name="board-monitor",
+        )
+        watcher.start()
+    try:
+        return main_with(
+            Hive(args.url, args.key),
+            interval=args.interval, dry_run=args.dry_run, once=args.once, project=args.project, busy=busy,
+        )
+    finally:
+        stop.set()
 
 
 if __name__ == "__main__":

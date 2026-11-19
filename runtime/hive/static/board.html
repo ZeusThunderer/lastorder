@@ -1,68 +1,106 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Доска сети · Last Order</title>
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="/board/board.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Доска сети · Last Order</title>
+  <link rel="stylesheet" href="/board/board.css">
+  <script defer src="/board/board.js"></script>
 </head>
 <body>
-<div id="login" class="login" hidden>
-  <form id="login-form" class="login-form">
-    <h2>Вход на доску</h2>
-    <p class="login-note">Пароль — HIVE_OPERATOR_KEY стенда</p>
-    <input type="password" id="login-password" placeholder="пароль оператора"
-           autocomplete="current-password" required>
-    <button type="submit">войти</button>
-    <div id="login-error" class="login-error" hidden></div>
-  </form>
-</div>
-<header class="top">
-  <h1>Доска сети</h1>
-  <span id="conn" class="conn" title="живое обновление">…</span>
-  <label class="filter-label">адресат:
-    <select id="filter"></select>
-  </label>
-  <form id="new-entry" class="new-entry">
-    <select id="new-kind">
-      <option value="task">задача</option>
-      <option value="message">сообщение</option>
-    </select>
-    <select id="new-to"></select>
-    <textarea id="new-text" maxlength="800" placeholder="текст (до 800 символов)" required></textarea>
-    <button type="submit">отправить</button>
-  </form>
-  <button id="logout" class="logout" hidden>выйти</button>
-  <div id="infra-switch" class="infra-switch" title="исполнитель инфраструктуры (T-057)" hidden>
-    <span id="infra-state" class="infra-state"></span>
-    <button id="infra-toggle" type="button"></button>
-    <form id="infra-off-form" class="inline-form" hidden>
-      <input type="text" id="infra-reason" maxlength="400"
-             placeholder="почему выключен (увидит Last Order)">
-      <button type="submit" class="danger">выключить</button>
-      <button type="button" class="cancel-inline">скрыть</button>
-    </form>
-    <!-- ADR-050: the operator's slot buttons — infra requests on the board, run by
-         the executor like Last Order's; the body is the slot's mind's own -->
-    <span id="infra-slots" class="infra-slots"></span>
+  <a class="skip" href="#main">К содержимому</a>
+  <div id="board" hidden>
+    <header class="top">
+      <div class="identity"><span>Last Order</span><h1>Доска сети</h1></div>
+      <div class="top-actions">
+        <a href="?section=network" id="connection" class="connection" data-section="network">Связь проверяется</a>
+        <button id="create" class="primary" type="button" disabled>Создать</button>
+      </div>
+    </header>
+    <div class="layout">
+      <nav class="sidebar" aria-label="Разделы доски">
+        <button type="button" id="menu" aria-expanded="false" aria-controls="navigation">Обзор</button>
+        <div id="navigation">
+          <div id="sections"></div>
+          <a href="?section=network" data-section="network">Состояние сети</a>
+          <button type="button" id="logout" class="quiet">Выйти</button>
+        </div>
+      </nav>
+      <main id="main" tabindex="-1">
+        <div id="ribbon" class="ribbon" hidden>
+          <p id="ribbon-text" role="status"></p><button id="retry" type="button">Повторить</button>
+        </div>
+        <div id="workspace" class="workspace">
+          <div class="content">
+            <h2 id="section-heading" tabindex="-1">Требует внимания</h2>
+            <form id="filters" class="filters" role="search" hidden>
+              <label class="search">Поиск по тексту или #номеру<input id="search" type="search" maxlength="800"></label>
+              <label id="lane-label">Очередь<select id="lane"></select></label>
+              <label>Статус<select id="filter-status"></select></label>
+              <label>Адресат<select id="filter-to"></select></label>
+            </form>
+            <p id="list-state" class="empty" role="status">Загружаем доску…</p>
+            <div id="list"></div>
+            <button type="button" id="more" hidden>Показать ещё 50</button>
+            <section id="network" hidden aria-labelledby="section-heading">
+              <div id="snapshot"><p class="empty">Загружаем состояние сети…</p></div>
+              <section class="panel" id="infra-switch" aria-labelledby="executor-heading">
+                <div class="panel-heading"><h3 id="executor-heading">Исполнитель заявок</h3></div>
+                <div class="panel-body">
+                  <p id="infra-switch-state">Настройка проверяется</p>
+                  <p id="infra-switch-reason" class="muted" hidden></p>
+                  <button id="infra-toggle" type="button" disabled>Изменить приём</button>
+                  <form id="infra-off-form" class="stack" hidden>
+                    <label>Причина для LO<textarea id="infra-reason" maxlength="400"></textarea></label>
+                    <div class="button-row"><button class="primary" type="submit">Выключить приём</button><button id="infra-off-cancel" type="button">Отмена</button></div>
+                  </form>
+                  <p id="infra-feedback" class="notice" role="status" hidden></p>
+                </div>
+              </section>
+              <section id="execution"></section>
+            </section>
+          </div>
+          <div id="inline-details"></div>
+        </div>
+      </main>
+    </div>
   </div>
-</header>
-<main class="columns">
-  <section class="column" id="col-task">
-    <h2>Задачи</h2>
-    <div class="cards"></div>
+  <section id="login" class="login" aria-labelledby="login-title" hidden>
+    <form id="login-form" class="stack">
+      <p class="brand">Last Order</p><h1 id="login-title">Доска сети</h1>
+      <label>Пароль оператора<input id="login-password" type="password" autocomplete="current-password" required></label>
+      <button class="primary" type="submit">Войти</button>
+      <p id="login-error" role="status" class="notice" hidden></p>
+    </form>
   </section>
-  <section class="column" id="col-request">
-    <h2>Запросы</h2>
-    <div class="cards"></div>
+  <dialog id="detail-dialog" aria-labelledby="detail-title"></dialog>
+  <section id="detail" class="detail" aria-labelledby="detail-title" hidden>
+    <header class="detail-heading">
+      <h2 id="detail-title" tabindex="-1">Запись</h2>
+      <button id="detail-close" type="button">Закрыть<span class="sr-only"> детали</span></button>
+    </header>
+    <p id="detail-state" class="notice" role="status" hidden></p>
+    <button id="detail-retry" type="button" hidden>Повторить загрузку</button>
+    <div id="detail-body"></div>
+    <div id="entry-actions" class="button-row"></div>
+    <div id="action-form"></div>
+    <p id="action-feedback" class="notice" role="status" hidden></p>
+    <div id="recovered"></div>
+    <section id="thread" aria-labelledby="thread-heading" hidden>
+      <h3 id="thread-heading">Обсуждение</h3><div id="thread-body"></div>
+    </section>
   </section>
-  <section class="column" id="col-info">
-    <h2>Тревоги и сообщения</h2>
-    <div class="cards"></div>
-  </section>
-</main>
-<div id="toast" class="toast" hidden></div>
-<script src="/board/board.js" defer></script>
+  <dialog id="composer" aria-labelledby="compose-title">
+    <form id="compose-form" class="stack">
+      <div class="dialog-heading"><h2 id="compose-title">Создать запись</h2><button id="compose-close" type="button">Закрыть</button></div>
+      <label>Вид записи<select id="new-kind" autofocus><option value="task">Задача</option><option value="message">Сообщение</option></select></label>
+      <label>Адресат<select id="new-to" required></select></label>
+      <label>Текст<textarea id="new-text" rows="5" required aria-describedby="new-count"></textarea><span id="new-count" class="count">0 из 800</span></label>
+      <div id="compose-connection" class="ribbon" hidden><p id="compose-connection-text" role="status"></p><button id="compose-retry" type="button">Повторить</button></div>
+      <p id="compose-feedback" class="notice" role="status" hidden></p>
+      <div class="button-row"><button type="submit" class="primary" disabled>Создать задачу</button></div>
+    </form>
+  </dialog>
+  <div id="announcement" class="sr-only" role="status"></div>
 </body>
 </html>

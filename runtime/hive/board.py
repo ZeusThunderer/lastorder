@@ -42,6 +42,7 @@ from typing import Any
 
 from runtime.config import env
 from runtime.hive.infra import (
+    INFRA_ACTIONS,
     RESULT_MAX,
     RUNNER_ACTIONS,
     RUNNER_RESTARTS_MAX,
@@ -72,6 +73,7 @@ FEED_LIMIT = 500  # one feed read; the rest waits for the next poll
 LIST_LIMIT = 15  # the MCP `board` tool: a glance, not a dump
 LIST_TEXT = 120  # the MCP `board` line cuts the text here
 ENTRIES_LIMIT_MAX = 200  # the operator listing
+VIEW_PAGE = 50
 
 KINDS = ("task", "request", "message", "alarm")
 ALARM_TYPES = (
@@ -229,6 +231,7 @@ class Board:
             self._path, check_same_thread=False, timeout=10.0, isolation_level=None
         )
         self._conn.row_factory = sqlite3.Row
+        self._conn.create_function("board_casefold", 1, str.casefold, deterministic=True)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA busy_timeout=10000")
         self._conn.execute("PRAGMA foreign_keys=ON")
@@ -380,6 +383,7 @@ class Board:
                 "count": row["alarm_count"],
                 "slot": row["alarm_slot"],
                 "serial": row["alarm_serial"],
+                "at": row["alarm_at"],
             }
         if with_thread:
             replies = cur.execute(
@@ -714,7 +718,7 @@ class Board:
 
     def transition(
         self, actor: str, entry_id: int, to_status: Any, text: Any = "", args: Any = None,
-        secret: Any = None,
+        secret: Any = None, expected_update: str | None = None,
     ) -> dict:
         if not isinstance(to_status, str):
             raise BoardError(422, "validation", "to_status must be a string")
@@ -726,6 +730,8 @@ class Board:
             if row is None:
                 raise BoardError(404, "unknown_entry", f"no board entry #{entry_id}")
             kind, status = row["kind"], row["status"]
+            if expected_update is not None and row["updated_at"] != expected_update:
+                raise BoardError(409, "entry_changed", f"#{entry_id} changed before the decision")
             moves = _TASK_MOVES if kind == "task" else (
                 _REQUEST_MOVES if kind == "request" else (
                     {
@@ -1171,7 +1177,130 @@ class Board:
                 )
                 if not involved:
                     raise BoardError(403, "forbidden", f"{actor} is not part of #{entry_id}")
-            return self._to_json(self._conn, row, with_thread=True)
+            entry = self._to_json(self._conn, row, with_thread=True)
+            if actor == OPERATOR:
+                entry["operator_actions"] = self._operator_actions(row)
+            return entry
+
+    def _operator_actions(self, row: sqlite3.Row) -> list[str]:
+        kind, status, author = row["kind"], row["status"], row["from_"]
+        actions = ["reply"]
+        if kind == "task" and status in ("open", "taken", "needs_input"):
+            actions.append("cancel")
+            if status == "needs_input" and (author == OPERATOR or self._author_gone(author, OPERATOR)):
+                actions.append("clarify")
+        if kind == "request" and status == "open":
+            if author == OPERATOR:
+                actions.append("cancel")
+            if not self._row_is_infra(row):
+                actions.extend(self._allowed_answers(row))
+        if kind == "alarm" and status == "open":
+            actions.append("ack")
+        return actions
+
+    def operator_view(
+        self, section: str, *, lane: str = "", status: str = "", to: str = "",
+        before: int | None = None, query: str = "",
+    ) -> dict:
+        """A page of compact operator entries and counts over the whole board."""
+        def placeholders(values: tuple) -> str:
+            return ",".join("?" for _ in values)
+
+        terminal = tuple(sorted(_TERMINAL))
+        active = f"status NOT IN ({placeholders(terminal)})"
+        sections = {
+            "overview": ("0", ()),
+            "tasks": (f"kind='task' AND {active}", terminal),
+            "requests": (f"kind='request' AND {active}", terminal),
+            "events": ("kind='message' OR (kind='alarm' AND status='open')", ()),
+            "history": (f"kind!='message' AND NOT ({active})", terminal),
+        }
+        lane_sections = {"alarms": "events", "decisions": "requests",
+                         "clarify": "tasks", "execution": "requests"}
+        statuses = _TERMINAL | {"open", "taken", "needs_input"}
+        if section not in sections or (lane and lane_sections.get(lane) != section):
+            raise BoardError(422, "validation", "unknown board section or queue")
+        if (status and status not in statuses) or (to and _target_class(to) is None):
+            raise BoardError(422, "validation", "unknown board filter")
+        if not isinstance(query, str) or len(query) > TEXT_MAX:
+            raise BoardError(422, "validation", "invalid board search")
+        if before is not None and not 0 < before < 2**63:
+            raise BoardError(422, "validation", "invalid board cursor")
+
+        with self._lock:
+            live = self._live_serials()
+            authors = tuple(str(serial) for serial in live)
+            infra_actions = tuple(INFRA_ACTIONS)
+            infra = f"COALESCE(json_extract(request_json,'$.action'),'') IN ({placeholders(infra_actions)})"
+            departed = "from_ != '' AND from_ NOT GLOB '*[^0-9]*'"
+            if authors:
+                departed += f" AND from_ NOT IN ({placeholders(authors)})"
+            lanes = {
+                "alarms": ("kind='alarm' AND status='open'", ()),
+                "decisions": (
+                    f"kind='request' AND status='open' AND to_='operator' AND NOT ({infra})",
+                    infra_actions,
+                ),
+                "clarify": (
+                    f"kind='task' AND status='needs_input' AND (from_='operator' OR ({departed}))",
+                    authors,
+                ),
+                "execution": (f"kind='request' AND status IN ('open','taken') AND {infra}", infra_actions),
+            }
+
+            def count(where: str, params: tuple) -> int:
+                return self._conn.execute(
+                    f"SELECT COUNT(*) FROM board_entry WHERE {where}", params,
+                ).fetchone()[0]
+
+            def compact(where: str, params: tuple, limit: int, *, recent: bool = False) -> list:
+                order = "e.updated_at DESC, e.id DESC" if recent else "e.id DESC"
+                rows = self._conn.execute(
+                    "SELECT e.*, (SELECT COUNT(*) FROM board_reply WHERE entry_id=e.id) AS replies"
+                    f" FROM board_entry e WHERE {where} ORDER BY {order} LIMIT ?",
+                    (*params, limit),
+                ).fetchall()
+                entries = []
+                for row in rows:
+                    entry = self._to_json(self._conn, row, with_thread=False)
+                    entries.append({
+                        key: entry[key] for key in (
+                            "id", "kind", "from", "to", "text", "status", "claimed_by",
+                            "created_at", "updated_at", "alarm",
+                        ) if key in entry
+                    } | {"reply_count": row["replies"]})
+                return entries
+
+            attention = {}
+            for name, (where, params) in lanes.items():
+                attention[name] = {"count": count(where, params)}
+                if section == "overview":
+                    attention[name]["entries"] = compact(where, params, 2, recent=True)
+            counts = {name: count(*selection) for name, selection in sections.items() if name != "overview"}
+            where, params = lanes[lane] if lane else sections[section]
+            conditions = [f"({where})"]
+            values = list(params)
+            for column, value in (("status", status), ("to_", to)):
+                if value:
+                    conditions.append(f"{column}=?")
+                    values.append(value)
+            query = query.strip()
+            if re.fullmatch(r"#[0-9]+", query):
+                conditions.append("CAST(id AS TEXT)=?")
+                values.append(query[1:].lstrip("0"))
+            elif query:
+                conditions.append("instr(board_casefold(text), ?) > 0")
+                values.append(query.casefold())
+            if before is not None:
+                conditions.append("id<?")
+                values.append(before)
+            entries = compact(" AND ".join(conditions), tuple(values), VIEW_PAGE + 1)
+            return {
+                "entries": entries[:VIEW_PAGE],
+                "next_cursor": entries[VIEW_PAGE - 1]["id"] if len(entries) > VIEW_PAGE else None,
+                "counts": counts, "attention": attention,
+                "alive": [b for b in self._lifecycle.alive() if b.serial in live],
+            }
 
     # --- the MCP glance (section 10) ------------------------------------------------------------------
 
