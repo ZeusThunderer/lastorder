@@ -245,32 +245,39 @@ button.primary:not(:disabled):hover { background:var(--teal); }
   .identity h1 { font-size:2.35rem; }
   .filters { gap:.65rem; }
 }
+.top::before { content:""; position:absolute; pointer-events:none; z-index:-1; inset:0 auto 0 58%; width:11rem; background:url("/board/last-order.webp") center 10% / cover no-repeat; mix-blend-mode:multiply; }
 .login .brand { padding-top:5.25rem; background:url("/board/last-order.webp") left top / auto 5rem no-repeat; }
-.top {
-  display:grid;
-  grid-template-columns:minmax(0,1fr) auto max-content;
-  grid-template-areas:"identity portrait actions";
-  align-items:center;
-}
-.identity { grid-area:identity; }
-.top-actions { grid-area:actions; }
-.lo-portrait {
-  grid-area:portrait;
-  display:block;
-  height:clamp(104px,15vw,152px);
-  width:clamp(115px,18vw,196px);
-  object-view-box:inset(0% 20% 36% 8%);
-  object-fit:cover;
-  object-position:center 25%;
-  mix-blend-mode:multiply;
-}
-@media(max-width:56rem) {
-  .top { grid-template-columns:minmax(0,1fr) auto; grid-template-areas:"identity portrait" "actions portrait"; row-gap:.4rem; }
+@media(max-width:64rem) { .top::before { left:54%; width:7.4rem; } }
+@media(max-width:48rem) {
+  .top::before { left:auto; right:var(--gutter); width:5.15rem; height:4.5rem; }
   .top-actions { width:100%; justify-content:space-between; }
+  .identity { max-width:calc(100% - 5.2rem); }
 }
-@media(max-width:36rem) { .identity { align-items:start; flex-direction:column; gap:.3rem; } .imprint { border:0; } .top { grid-template-areas:"identity portrait" "actions actions"; } }
-@media(max-width:25rem) { .identity { gap:.3rem; } .imprint { padding-right:.55rem; } .identity h1 { font-size:1.8rem; } }
+@media(max-width:25rem) { .identity { gap:.55rem; } .imprint { padding-right:.55rem; } .identity h1 { font-size:1.8rem; } }
 @media(max-width:36rem) {
   .top::after { left:67%; width:1.1rem; border-inline-width:2px; }
   #navigation a,#logout { padding-inline:.38rem; font-size:.88rem; }
+}
+
+/* Give the portrait its own space between the title and controls on small desktops. */
+@media (48rem < width <= 64rem) {
+  .top { display:grid; grid-template-columns:max-content minmax(0,1fr) max-content; gap:.5rem; }
+  .top .identity { grid-column:1; grid-row:1; }
+  .top-actions { grid-column:3; grid-row:1; }
+  .top::before {
+    grid-column:2; grid-row:1; justify-self:center; align-self:stretch;
+    position:relative; inset:auto; width:min(100%,7.4rem); margin-block:-1rem;
+    background-size:contain; background-position:center; z-index:0;
+  }
+  .top::after { display:none; }
+}
+/* Keep both names intact when the original single-line lockup no longer fits. */
+@media (max-width:24rem) {
+  .top { display:grid; grid-template-columns:minmax(0,1fr) 5.15rem; gap:.45rem .65rem; }
+  .identity { grid-area:1 / 1; max-width:none; flex-direction:column; align-items:start; gap:.1rem; }
+  .imprint { border:0; padding:0; white-space:nowrap; }
+  .identity h1 { font-size:clamp(1.4rem,8vw,1.8rem); }
+  .top::before { grid-area:1 / 2; position:static; align-self:center; }
+  .top::after { display:none; }
+  .top-actions { grid-column:1 / -1; }
 }
