@@ -11,7 +11,7 @@
   <a class="skip" href="#main">К содержимому</a>
   <div id="board" hidden>
     <header class="top">
-      <div class="identity"><span>Last Order</span><h1>Доска сети</h1></div>
+      <div class="identity"><div class="imprint"><span lang="ja">ラストオーダー</span><b>Last Order</b></div><h1>Доска сети</h1></div>
       <div class="top-actions">
         <a href="?section=network" id="connection" class="connection" data-section="network">Связь проверяется</a>
         <button id="create" class="primary" type="button" disabled>Создать</button>
@@ -19,7 +19,6 @@
     </header>
     <div class="layout">
       <nav class="sidebar" aria-label="Разделы доски">
-        <button type="button" id="menu" aria-expanded="false" aria-controls="navigation">Обзор</button>
         <div id="navigation">
           <div id="sections"></div>
           <a href="?section=network" data-section="network">Состояние сети</a>
@@ -36,9 +35,9 @@
             <div id="glance" hidden><a href="#stream-tasks">Задачи</a><a href="#stream-requests">Запросы</a><a href="#stream-events">События</a></div>
             <form id="filters" class="filters" role="search" hidden>
               <label class="search">Поиск по тексту или #номеру<input id="search" type="search" maxlength="800"></label>
-              <label id="lane-label">Очередь<select id="lane"></select></label>
-              <label>Статус<select id="filter-status"></select></label>
-              <label>Адресат<select id="filter-to"></select></label>
+              <fieldset class="choices" id="lane-label"><legend>Очередь</legend><input type="hidden" id="lane"><div class="choice-list"></div></fieldset>
+              <fieldset class="choices"><legend>Статус</legend><input type="hidden" id="filter-status"><div class="choice-list"></div></fieldset>
+              <fieldset class="choices"><legend>Адресат</legend><input type="hidden" id="filter-to"><div class="choice-list"></div></fieldset>
             </form>
             <p id="list-state" class="empty" role="status">Загружаем доску…</p>
             <div id="list"></div>
@@ -94,8 +93,8 @@
   <dialog id="composer" aria-labelledby="compose-title">
     <form id="compose-form" class="stack">
       <div class="dialog-heading"><h2 id="compose-title">Создать запись</h2><button id="compose-close" type="button">Закрыть</button></div>
-      <label>Вид записи<select id="new-kind" autofocus><option value="task">Задача</option><option value="message">Сообщение</option></select></label>
-      <label>Адресат<select id="new-to" required></select></label>
+      <fieldset class="choices"><legend>Вид записи</legend><input type="hidden" id="new-kind" value="task"><div class="choice-list"></div></fieldset>
+      <fieldset class="choices"><legend>Выберите адресата</legend><input type="hidden" id="new-to"><div class="choice-list"></div></fieldset>
       <label>Текст<textarea id="new-text" rows="5" required aria-describedby="new-count"></textarea><span id="new-count" class="count">0 из 800</span></label>
       <div id="compose-connection" class="ribbon" hidden><p id="compose-connection-text" role="status"></p><button id="compose-retry" type="button">Повторить</button></div>
       <p id="compose-feedback" class="notice" role="status" hidden></p>

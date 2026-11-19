@@ -103,6 +103,7 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _BOARD_STATIC = {
     "board.html": "text/html; charset=utf-8",
     "board.js": "text/javascript; charset=utf-8",
+    "last-order.webp": "image/webp",
     "board.css": "text/css; charset=utf-8",
 }
 

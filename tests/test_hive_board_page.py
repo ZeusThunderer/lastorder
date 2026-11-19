@@ -62,6 +62,7 @@ def test_board_assets_open_and_whitelisted(tmp_path: Path) -> None:
     for name, media in (
         ("board.js", "text/javascript"),
         ("board.css", "text/css"),
+        ("last-order.webp", "image/webp"),
     ):
         served = stack.client.get(f"/board/{name}")
         assert served.status_code == 200
@@ -181,6 +182,8 @@ def test_non_ascii_key_is_a_calm_401(tmp_path: Path) -> None:
 
 def test_static_references_nothing_external() -> None:
     for path in sorted(STATIC.iterdir()):
+        if path.suffix == ".webp":
+            continue
         text = path.read_text(encoding="utf-8")
         assert re.search(r"https?://", text) is None, path
         assert "http" not in text.lower(), f"{path} mentions the network protocol"

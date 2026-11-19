@@ -125,7 +125,6 @@ function navigate(route, { replace = false, pop = false, trigger = null } = {}) 
     history[replace ? "replaceState" : "pushState"](null, "", address(route));
   }
   state.route = route;
-  $("menu").setAttribute("aria-expanded", "false");
   if (changedList) {
     if (route.section !== previous.section) {
       state.q = "";
@@ -186,7 +185,6 @@ function updateNav() {
     const count = link.querySelector(".nav-count");
     if (count) count.textContent = state.view?.counts?.[link.dataset.section] ?? "";
   }
-  $("menu").textContent = sections[state.route.section];
 }
 
 async function api(path, { method = "GET", body, signal } = {}) {
@@ -334,13 +332,29 @@ async function refresh() {
   return view;
 }
 
-function options(select, items, target) {
+function options(field, items, target) {
+  const group = field.nextElementSibling;
   const signature = JSON.stringify(items);
-  if (select.dataset.options !== signature) {
-    select.replaceChildren(...items.map(([value, label]) => new Option(label, value)));
-    select.dataset.options = signature;
+  if (field.dataset.options !== signature) {
+    group.replaceChildren(...items.map(([value, caption]) => {
+      const label = document.createElement("label");
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = field.id + "-choice";
+      radio.value = value;
+      radio.addEventListener("change", () => {
+        field.value = value;
+        field.dispatchEvent(new Event("change"));
+      });
+      const text = document.createElement("span");
+      text.textContent = caption;
+      label.append(radio, text);
+      return label;
+    }));
+    field.dataset.options = signature;
   }
-  select.value = target;
+  field.value = target;
+  for (const radio of group.querySelectorAll("input")) radio.checked = radio.value === target;
 }
 function renderFilters() {
   const { section, lane, status, to } = state.route;
@@ -800,8 +814,10 @@ async function sendMutation(path, body, { success, failure }) {
 }
 
 function renderRecipients() {
+  options($("new-kind"), [["task", "Задача"], ["message", "Сообщение"]], $("new-kind").value);
   const select = $("new-to");
   const message = $("new-kind").value === "message";
+  select.parentElement.querySelector("legend").textContent = message ? "Адресат" : "Выберите адресата";
   if (message) {
     options(select, [["net", "Вся сеть"]], "net");
     return;
@@ -810,7 +826,7 @@ function renderRecipients() {
   const nodes = (state.view?.alive || []).map((brief) => [
     String(brief.serial), actor(String(brief.serial)) + " · " + brief.slot,
   ]);
-  const choices = [["", "Выберите адресата"], ["last-order", "LO"], ["net", "Вся сеть"], ...nodes];
+  const choices = [["last-order", "LO"], ["net", "Вся сеть"], ...nodes];
   let target = original;
   if (state.view && original && !choices.some(([key]) => key === original)) {
     target = "";
@@ -818,7 +834,6 @@ function renderRecipients() {
     report($("compose-feedback"), "Адресат вышел из реестра. Выберите нового. Текст сохранён.");
   } else if (!state.view && original && !choices.some(([key]) => key === original)) choices.push([original, actor(original)]);
   options(select, choices, target);
-  select.options[0].disabled = true;
 }
 function updateComposer() {
   const message = $("new-kind").value === "message";
@@ -842,6 +857,7 @@ async function createEntry(event) {
     success: (entry) => {
       $("composer").close();
       $("compose-form").reset();
+      $("new-kind").value = "task";
       $("new-to").value = "";
       limit($("new-text"), $("new-count"), 800);
       report($("compose-feedback"), "");
@@ -1008,10 +1024,6 @@ function init() {
     if (link.dataset.entry) {
       navigate({ ...state.route, id: Number(link.dataset.entry) }, { trigger: link });
     } else gotoSection(link.dataset.section, link.dataset.lane);
-  });
-  $("menu").addEventListener("click", () => {
-    const menu = $("menu");
-    menu.setAttribute("aria-expanded", String(menu.getAttribute("aria-expanded") !== "true"));
   });
   for (const [id, key] of [["lane", "lane"], ["filter-status", "status"], ["filter-to", "to"]]) {
     $(id).addEventListener("change", () => navigate({ ...state.route, [key]: $(id).value }));
