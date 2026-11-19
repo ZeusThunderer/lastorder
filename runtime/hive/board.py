@@ -1277,6 +1277,12 @@ class Board:
                 if section == "overview":
                     attention[name]["entries"] = compact(where, params, 2, recent=True)
             counts = {name: count(*selection) for name, selection in sections.items() if name != "overview"}
+            streams = {}
+            if section == "overview":
+                for name in ("tasks", "requests", "events"):
+                    preview = compact(*sections[name], 4)
+                    priority = attention[{"tasks": "clarify", "requests": "decisions", "events": "alarms"}[name]]["entries"]
+                    streams[name] = list({entry["id"]: entry for entry in priority + preview}.values())[:4]
             where, params = lanes[lane] if lane else sections[section]
             conditions = [f"({where})"]
             values = list(params)
@@ -1298,7 +1304,7 @@ class Board:
             return {
                 "entries": entries[:VIEW_PAGE],
                 "next_cursor": entries[VIEW_PAGE - 1]["id"] if len(entries) > VIEW_PAGE else None,
-                "counts": counts, "attention": attention,
+                "counts": counts, "attention": attention, "streams": streams,
                 "alive": [b for b in self._lifecycle.alive() if b.serial in live],
             }
 

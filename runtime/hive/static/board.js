@@ -2,7 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 const sections = {
-  overview: "Обзор", tasks: "Задачи", requests: "Запросы",
+  overview: "Доска", tasks: "Задачи", requests: "Запросы",
   events: "События", history: "История", network: "Состояние сети",
 };
 const kinds = { task: "Задача", request: "Запрос", message: "Сообщение", alarm: "Тревога" };
@@ -38,7 +38,7 @@ const actionSpecs = {
   cancel: { label: "Отменить запись", target: "canceled", danger: true },
   revoke: { label: "Отозвать грант", danger: true, noText: true },
 };
-const wide = matchMedia("(min-width: 75rem)");
+
 const dateFormat = new Intl.DateTimeFormat("ru-RU", {
   month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
 });
@@ -135,6 +135,7 @@ function navigate(route, { replace = false, pop = false, trigger = null } = {}) 
     state.view = null;
     state.listFresh = false;
     state.listSeq++;
+    if ($("list").contains($("detail"))) $("inline-details").append($("detail"));
     $("list").replaceChildren();
     state.initialError = false;
     renderView();
@@ -355,7 +356,15 @@ function renderFilters() {
 function renderView() {
   const { section, lane, status, to } = state.route;
   const listing = section !== "overview" && section !== "network";
-  $("section-heading").textContent = section === "overview" ? "Требует внимания" : sections[section];
+  $("section-heading").textContent = section === "overview" ? "Сейчас в сети" : sections[section];
+  $("main").dataset.section = section;
+  $("glance").hidden = section !== "overview";
+  if (section === "overview" && state.view) {
+    for (const key of ["tasks", "requests", "events"]) {
+      const jump = $("glance").querySelector('[href="#stream-' + key + '"]');
+      jump.textContent = sections[key] + " · " + state.view.counts[key];
+    }
+  }
   $("filters").hidden = !listing;
   $("network").hidden = section !== "network";
   $("list").hidden = section === "network";
@@ -381,8 +390,8 @@ function renderView() {
 
   if (section === "overview") {
     $("list").querySelector('[data-all-entries]')?.remove();
-    for (const key of ["alarms", "decisions", "clarify"]) {
-      renderQueue($("list"), key, current.attention[key]);
+    for (const key of ["tasks", "requests", "events"]) {
+      renderQueue($("list"), key, { count: current.counts[key], entries: current.streams[key] });
     }
   } else if (section === "network") {
     renderQueue($("execution"), "execution", {
@@ -398,27 +407,32 @@ function renderView() {
     }
     renderRows(wrap.firstElementChild, current.entries);
   } else {
+    if ($("list").contains($("detail"))) $("inline-details").append($("detail"));
     $("list").replaceChildren();
   }
   annotateSelection();
+  if (state.route.id) placeDetails();
 }
 function renderQueue(parent, key, data) {
+  const stream = Object.hasOwn(sections, key);
+  const group = stream ? { title: sections[key], section: key, empty: { tasks: "Активных задач нет.", requests: "Открытых запросов нет.", events: "Событий пока нет." }[key], link: sections[key] } : lanes[key];
   let panel = parent.querySelector('[data-queue="' + key + '"]');
   if (!panel) {
     panel = el("section", "panel");
     panel.dataset.queue = key;
+    panel.id = "stream-" + key;
     const heading = el("div", "panel-heading");
-    const title = el("h3", "", lanes[key].title);
+    const title = el("h3", "", group.title);
     title.append(el("span"));
-    const link = linkFor(lanes[key].section, key);
+    const link = linkFor(group.section, stream ? "" : key);
     heading.append(title, link);
-    panel.append(heading, el("ul", "entry-list"), el("p", "empty", lanes[key].empty));
+    panel.append(heading, el("ul", "entry-list"), el("p", "empty", group.empty));
     parent.append(panel);
   }
   panel.querySelector("h3 span").textContent = data.count;
   const link = panel.querySelector("a");
   link.textContent = "Все " + data.count;
-  link.setAttribute("aria-label", lanes[key].link + ", всего " + data.count);
+  link.setAttribute("aria-label", group.link + ", всего " + data.count);
   link.hidden = data.count === 0;
   panel.lastElementChild.hidden = data.entries.length > 0;
   renderRows(panel.querySelector("ul"), data.entries);
@@ -455,6 +469,7 @@ function renderRows(parent, entries) {
   }
   for (const row of old.values()) {
     if (document.activeElement === row.firstElementChild) $("section-heading").focus({ preventScroll: true });
+    if (row.contains($("detail"))) $("inline-details").append($("detail"));
     row.remove();
   }
 }
@@ -475,12 +490,12 @@ function placeDetails(focus = false) {
     detail.hidden = true;
     return;
   }
-  const holder = wide.matches ? $("inline-details") : dialog;
+  const selected = $("workspace").querySelector('[data-entry="' + state.route.id + '"]');
+  const holder = selected?.parentElement || $("inline-details");
   const focused = detail.contains(document.activeElement) && document.activeElement;
   if (detail.parentElement !== holder) holder.append(detail);
   detail.hidden = false;
-  if (wide.matches) dialog.close();
-  else if (!dialog.open) dialog.showModal();
+  dialog.close();
   renderDetail();
   if (focus) $("detail-title").focus({ preventScroll: true });
   else if (focused) focused.focus({ preventScroll: true });
@@ -815,7 +830,9 @@ function openComposer() {
   if (!state.listFresh || $("composer").open) return;
   renderRecipients();
   updateComposer();
-  $("composer").showModal();
+  $("main").prepend($("composer"));
+  $("composer").show();
+  $("composer").scrollIntoView({block: "nearest"});
 }
 async function createEntry(event) {
   event.preventDefault();
@@ -978,7 +995,7 @@ async function toggleInfra(on) {
 }
 
 function init() {
-  for (const key of Object.keys(sections).filter((section) => section !== "network")) {
+  for (const key of ["overview", "history"]) {
     const link = linkFor(key);
     link.append(el("span", "nav-count"));
     $("sections").append(link);
@@ -1036,7 +1053,7 @@ function init() {
     event.preventDefault();
     dismissDetail();
   });
-  wide.addEventListener("change", () => placeDetails());
+
   window.addEventListener("popstate", () => navigate(readRoute(), { pop: true }));
   window.addEventListener("online", refresh);
   window.addEventListener("offline", () => {
