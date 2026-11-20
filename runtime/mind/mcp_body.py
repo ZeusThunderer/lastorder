@@ -743,8 +743,6 @@ class BodyMcp:
             _err(NO_BODY_ERROR)
         cleaned = check_say(text)
         if self._speaker is not None:
-            # spoken sentence by sentence; a line still waiting to start is replaced by this
-            # one (and goes to chat as text) instead of queueing behind it (defence-plan W1)
             replaced = self._speaker.say(cleaned)
             answer: dict[str, Any] = {"said": True, "text": cleaned, "voice": "speaking"}
             if replaced:
@@ -880,10 +878,9 @@ def build_server(
     async def say(text: str) -> dict[str, Any]:
         """One line into the player chat (no / or @, limited length and rate).
         When this body has a voice, the line is spoken aloud, sentence by sentence,
-        and appears in chat as the voice starts. A new line replaces the ones not
-        started yet (they go to chat unspoken, `replaced` counts them); a player
-        speaking to you does the same. Short lines start sooner: one or two
-        sentences."""
+        and appears in chat as the voice starts. Consecutive calls speak in order.
+        When another player speaks, pending lines go to chat only. Up to four lines
+        may wait for audio. Each call accepts at most 256 characters."""
         return await impl._reply("say", {"text": text}, lambda: impl.say(text))
 
     async def server_command(command: str) -> dict[str, Any]:
@@ -942,6 +939,17 @@ def build_server(
     @server.custom_route("/runner/status", methods=["GET"])
     async def runner_status(request: Request) -> Response:
         return JSONResponse(executor.death_status())
+
+    @server.custom_route("/voice/next", methods=["POST"])
+    async def voice_next(request: Request) -> Response:
+        """Slot-local Pi delivery. Text goes through the same filter as wait_events."""
+        body = await request.json()
+        status = executor.death_status()
+        if status["dead"] or status["term"] or not status["serial"] or body.get("serial") != status["serial"]:
+            return JSONResponse({"line": None}, status_code=409)
+        line = await asyncio.to_thread(executor.events.voice_for_pi, status["serial"],
+                                       body.get("ack", ""), 8.0)
+        return JSONResponse({"line": line})
 
     @server.custom_route("/runner/respawn", methods=["POST"])
     async def runner_respawn(request: Request) -> Response:

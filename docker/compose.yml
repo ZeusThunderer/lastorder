@@ -724,6 +724,7 @@ services:
       TTS_GPU_NAME: "${TTS_GPU_NAME:-5070 Ti}"
       TTS_DTYPE: "${TTS_DTYPE:-float32}"   # float16 produced NaN probabilities on this RTX 2070; measured float32 fallback
       TTS_F5_WEIGHTS: "${TTS_F5_WEIGHTS:-}"
+      TTS_F5_STEPS: "${TTS_F5_STEPS:-32}"
       TTS_VOICE_DIR: /voice
       TTS_STT_DEVICE: "${TTS_STT_DEVICE:-cpu}"
       TTS_STT_MODEL: "${TTS_STT_MODEL:-openai/whisper-large-v3-turbo}"

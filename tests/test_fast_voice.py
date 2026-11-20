@@ -5,6 +5,24 @@ from unittest.mock import AsyncMock
 from runtime.node.workplace import render_pi_configs
 from runtime.voice.speaker import Speaker
 
+
+def test_voice_queue_ack_retry_and_wait_use_one_observation():
+    from runtime.mind.executor import EventQueue
+    import time
+    queue = EventQueue()
+    line = {"voice": True, "voice_id": "375:body#1", "text": "снег"}
+    chat = {"from": "A", "text": "hi"}
+    queue.put("chat.line", lines=[chat, line])
+    assert queue.voice_for_pi(374, "", 0) is None
+    assert queue.voice_for_pi(375, "", 0) == line
+    assert queue.voice_for_pi(375, "", 0) == line  # lost response
+    assert queue.pop(0, time.monotonic)["lines"] == [chat]
+    assert queue.voice_for_pi(375, line["voice_id"], 0) is None
+    assert queue.pop(0, time.monotonic) is None
+    queue.put("chat.line", lines=[line])
+    assert queue.pop(0, time.monotonic)["lines"] == [line]
+    assert queue.voice_for_pi(375, "", 0) is None
+
 def test_pi_go_uses_virtual_key_and_preserves_mcp(monkeypatch):
     monkeypatch.setenv("PI_API_ROUTE", "gateway")
     c = render_pi_configs("GLM-5.3", "http://mind:8700", "http://hive:8000", "node-id")
@@ -190,7 +208,8 @@ def test_new_line_replaces_stream_still_waiting_for_first_audio():
     try:
         speaker.say("old")
         assert entered.wait(2)
-        assert speaker.say("new") == 1
+        speaker.heard({"from": "Steve"})
+        assert speaker.say("new") == 0
         release.set()
         assert played.wait(2)
         deadline=time.monotonic()+2

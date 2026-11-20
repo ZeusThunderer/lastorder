@@ -171,10 +171,12 @@ def test_each_sentence_is_its_own_clip_and_the_chat_line_comes_once_whole():
     assert synthesized == ["Первое предложение здесь.", "Второе предложение тоже здесь."]
     assert [t for k, t in ev.items if k == "chat"] == [line]
     assert [j["ok"] for j in ev.journal] == [True, True]
+    assert sum(kind == "audio" for kind, _ in ev.items) == 1
+    assert ev.journal[1]["inlet_gap_s"] == 0
     assert "wait_s" in ev.journal[0] and "wait_s" not in ev.journal[1]
 
 
-def test_a_new_line_replaces_the_waiting_one_and_nothing_is_lost():
+def test_queue_overflow_drops_only_oldest_waiting_line():
     ev = Events()
     gate = threading.Event()
 
@@ -186,19 +188,17 @@ def test_a_new_line_replaces_the_waiting_one_and_nothing_is_lost():
     sp = make(ev, synth=synth)
     assert sp.say("first") == 0
     time.sleep(0.05)                # "first" is in synthesis
-    assert sp.say("stale") == 1     # "first" had not started playing: replaced too
-    assert sp.say("newest") == 1    # "stale" never started: replaced, goes to chat as text
+    for text in ("second", "third", "fourth"):
+        assert sp.say(text) == 0
+    assert sp.say("newest") == 1
     gate.set()
-    wait_for(lambda: sum(1 for k, _ in ev.items if k == "chat") == 3)
-    wait_for(lambda: len(ev.journal) == 3)
+    wait_for(lambda: len(ev.journal) == 5)
     sp.close()
     chats = [t for k, t in ev.items if k == "chat"]
-    assert chats == ["first", "stale", "newest"]
-    assert chats.index("stale") < chats.index("newest")
+    assert chats == ["first", "second", "third", "fourth", "newest"]
     spoken = [t for k, t in ev.items if k == "audio"]
-    assert spoken == ["newest  "]
-    (dropped,) = [j for j in ev.journal if j["text"] == "stale"]
-    assert dropped["ok"] is False and dropped["silent"] == "replaced by a newer line"
+    assert spoken == ["second  ", "third   ", "fourth  ", "newest  "]
+    assert ev.journal[0]["silent"] == "voice queue full"
 
 
 def test_interrupt_drops_the_waiting_lines_and_lets_the_playing_one_finish():
@@ -216,18 +216,18 @@ def test_interrupt_drops_the_waiting_lines_and_lets_the_playing_one_finish():
     assert {j["text"]: j["ok"] for j in ev.journal} == {"playing": True, "waiting": False}
 
 
-def test_body_mcp_say_speaks_through_the_speaker_and_reports_replaced_lines():
+def test_two_consecutive_body_calls_speak_even_if_first_is_still_synthesizing():
     ev = Events()
     gate = threading.Event()
     sp = make(ev, synth=lambda t: (gate.wait(5), (pcm_for(t), ""))[1])
     impl = BodyMcp(SimpleNamespace(bodiless=False), speaker=sp)
     assert impl.say("привет") == {"said": True, "text": "привет", "voice": "speaking"}
     time.sleep(0.05)
-    impl.say("ещё")
-    assert impl.say("и ещё") == {"said": True, "text": "и ещё", "voice": "speaking", "replaced": 1}
+    assert impl.say("и ещё") == {"said": True, "text": "и ещё", "voice": "speaking"}
     gate.set()
-    wait_for(lambda: ("chat", "привет") in ev.items)
+    wait_for(lambda: len(ev.journal) == 2)
     sp.close()
+    assert [(j["text"], j["ok"]) for j in ev.journal] == [("привет", True), ("и ещё", True)]
 
 
 def test_the_executor_tells_listeners_only_about_other_players():

@@ -13,15 +13,39 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from queue import Full, Queue
+
+import webrtcvad
 
 log = logging.getLogger("voice.listener")
 
 BYTES_PER_S = 48000 * 2
-PAUSE_S = 0.8        # no packets this long: the phrase is over
-MIN_PHRASE_S = 0.5   # shorter is a cough or a click
+PAUSE_S = 0.45
+FRAME_BYTES = 1920   # 20 ms, 48 kHz mono, signed 16-bit
+MIN_SPEECH_FRAMES = 8
 MAX_PHRASE_S = 20.0  # a monologue is cut here and goes on as the next phrase
+
+
+def _music_caption(pcm_bytes: int, text: str) -> bool:
+    # Whisper can label an entire open-mic segment with a single ambient caption.
+    # A short spoken «музыка» and questions about music still reach the sister.
+    return (pcm_bytes >= MAX_PHRASE_S * BYTES_PER_S
+            and text.strip(" .!?…[]()♪").casefold() in {"музыка", "music"})
+
+
+@dataclass
+class _Capture:
+    vad: webrtcvad.Vad = field(default_factory=lambda: webrtcvad.Vad(2))
+    prefix: deque = field(default_factory=lambda: deque(maxlen=8))
+    pending: bytearray = field(default_factory=bytearray)
+    phrase: bytearray = field(default_factory=bytearray)
+    speech_frames: int = 0
+    silent_frames: int = 0
+    last_speech: float = 0
+    last_packet: float = 0
 
 
 class VoiceListener:
@@ -38,7 +62,7 @@ class VoiceListener:
         self._ignore = {n.lower() for n in ignore if n}
         self._clock = clock
         self._lock = threading.Lock()
-        self._open: dict[str, tuple[bytearray, float]] = {}
+        self._open: dict[str, _Capture] = {}
         self._phrases: Queue[tuple[str, bytes, float]] = Queue(maxsize=8)
         threading.Thread(target=self._cut_loop, name="voice-cut", daemon=True).start()
         threading.Thread(target=self._stt_loop, name="voice-stt", daemon=True).start()
@@ -48,28 +72,54 @@ class VoiceListener:
             return
         now = self._clock()
         with self._lock:
-            buf, _ = self._open.get(speaker, (bytearray(), now))
-            buf += bytes(audio)
-            self._open[speaker] = (buf, now)
-            if len(buf) >= MAX_PHRASE_S * BYTES_PER_S:
-                self._close(speaker)
+            capture = self._open.get(speaker)
+            if capture is None:
+                capture = self._open[speaker] = _Capture()
+                log.info("voice packets: %s", speaker)
+            capture.last_packet = now
+            capture.pending.extend(audio)
+            while len(capture.pending) >= FRAME_BYTES:
+                frame = bytes(capture.pending[:FRAME_BYTES])
+                del capture.pending[:FRAME_BYTES]
+                if capture.vad.is_speech(frame, 48000):
+                    if not capture.phrase:
+                        capture.phrase.extend(b"".join(capture.prefix))
+                        capture.prefix.clear()
+                        log.debug("voice activity: %s", speaker)
+                    capture.last_speech = now
+                    capture.speech_frames += 1
+                    capture.silent_frames = 0
+                elif not capture.phrase:
+                    capture.prefix.append(frame)
+                    continue
+                else:
+                    capture.silent_frames += 1
+                capture.phrase.extend(frame)
+                if (capture.silent_frames * 0.02 >= PAUSE_S
+                        or len(capture.phrase) >= MAX_PHRASE_S * BYTES_PER_S):
+                    self._close(speaker, capture)
 
-    def _close(self, speaker: str) -> None:  # under self._lock
-        buf, last_packet = self._open.pop(speaker)
-        if len(buf) < MIN_PHRASE_S * BYTES_PER_S:
+    def _close(self, speaker: str, capture: _Capture) -> None:
+        buf, capture.phrase = capture.phrase, bytearray()
+        frames, capture.speech_frames = capture.speech_frames, 0
+        capture.silent_frames = 0
+        if frames < MIN_SPEECH_FRAMES:
             return
         try:
-            self._phrases.put_nowait((speaker, bytes(buf), last_packet))
+            self._phrases.put_nowait((speaker, bytes(buf), capture.last_speech))
         except Full:
             log.warning("voice: STT behind, phrase of %s dropped", speaker)
 
     def _cut_loop(self) -> None:
         while True:
-            time.sleep(0.2)
+            time.sleep(0.025)
             now = self._clock()
             with self._lock:
-                for speaker in [s for s, (_, t) in self._open.items() if now - t >= PAUSE_S]:
-                    self._close(speaker)
+                for speaker, capture in list(self._open.items()):
+                    if capture.phrase and now - capture.last_speech >= PAUSE_S:
+                        self._close(speaker, capture)
+                    if now - capture.last_packet >= PAUSE_S:
+                        del self._open[speaker]
 
     def _stt_loop(self) -> None:
         while True:
@@ -83,7 +133,9 @@ class VoiceListener:
             log.info("voice heard: %s (%.1f s, end_to_stt=%.3f s, stt=%.3f s): %r",
                      speaker, len(pcm) / BYTES_PER_S, started - last_packet,
                      self._clock() - started, text[:80])
-            if text:
+            if _music_caption(len(pcm), text):
+                log.info("voice ambient music caption: %s", speaker)
+            elif text:
                 self._emit(speaker, text)
 
 

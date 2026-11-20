@@ -194,6 +194,24 @@ def rig_file(tmp_path) -> tuple[Rig, str]:
 # --- intents -------------------------------------------------------------------------------
 
 
+def test_voice_delivery_during_active_build_keeps_the_same_intent() -> None:
+    rig = Rig()
+    try:
+        rig.x.runner_birth(7, rig.wall().isoformat(), 45)
+        intent = rig.x.submit("build_blocks", {"blocks": [[1, 64, 1, "stone"]]})
+        rig.tick()
+        rig.body.busy_flag = True
+        rig.body.push_event("voice.line", "<Steve> Какого цвета снег?")
+        rig.tick(0.25)
+        line = rig.x.events.voice_for_pi(7, "", 0)
+        assert line and line["text"] == "Какого цвета снег?"
+        assert rig.x.events.voice_for_pi(7, line["voice_id"], 0) is None
+        rig.tick(0.25)
+        assert intent.state == Intent.ACTIVE and rig.body.stops == 0
+    finally:
+        rig.close()
+
+
 def test_goto_intent_done_on_arrival() -> None:
     rig = Rig()
     try:

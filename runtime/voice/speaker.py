@@ -12,10 +12,8 @@ chat at the moment its voice starts.
 - A line is cut into sentences (defence-plan W1): the first sentence plays while the next is
   synthesized, so the first sound comes after one sentence of synthesis, not the whole line,
   and each request stays well inside the tts timeout.
-- A new line REPLACES the lines still waiting to start, it does not queue behind them: by the
-  time a stale line would be spoken the moment has passed (Pyhtun, showcase §3). The line
-  already playing finishes. `interrupt()` drops the waiting lines the same way — a player
-  spoke to her (§8).
+- Consecutive say calls play in order. A new player observation interrupts waiting lines;
+  an ongoing line finishes. A bounded backlog keeps a burst of calls from piling up.
 - A line is never lost: replaced, interrupted, no voice (tts down, too slow, nothing
   speakable) or no inlet — it goes to chat as text and the journal says why.
 - The body's inlet (`socat` → `paplay`) closes the connection when the audio has drained:
@@ -42,6 +40,7 @@ FIRST_CHUNK = BYTES_PER_S // 10   # 100 ms of audio go out before the chat line
 DRAIN_MARGIN_S = 5.0          # how long past the clip's end the inlet may take to close
 MIN_PART = 25                 # a shorter sentence rides with the next one ("Да. Иду.")
 MAX_PART = 180                # a longer sentence is cut at a comma or a dash
+MAX_WAITING_LINES = 4
 
 _SENTENCE = re.compile(r"(?<=[.!?…])\s+")
 _CLAUSE = re.compile(r"(?<=[,;:])\s+|\s+(?=[—–-]\s)")
@@ -86,6 +85,8 @@ class _Line:
     state: str = "waiting"    # waiting → playing → done, or waiting → dropped
     heard_at: float | None = None
     synth: Callable | None = None
+    inlet: Any = None
+    audio_until: float = 0.0
 
 
 @dataclass
@@ -148,7 +149,8 @@ def http_synth(url: str, timeout_s: float, *, gateway_key: str = ""):
                     yield block
             if first_at is not None:
                 elapsed = time.monotonic() - first_at
-                fast = underrun < 0.05 and elapsed < 0.8 * received / BYTES_PER_S
+                buffered = getattr(resp, "headers", {}).get("X-Audio-Buffered") == "true"
+                fast = not buffered and underrun < 0.05 and elapsed < 0.8 * received / BYTES_PER_S
                 with speed_lock:
                     fast_runs = fast_runs + 1 if fast else 0
         with speed_lock:
@@ -212,24 +214,25 @@ class Speaker:
             self._cv.notify_all()
 
     def say(self, text: str) -> int:
-        """Speak one line; the lines still waiting to start are replaced (sent to chat as
-        text). Returns how many lines it replaced."""
+        """Queue a line in speaking order. Return the number displaced by overflow."""
         parts = split_parts(text) or [text]
         with self._cv:
-            dropped = self._drop_waiting()
+            dropped = self._drop_waiting(keep_newest=MAX_WAITING_LINES - 1)
             self._ids += 1
             line = _Line(self._ids, text, self._clock())
             line.heard_at, self._last_heard = self._last_heard, None
             for i, piece in enumerate(parts):
                 self._todo.append(_Part(line, piece, first=i == 0, last=i == len(parts) - 1))
             self._cv.notify_all()
-        self._flush_dropped(dropped, "replaced by a newer line")
+        self._flush_dropped(dropped, "voice queue full")
         return len(dropped)
 
     def heard(self, entry: dict) -> None:
         with self._cv:
             self._last_heard = self._clock()
-        self.interrupt(f"{entry.get('from')} spoke")
+            dropped = self._drop_waiting()
+            self._cv.notify_all()
+        self._flush_dropped(dropped, f"{entry.get('from')} spoke")
 
     def interrupt(self, why: str = "interrupted") -> int:
         """Drop the lines still waiting to start (sent to chat as text); the one playing
@@ -242,21 +245,24 @@ class Speaker:
 
     # --- dropping ------------------------------------------------------------------------
 
-    def _drop_waiting(self) -> list[_Line]:
-        """Under the lock: every waiting line becomes dropped, its parts leave the queues."""
+    def _drop_waiting(self, keep_newest: int = 0) -> list[_Line]:
+        """Under the lock: discard the oldest waiting lines beyond the given allowance."""
         lines: dict[int, _Line] = {}
         inflight = [self._inflight] if self._inflight is not None else []
         active = [self._active] if self._active is not None else []
         for part in [*active, *inflight, *self._todo, *self._ready]:
             if part.line.state == "waiting":
                 lines[part.line.id] = part.line
-        for line in lines.values():
+        dropped = sorted(lines.values(), key=lambda line: line.id)[:max(0, len(lines) - keep_newest)]
+        if not dropped:
+            return []
+        for line in dropped:
             line.state = "dropped"
         for queue in (self._todo, self._ready):
             kept = [p for p in queue if p.line.state != "dropped"]
             queue.clear()
             queue.extend(kept)
-        return sorted(lines.values(), key=lambda line: line.id)
+        return dropped
 
     def _flush_dropped(self, lines: list[_Line], why: str) -> None:
         for line in lines:
@@ -387,15 +393,20 @@ class Speaker:
 
     def _speak(self, part: _Part) -> None:
         if part.pcm is None:
+            if part.last:
+                self._finish_inlet(part.line)
             if self._chat(part):
                 self._record(part, ok=False, silent=part.why_silent, synth_s=round(part.synth_s, 2))
             return
         if not isinstance(part.pcm, bytes):
+            self._finish_inlet(part.line)
             self._stream_part(part)
             return
         duration_s = len(part.pcm) / BYTES_PER_S
         try:
-            sock = self._connect()
+            if part.line.inlet is None:
+                part.line.inlet = self._connect()
+            sock = part.line.inlet
         except OSError as exc:
             if self._chat(part):
                 self._record(part, ok=False, silent=f"inlet unreachable: {exc.__class__.__name__}")
@@ -403,15 +414,17 @@ class Speaker:
         chatted = False
         t0 = started = self._clock()
         try:
-            sock.settimeout(duration_s + self._drain_margin_s)
+            sock.settimeout(max(0, part.line.audio_until - t0) + duration_s + self._drain_margin_s)
             sock.sendall(part.pcm[:FIRST_CHUNK])
             started = self._clock()
             chatted = self._chat(part)  # the line appears as its voice starts
             sock.sendall(part.pcm[FIRST_CHUNK:])
-            sock.shutdown(socket.SHUT_WR)
-            while sock.recv(4096):      # paplay drains, exits, the inlet closes: EOF
-                pass
             timing = {}
+            if part.line.audio_until:
+                timing["inlet_gap_s"] = round(max(0, started - part.line.audio_until), 3)
+            part.line.audio_until = max(started, part.line.audio_until) + duration_s
+            if part.last:
+                self._finish_inlet(part.line)
             if part.first and part.first_pcm_at is not None:
                 timing["say_to_pcm_s"] = round(part.first_pcm_at - part.line.said_at, 3)
                 timing["pcm_to_inlet_s"] = round(started - part.first_pcm_at, 3)
@@ -421,12 +434,20 @@ class Speaker:
                          synth_s=round(part.synth_s, 2), played_s=round(self._clock() - t0, 2),
                          **timing)
         except OSError as exc:
+            if part.line.inlet is not None:
+                part.line.inlet.close()
+                part.line.inlet = None
             if not chatted:
                 chatted = self._chat(part)
             self._record(part, ok=False, error=f"inlet: {exc.__class__.__name__}: {exc}",
                          duration_s=round(duration_s, 2))
-        finally:
+
+    def _finish_inlet(self, line: _Line) -> None:
+        sock, line.inlet = line.inlet, None
+        if sock is not None:
             try:
+                sock.shutdown(socket.SHUT_WR)
+                while sock.recv(4096):
+                    pass
+            finally:
                 sock.close()
-            except OSError:
-                pass

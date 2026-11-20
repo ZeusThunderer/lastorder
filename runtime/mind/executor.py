@@ -281,6 +281,9 @@ class EventQueue:
         self._items: list[dict[str, Any]] = []
         self._limit = limit
         self._cond = threading.Condition()
+        self._waiters = 0
+        self._voice_lease = None
+        self._generation = 0
 
     def put(self, type_: str, **fields: Any) -> None:
         with self._cond:
@@ -325,18 +328,65 @@ class EventQueue:
         the next session must not replay the previous node's death and chat."""
         with self._cond:
             self._items.clear()
+            self._voice_lease = None
+            self._generation += 1
             self._cond.notify_all()
+
+    def _recover_voice(self):
+        if self._voice_lease and time.monotonic() >= self._voice_lease[1]:
+            line, _ = self._voice_lease
+            self._voice_lease = None
+            self._items.insert(0, {"type": "chat.line", "lines": [line]})
+
+    def voice_for_pi(self, serial: int, ack: str, timeout: float):
+        """Long poll the same queue as wait_events. Lease one voice observation until ack."""
+        deadline = time.monotonic() + timeout
+        with self._cond:
+            generation = self._generation
+            if self._voice_lease and self._voice_lease[0]["voice_id"] == ack:
+                self._voice_lease = None
+            while generation == self._generation:
+                self._recover_voice()
+                if self._voice_lease:
+                    line = self._voice_lease[0]
+                    if line["voice_id"].startswith(f"{serial}:"):
+                        return line
+                elif not self._waiters:
+                    for item in self._items:
+                        if item["type"] != "chat.line":
+                            continue
+                        for line in item["lines"]:
+                            if str(line.get("voice_id", "")).startswith(f"{serial}:"):
+                                item["lines"].remove(line)
+                                if not item["lines"]:
+                                    self._items.remove(item)
+                                self._voice_lease = (line, time.monotonic() + 30)
+                                return line
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._cond.wait(remaining)
+            return None
 
     def pop(self, timeout_s: float, clock: Callable[[], float]) -> dict[str, Any] | None:
         """The first accumulated event, or None when the timeout runs out."""
         deadline = clock() + timeout_s
         with self._cond:
-            while not self._items:
-                remaining = deadline - clock()
-                if remaining <= 0:
-                    return None
-                self._cond.wait(remaining)
-            return self._items.pop(0)
+            self._waiters += 1
+            try:
+                while True:
+                    self._recover_voice()
+                    if self._items:
+                        return self._items.pop(0)
+                    remaining = deadline - clock()
+                    if remaining <= 0:
+                        return None
+                    if self._voice_lease:
+                        remaining = min(remaining, max(0, self._voice_lease[1] - time.monotonic()))
+                    self._cond.wait(remaining)
+            finally:
+                self._waiters -= 1
+                self._cond.notify_all()
 
     def pending(self) -> tuple[dict[str, Any], ...]:
         with self._cond:
@@ -773,6 +823,8 @@ class Executor:
                 entry = self.chat_entry(payload.get("text"))
                 if entry is not None:
                     entry["voice"] = True
+                    if self._birth and entry.get("from", "").lower() != self._username.lower():
+                        entry["voice_id"] = f"{self._birth.serial}:{event.id}:{event.ts_mono:.9f}"
                     self._emit("chat.line", lines=[entry])
                     self._notify_heard(entry)
             elif event.type == "game.damage" and not payload.get("service"):

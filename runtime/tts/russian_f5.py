@@ -18,9 +18,16 @@ class RussianF5:
         from ruaccent import RUAccent
 
         self.gpu = torch.cuda.get_device_name()
+        self.steps = int(os.environ.get("TTS_F5_STEPS", "32"))
+        if self.steps not in (16, 24, 32):
+            raise ValueError("TTS_F5_STEPS must be 16, 24 or 32")
         ref = VoiceRef.load(Path(reference_dir))
         self.accent = RUAccent()
         self.accent.load(omograph_model_size="turbo3.1", use_dictionary=True)
+        # The unknown-word ONNX graph also expects segment IDs; CharTokenizer's
+        # defaults omit them. Match the loaded graph before stressing the reference.
+        accent_model = self.accent.accent_model
+        accent_model.tokenizer.model_input_names = [arg.name for arg in accent_model.session.get_inputs()]
         self.reference = str(ref.wav)
         self.transcript = self.accent.process_all(ref.text)
         self.vocoder = load_vocoder(device="cuda")
@@ -46,6 +53,6 @@ class RussianF5:
 
         marked = "".join(stress(i, part) for i, part in enumerate(words))
         wave, rate, _ = infer_process(self.reference, self.transcript, marked, self.model,
-                                     self.vocoder, device="cuda", nfe_step=32, speed=1.0, progress=None)
+                                     self.vocoder, device="cuda", nfe_step=self.steps, speed=1.0, progress=None)
         pcm = soxr.resample(wave, rate, 48000)
         return np.clip(np.rint(pcm * 32768), -32768, 32767).astype("<i2").tobytes()

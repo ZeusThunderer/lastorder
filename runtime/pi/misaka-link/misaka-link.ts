@@ -78,6 +78,7 @@ function log(type: string, payload: Record<string, unknown> = {}): void {
 
 interface LinkConfig {
   hive: HiveClient;
+  bodyUrl?: string;
   nameOf: ReturnType<typeof makeNameOf>;
   serial: number | null;
   desk: boolean;
@@ -87,9 +88,11 @@ interface LinkConfig {
  * runner, root-owned 0444 — the same identity the session's own hive MCP uses). */
 function readLinkConfig(agentDir: string, cwd: string): LinkConfig | null {
   let server: { url?: unknown; headers?: Record<string, unknown> } = {};
+  let bodyUrl: string | undefined;
   try {
     const mcp = JSON.parse(fs.readFileSync(path.join(agentDir, "mcp.json"), "utf8"));
     server = mcp?.mcpServers?.hive ?? {};
+    bodyUrl = mcp?.mcpServers?.body?.url?.replace(/\/mcp\/?$/, "/voice/next");
   } catch (err) {
     log("misakalink.no_mcp_json", { agentDir, error: String(err) });
     return null;
@@ -113,6 +116,7 @@ function readLinkConfig(agentDir: string, cwd: string): LinkConfig | null {
   const serial = naming.serial;
   return {
     hive: new HiveClient({ base, mcpUrl: url, key }),
+    bodyUrl,
     nameOf: makeNameOf(naming),
     serial,
     // the desk's own MCP mount rides the same agent-dir shape (T-043): its
@@ -128,6 +132,7 @@ export default function misakaLink(pi: unknown) {
     sendUserMessage(content: string, options: { deliverAs: "steer" | "followUp" }): void;
   };
   let stopped = false;
+  let voiceAbort: AbortController | undefined;
   let atTurnEnd: (() => Promise<void>) | null = null;
   api.on("turn_end", async () => { await atTurnEnd?.(); });
   let running: Promise<void> | null = null;
@@ -166,6 +171,36 @@ export default function misakaLink(pi: unknown) {
     }
     const config = readLinkConfig(agentDir, ctx.cwd);
     if (config === null) return;
+    voiceAbort?.abort();
+    if (!config.desk && config.serial && config.bodyUrl &&
+        JSON.parse(fs.readFileSync(settingsPath, "utf8")).sessionDir === ".pi-sessions") {
+      const controller = voiceAbort = new AbortController();
+      const url = config.bodyUrl;
+      void (async () => {
+        let ack = "";
+        while (!controller.signal.aborted) {
+          try {
+            const response = await fetch(url, {
+              method: "POST", headers: {"content-type": "application/json"},
+              body: JSON.stringify({serial: config.serial, ack}),
+              signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]),
+            });
+            if (!response.ok) throw new Error("voice feed HTTP " + response.status);
+            const {line} = await response.json();
+            if (line?.voice_id && line.voice_id !== ack && !controller.signal.aborted) {
+              const deliverAs = ctx.isIdle() ? "followUp" : "steer";
+              api.sendUserMessage("[In-game voice observation] " + JSON.stringify(line), {deliverAs});
+              ack = line.voice_id;
+              log("misakalink.voice", {id: ack, deliverAs});
+            }
+          } catch (err) {
+            if (controller.signal.aborted) break;
+            log("misakalink.voice_failed", {error: String(err)});
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
+      })();
+    }
     // the slot name for the delivery_failing alarm: root-rendered file beside the
     // configs (T-045, the T-048 R1-4 note); absent → the alarm stays slot-less
     let slot = "";
@@ -277,6 +312,7 @@ export default function misakaLink(pi: unknown) {
   api.on("before_provider_request", (eventRaw: unknown) => dropOldReasoning(eventRaw));
 
   api.on("session_shutdown", () => {
+    voiceAbort?.abort();
     stopped = true; // the loop finishes its sleep and exits; no in-flight re-schedule
   });
 }

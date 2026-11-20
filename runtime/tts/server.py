@@ -140,7 +140,8 @@ def create_app(backend: Backend | None = None) -> FastAPI:
                 with anyio.CancelScope(shield=True):
                     await run_in_threadpool(finish)
         return StreamingResponse(chunks(), media_type="application/octet-stream",
-                                 headers={"X-Audio-Rate": str(OUT_RATE)})
+                                 headers={"X-Audio-Rate": str(OUT_RATE),
+                                          "X-Audio-Buffered": str(not hasattr(engine, "stream")).lower()})
 
     @app.post("/speak")
     def speak(body: SpeakIn) -> Response:

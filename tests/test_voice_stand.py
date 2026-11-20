@@ -27,12 +27,13 @@ def test_tts_is_raised_by_the_operator_alone():
     assert all(p.startswith("127.0.0.1:") for p in tts["ports"])
 
 
-def test_the_voice_sample_and_the_cloud_key_stay_in_tts():
+def test_reference_mounts_are_read_only_in_voice_services_and_the_key_stays_in_tts():
     for name, svc in SERVICES.items():
+        for vol in svc.get("volumes") or []:
+            if ".stand/voice" in vol:
+                assert name in {"tts", "tts-cloud"} and vol.endswith(":ro"), f"{name}: {vol}"
         if name == "tts":
             continue
-        for vol in svc.get("volumes") or []:
-            assert ".stand/voice" not in vol, f"{name}: {vol}"
         env = svc.get("environment") or {}
         values = list(env.values()) if isinstance(env, dict) else env
         assert not any(isinstance(v, str) and "TTS_OPENROUTER_KEY" in v for v in values), name
