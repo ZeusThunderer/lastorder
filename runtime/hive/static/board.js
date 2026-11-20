@@ -891,43 +891,32 @@ function dockerHealth(value) {
 const modelDrafts = new Map();
 const voiceDrafts = new Map();
 function slotControls(slot) {
-  const holder = el("div", "button-row slot-actions");
+  const holder = $("slot-settings").content.firstElementChild.cloneNode(true);
   const slotName = "LastOrder0" + slot;
-  const assignment = state.network?.slot_models?.[slotName];
-  const source = state.network?.slot_voice?.[slotName];
-  if (source) {
-    const select = document.createElement("select");
-    select.setAttribute("aria-label", "Источник голоса слота " + slot);
-    select.add(new Option("Локальный TTS · своя GPU", "local"));
-    select.add(new Option("OpenRouter · Fish Audio S2.1 Pro · платно", "openrouter"));
-    select.value = voiceDrafts.get(slot) || source;
-    select.onchange = () => voiceDrafts.set(slot, select.value);
-    const apply = button("Применить голос");
-    apply.onclick = () => sendMutation("/board/voice/" + slotName, {source: select.value},
-      {success: () => { voiceDrafts.delete(slot); void loadNetwork(); },
-       failure: message => report($("infra-feedback"), message)});
-    holder.append(el("p", "", "Озвучка: " + (source === "local" ? "локальный TTS" : "OpenRouter")),
-      select, apply);
-  }
-  if (assignment) {
-    const select = document.createElement("select");
-    select.setAttribute("aria-label", "Модель слота " + slot);
-    for (const entry of state.network.model_catalog) {
-      select.add(new Option(entry.name + " · " + entry.billing, entry.provider + "/" + entry.id));
-    }
-    select.value = modelDrafts.get(slot) || assignment.desired || assignment.applied || "";
-    select.onchange = () => modelDrafts.set(slot, select.value);
-    const phases = {requested: "ожидает LO", pending: "ожидает ответа модели", applied: "применена",
-      failed: "модель недоступна", default: "по умолчанию"};
-    holder.append(el("p", "", "Текущая модель: " + (assignment.applied || "нет данных") +
-      " · " + (assignment.error === "quota" ? "у провайдера исчерпана квота" : phases[assignment.state])), select);
-    for (const delegate of [false, true]) {
-      const apply = button(delegate ? "Поручить LO" : "Применить модель");
-      apply.onclick = () => select.value && sendMutation("/board/models/" + slotName,
-        {model: select.value, delegate}, {success: () => { modelDrafts.delete(slot); void loadNetwork(); },
-          failure: message => report($("infra-feedback"), message)});
-      holder.append(apply);
-    }
+  const voice = holder.querySelector(".voice-setting select");
+  voice.setAttribute("aria-label", "Источник голоса слота " + slot);
+  voice.onchange = () => voiceDrafts.set(slot, voice.value);
+  holder.querySelector(".voice-setting button").onclick = () => sendMutation("/board/voice/" + slotName,
+    {source: voice.value}, {
+      success: () => { voiceDrafts.delete(slot); void loadNetwork(); },
+      failure: message => report($("infra-feedback"), message),
+    });
+
+  const model = holder.querySelector(".model-setting select");
+  const billing = holder.querySelector(".slot-billing");
+  billing.id = "model-billing-" + slot;
+  model.setAttribute("aria-label", "Модель слота " + slot);
+  model.setAttribute("aria-describedby", billing.id);
+  model.onchange = () => {
+    modelDrafts.set(slot, model.value);
+    billing.textContent = model.selectedOptions[0]?.dataset.billing || "";
+  };
+  for (const apply of holder.querySelectorAll(".model-setting button")) {
+    apply.onclick = () => model.value && sendMutation("/board/models/" + slotName,
+      {model: model.value, delegate: apply.hasAttribute("data-delegate")}, {
+        success: () => { modelDrafts.delete(slot); void loadNetwork(); },
+        failure: message => report($("infra-feedback"), message),
+      });
   }
   const slots = { slot_up: "Поднять", slot_restart: "Перезапустить mind", slot_down: "Остановить" };
   for (const [key, label] of Object.entries(slots)) {
@@ -947,24 +936,60 @@ function slotControls(slot) {
         failure: (message) => report($("infra-feedback"), message),
       });
     });
-    holder.append(control);
+    holder.querySelector(".lifecycle").append(control);
   }
   return holder;
 }
+function updateSlotSettings(panel, slot, status) {
+  const name = "LastOrder0" + slot;
+  const voice = panel.querySelector(".voice-setting");
+  const source = status?.slot_voice?.[name];
+  voice.hidden = !source;
+  if (source) {
+    voice.querySelector("p").textContent = "Озвучка: " + (source === "local" ? "локальный Qwen" : "OpenRouter");
+    const select = voice.querySelector("select");
+    const value = voiceDrafts.get(slot) || source;
+    if (select.value !== value) select.value = value;
+  }
+
+  const model = panel.querySelector(".model-setting");
+  const assignment = status?.slot_models?.[name];
+  model.hidden = !assignment;
+  if (!assignment) return;
+  const phases = {requested: "ожидает LO", pending: "ожидает ответа модели", applied: "применена",
+    failed: "модель недоступна", default: "по умолчанию"};
+  model.querySelector(".current-model").textContent = "Текущая модель: " + (assignment.applied || "нет данных")
+    + " · " + (assignment.error === "quota" ? "у провайдера исчерпана квота" : phases[assignment.state]);
+  const select = model.querySelector("select");
+  const catalog = status.model_catalog || [];
+  const optionsCurrent = select.length === catalog.length && catalog.every((entry, index) => {
+    const option = select.options[index];
+    return option.value === entry.provider + "/" + entry.id && option.dataset.billing === entry.billing
+      && option.label === entry.name + " · " + entry.billing;
+  });
+  if (!optionsCurrent) {
+    select.replaceChildren(...catalog.map(entry => {
+      const option = new Option(entry.name + " · " + entry.billing, entry.provider + "/" + entry.id);
+      option.dataset.billing = entry.billing;
+      return option;
+    }));
+    if (![...select.options].some(option => option.value === modelDrafts.get(slot))) modelDrafts.delete(slot);
+  }
+  const value = modelDrafts.get(slot) || assignment.desired || assignment.applied || "";
+  if (select.value !== value) select.value = value;
+  model.querySelector(".slot-billing").textContent = select.selectedOptions[0]?.dataset.billing || "";
+}
 function renderNetwork() {
-  const box = $("snapshot");
   const status = state.network;
   const data = status?.components;
   const freshness = !data ? "Нет данных" : status.freshness === "stale" || !state.monitorFresh ? "Устарели" : "Снимок обновлён";
-  const focus = document.activeElement?.dataset;
-  const focusKey = focus?.slot ? '[data-slot="' + focus.slot + '"][data-slot-action="' + focus.slotAction + '"]' : "";
-  const summary = el("div", "monitor-summary");
+  const summary = $("monitor-summary");
+  summary.replaceChildren();
   summary.append(el("p", state.monitorFresh && status?.freshness === "fresh" ? "healthy" : "muted",
     "Данные мониторинга: " + freshness + (status?.observed_at ? " · " + formatDate(status.observed_at) : "")));
   if (!state.monitorFresh && state.network) summary.append(el("p", "muted", "Не удалось обновить состояние сети."));
   if (data?.docker === false) summary.append(el("p", "muted", "Docker недоступен для проверки."));
-  const grid = el("div", "monitor-grid");
-  grid.append(
+  $("services").replaceChildren(
     renderComponent("LO", [["Процесс", tier(data?.lo.process, "Процесс LO запущен", "Процесс LO остановлен")],
       ["Контейнер", dockerHealth(data?.lo.health)]]),
     renderComponent("Голос", [
@@ -985,7 +1010,7 @@ function renderNetwork() {
     const runner = item?.runner;
     const body = runner?.body === "attached" ? el("span", "healthy", "Подключено") :
       runner?.body === "none" ? "Не подключено" : stopped ? "Остановлено" : "Нет данных";
-    grid.append(renderComponent("Слот " + slot, [
+    const facts = [
       ["Сестра в реестре", !registry ? "Нет данных" : registry.length
         ? registry.map((brief) => actor(String(brief.serial))).join(", ") : "Отсутствует"],
       ["Состояние слота", stopped ? "Остановлен" :
@@ -995,10 +1020,19 @@ function renderNetwork() {
       ["Тело", body],
       ["Жизнь в mind", runner?.term ? "Срок завершён" : runner?.dead ? "Тело погибло" :
         runner?.serial ? "#" + serial(runner.serial) : null],
-    ], slotControls(slot)));
+    ];
+    let panel = $("slot-" + slot);
+    if (panel) {
+      panel.querySelector(".facts").replaceWith(newFacts(facts));
+    } else {
+      panel = renderComponent("Слот " + slot, facts, slotControls(slot));
+      panel.id = "slot-" + slot;
+      panel.tabIndex = -1;
+      $("slots").append(panel);
+    }
+    updateSlotSettings(panel, slot, status);
   }
-  box.replaceChildren(summary, grid);
-  if (focusKey) box.querySelector(focusKey)?.focus({ preventScroll: true });
+  $("network").querySelector(".network-jumps").hidden = false;
   renderInfraSwitch();
 }
 async function loadNetwork() {

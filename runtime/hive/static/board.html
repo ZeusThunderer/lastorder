@@ -44,8 +44,18 @@
             <div id="list"></div>
             <button type="button" id="more" hidden>Показать ещё 50</button>
             <section id="network" hidden aria-labelledby="section-heading">
-              <div id="snapshot"><p class="empty">Загружаем состояние сети…</p></div>
-              <section class="panel" id="infra-switch" aria-labelledby="executor-heading">
+              <div id="snapshot">
+                <div class="network-heading">
+                  <div id="monitor-summary" class="monitor-summary"><p>Загружаем состояние сети…</p></div>
+                  <nav class="network-jumps" aria-label="Перейти к управлению сетью" hidden>
+                    <a href="#slot-1">Слот 1</a><a href="#slot-2">Слот 2</a><a href="#slot-3">Слот 3</a>
+                    <a href="#infra-switch">Исполнитель</a><a href="#execution">Очередь</a>
+                  </nav>
+                </div>
+                <div id="services" class="monitor-grid"></div>
+                <div id="slots" class="monitor-grid"></div>
+              </div>
+              <section class="panel" id="infra-switch" tabindex="-1" aria-labelledby="executor-heading">
                 <div class="panel-heading"><h3 id="executor-heading">Исполнитель заявок</h3></div>
                 <div class="panel-body">
                   <p id="infra-switch-state">Настройка проверяется</p>
@@ -58,7 +68,7 @@
                   <p id="infra-feedback" class="notice" role="status" hidden></p>
                 </div>
               </section>
-              <section id="execution"></section>
+              <section id="execution" tabindex="-1"></section>
             </section>
           </div>
           <div id="inline-details"></div>
@@ -66,6 +76,25 @@
       </main>
     </div>
   </div>
+  <template id="slot-settings">
+    <div class="slot-actions">
+      <div class="slot-setting voice-setting" hidden>
+        <p></p>
+        <select><option value="local">Локальный Qwen · своя GPU</option><option value="openrouter">OpenRouter · Fish Audio S2.1 Pro · платно</option></select>
+        <button type="button">Применить голос</button>
+      </div>
+      <div class="slot-setting model-setting" hidden>
+        <p class="current-model"></p>
+        <select></select>
+        <p class="slot-billing"></p>
+        <div class="button-row">
+          <button type="button">Применить модель</button>
+          <button type="button" data-delegate>Поручить LO</button>
+        </div>
+      </div>
+      <div class="button-row lifecycle"></div>
+    </div>
+  </template>
   <section id="login" class="login" aria-labelledby="login-title" hidden>
     <form id="login-form" class="stack">
       <p class="brand">Last Order</p><h1 id="login-title">Доска сети</h1>
